@@ -8,6 +8,8 @@ export interface PermissionDef {
   label: string;
   /** Sensitive actions are highlighted in the permission matrix and always audited. */
   sensitive?: boolean;
+  /** Release that introduced the permission; baseline roles receive new ones once on upgrade. */
+  since?: 'P1' | 'P2' | 'P3';
 }
 
 export const PERMISSIONS: PermissionDef[] = [
@@ -42,34 +44,58 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: 'governance.document.read', module: 'Governance', label: 'View and download documents' },
   { code: 'governance.document.upload', module: 'Governance', label: 'Upload documents and new versions' },
   { code: 'governance.document.delete', module: 'Governance', label: 'Archive documents', sensitive: true },
+
+  { code: 'procurement.read', module: 'Procurement', label: 'View requisitions, RFQs, purchase orders, receipts and supplier scorecards', since: 'P2' },
+  { code: 'procurement.requisition.create', module: 'Procurement', label: 'Raise purchase requisitions', since: 'P2' },
+  { code: 'procurement.requisition.approve', module: 'Procurement', label: 'Approve purchase requisitions', sensitive: true, since: 'P2' },
+  { code: 'procurement.rfq.manage', module: 'Procurement', label: 'Create RFQs, record quotes and award', since: 'P2' },
+  { code: 'procurement.po.manage', module: 'Procurement', label: 'Create, revise, send and cancel purchase orders', since: 'P2' },
+  { code: 'procurement.po.approve', module: 'Procurement', label: 'Approve purchase orders (checker)', sensitive: true, since: 'P2' },
+  { code: 'procurement.receipt.record', module: 'Procurement', label: 'Record goods and mill receipts against POs', since: 'P2' },
+  { code: 'procurement.invoice.read', module: 'Procurement', label: 'View supplier invoices, matching and AP ledger', since: 'P2' },
+  { code: 'procurement.invoice.capture', module: 'Procurement', label: 'Upload and review supplier invoices (AI workbench)', since: 'P2' },
+  { code: 'procurement.invoice.approve', module: 'Procurement', label: 'Approve invoice posting, including variances (checker)', sensitive: true, since: 'P2' },
+  { code: 'procurement.payment.approve', module: 'Procurement', label: 'Approve supplier invoices for payment', sensitive: true, since: 'P2' },
+  { code: 'procurement.exception.manage', module: 'Procurement', label: 'Resolve procurement exceptions', since: 'P2' },
+  { code: 'portal.supplier.access', module: 'Partner portals', label: 'Supplier portal: own POs, dispatch and invoices', since: 'P2' },
+
+  { code: 'jobwork.read', module: 'Job work', label: 'View job-work orders, mill stock, rates and claims', since: 'P3' },
+  { code: 'jobwork.order.manage', module: 'Job work', label: 'Create and issue job-work orders and challans', since: 'P3' },
+  { code: 'jobwork.rate.manage', module: 'Job work', label: 'Maintain process templates and mill rate cards', sensitive: true, since: 'P3' },
+  { code: 'jobwork.return.record', module: 'Job work', label: 'Record return inward and yield', since: 'P3' },
+  { code: 'jobwork.claim.manage', module: 'Job work', label: 'Raise and settle mill quality claims', since: 'P3' },
+  { code: 'portal.mill.access', module: 'Partner portals', label: 'Mill portal: acknowledge receipts, update stages, raise invoices', since: 'P3' },
 ];
 
 export const ALL_PERMISSION_CODES = PERMISSIONS.map((p) => p.code);
 
 const READS = ALL_PERMISSION_CODES.filter((c) => c.endsWith('.read'));
 
-/** Baseline roles from the developer brief (section 7) with their P1 permissions. Editable in the app. */
+const P2_BUY = ['procurement.read', 'procurement.requisition.create', 'procurement.rfq.manage', 'procurement.po.manage', 'procurement.receipt.record', 'procurement.invoice.read', 'procurement.invoice.capture', 'procurement.exception.manage'];
+const P3_MILL = ['jobwork.read', 'jobwork.order.manage', 'jobwork.return.record', 'jobwork.claim.manage'];
+
+/** Baseline roles from the developer brief (section 7). Editable in the app. */
 export const BASELINE_ROLES: { code: string; name: string; description: string; permissions: string[] }[] = [
-  { code: 'super_admin', name: 'Super Admin', description: 'All configuration and platform access', permissions: ALL_PERMISSION_CODES },
-  { code: 'owner', name: 'Owner / Director', description: 'Executive visibility and strategic approvals', permissions: [...READS, 'governance.approval.decide', 'masters.party.bank.view'] },
-  { code: 'management_approver', name: 'Management Approver', description: 'Assigned approval authority', permissions: [...READS, 'governance.approval.decide'] },
-  { code: 'purchase_manager', name: 'Purchase Manager', description: 'Procurement and supplier management', permissions: ['masters.party.read', 'masters.supplier.manage', 'masters.mill.manage', 'masters.party.bank.request', 'masters.product.read', 'masters.reference.read', 'org.entity.read', 'org.warehouse.read', 'governance.document.read', 'governance.document.upload', 'governance.approval.read'] },
-  { code: 'purchase_executive', name: 'Purchase Executive', description: 'Purchase operations', permissions: ['masters.party.read', 'masters.product.read', 'masters.reference.read', 'org.warehouse.read', 'governance.document.read', 'governance.document.upload'] },
-  { code: 'warehouse_manager', name: 'Stores / Warehouse Manager', description: 'Warehouse operations', permissions: ['org.warehouse.read', 'org.warehouse.manage', 'masters.product.read', 'masters.party.read', 'masters.reference.read', 'governance.document.read', 'governance.document.upload'] },
-  { code: 'warehouse_operator', name: 'Warehouse Operator', description: 'Scanning and physical operations', permissions: ['org.warehouse.read', 'masters.product.read'] },
-  { code: 'mill_ops_manager', name: 'Mill Operations Manager', description: 'Job-work operations', permissions: ['masters.party.read', 'masters.mill.manage', 'masters.product.read', 'org.warehouse.read', 'governance.document.read', 'governance.document.upload'] },
-  { code: 'mill_user', name: 'Mill User', description: 'Mill portal actions', permissions: [] },
+  { code: 'super_admin', name: 'Super Admin', description: 'All configuration and platform access', permissions: ALL_PERMISSION_CODES.filter((c) => !c.startsWith('portal.')) },
+  { code: 'owner', name: 'Owner / Director', description: 'Executive visibility and strategic approvals', permissions: [...READS, 'governance.approval.decide', 'masters.party.bank.view', 'procurement.po.approve', 'procurement.invoice.approve', 'procurement.payment.approve', 'procurement.invoice.read'] },
+  { code: 'management_approver', name: 'Management Approver', description: 'Assigned approval authority', permissions: [...READS, 'governance.approval.decide', 'procurement.po.approve', 'procurement.invoice.approve', 'procurement.requisition.approve', 'procurement.invoice.read'] },
+  { code: 'purchase_manager', name: 'Purchase Manager', description: 'Procurement and supplier management', permissions: ['masters.party.read', 'masters.supplier.manage', 'masters.mill.manage', 'masters.party.bank.request', 'masters.product.read', 'masters.reference.read', 'org.entity.read', 'org.warehouse.read', 'governance.document.read', 'governance.document.upload', 'governance.approval.read', ...P2_BUY, 'procurement.requisition.approve', 'jobwork.read'] },
+  { code: 'purchase_executive', name: 'Purchase Executive', description: 'Purchase operations', permissions: ['masters.party.read', 'masters.product.read', 'masters.reference.read', 'org.warehouse.read', 'governance.document.read', 'governance.document.upload', 'procurement.read', 'procurement.requisition.create', 'procurement.rfq.manage', 'procurement.po.manage', 'procurement.invoice.read', 'procurement.invoice.capture'] },
+  { code: 'warehouse_manager', name: 'Stores / Warehouse Manager', description: 'Warehouse operations', permissions: ['org.warehouse.read', 'org.warehouse.manage', 'masters.product.read', 'masters.party.read', 'masters.reference.read', 'governance.document.read', 'governance.document.upload', 'procurement.read', 'procurement.requisition.create', 'procurement.receipt.record', 'jobwork.read', 'jobwork.return.record'] },
+  { code: 'warehouse_operator', name: 'Warehouse Operator', description: 'Scanning and physical operations', permissions: ['org.warehouse.read', 'masters.product.read', 'procurement.receipt.record'] },
+  { code: 'mill_ops_manager', name: 'Mill Operations Manager', description: 'Job-work operations', permissions: ['masters.party.read', 'masters.mill.manage', 'masters.product.read', 'org.warehouse.read', 'governance.document.read', 'governance.document.upload', 'procurement.read', 'procurement.receipt.record', ...P3_MILL, 'jobwork.rate.manage'] },
+  { code: 'mill_user', name: 'Mill User', description: 'Mill portal actions', permissions: ['portal.mill.access'] },
   { code: 'sales_manager', name: 'Sales Manager / TSM', description: 'Sales team and pipeline', permissions: ['masters.party.read', 'masters.customer.manage', 'masters.product.read', 'masters.reference.read', 'org.warehouse.read', 'governance.document.read', 'governance.document.upload', 'governance.approval.read'] },
   { code: 'sales_executive', name: 'Sales Executive / TSE', description: 'Assigned leads and customers', permissions: ['masters.party.read', 'masters.customer.manage', 'masters.product.read', 'governance.document.read', 'governance.document.upload'] },
-  { code: 'accounts_manager', name: 'Accounts Manager', description: 'Accounting and statutory controls', permissions: [...READS, 'masters.party.bank.view', 'masters.party.bank.request', 'masters.reference.manage', 'governance.document.upload'] },
-  { code: 'accounts_executive', name: 'Accounts Executive', description: 'Day-to-day accounting', permissions: ['masters.party.read', 'masters.reference.read', 'org.entity.read', 'governance.document.read', 'governance.document.upload'] },
+  { code: 'accounts_manager', name: 'Accounts Manager', description: 'Accounting and statutory controls', permissions: [...READS, 'masters.party.bank.view', 'masters.party.bank.request', 'masters.reference.manage', 'governance.document.upload', 'procurement.invoice.read', 'procurement.invoice.capture', 'procurement.payment.approve', 'procurement.exception.manage'] },
+  { code: 'accounts_executive', name: 'Accounts Executive', description: 'Day-to-day accounting', permissions: ['masters.party.read', 'masters.reference.read', 'org.entity.read', 'governance.document.read', 'governance.document.upload', 'procurement.read', 'procurement.invoice.read', 'procurement.invoice.capture'] },
   { code: 'dispatch_manager', name: 'Dispatch Manager', description: 'Dispatch and transport', permissions: ['masters.party.read', 'masters.transporter.manage', 'org.warehouse.read', 'masters.product.read', 'governance.document.read', 'governance.document.upload'] },
   { code: 'customer_care', name: 'Customer Care', description: 'Customer service and complaints', permissions: ['masters.party.read', 'masters.product.read', 'governance.document.read'] },
   { code: 'hr_manager', name: 'HR Manager', description: 'HRMS and payroll', permissions: ['identity.user.read', 'org.entity.read', 'governance.document.read', 'governance.document.upload'] },
   { code: 'customer_company_admin', name: 'Customer Company Admin', description: 'Customer portal administration', permissions: [] },
   { code: 'customer_buyer', name: 'Customer Buyer', description: 'Customer purchasing', permissions: [] },
   { code: 'customer_accounts', name: 'Customer Accounts User', description: 'Customer financial view', permissions: [] },
-  { code: 'supplier_portal', name: 'Supplier Portal User', description: 'Supplier collaboration', permissions: [] },
+  { code: 'supplier_portal', name: 'Supplier Portal User', description: 'Supplier collaboration', permissions: ['portal.supplier.access'] },
   { code: 'transporter_portal', name: 'Transporter Portal User', description: 'Shipment updates', permissions: [] },
-  { code: 'auditor', name: 'Auditor / CA', description: 'Read-only audit and compliance', permissions: [...READS, 'masters.party.bank.view'] },
+  { code: 'auditor', name: 'Auditor / CA', description: 'Read-only audit and compliance', permissions: [...READS, 'masters.party.bank.view', 'procurement.invoice.read'] },
 ];

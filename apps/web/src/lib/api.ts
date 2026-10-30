@@ -33,6 +33,7 @@ export interface RefreshResult { accessToken: string; user: SessionUser; mustCha
 export interface SessionUser {
   id: string; name: string; email: string; roles: string[]; permissions: string[];
   scope: Record<'entity' | 'gstin' | 'branch' | 'warehouse', '*' | string[]>;
+  partyId?: string | null;
 }
 
 type Body = BodyInit | object | undefined;

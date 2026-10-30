@@ -107,7 +107,7 @@ export function partyRoutes(r: Router, { pool }: ServiceContext) {
     }
     const rows = await many<{ total_count: number }>(pool, `
       SELECT p.id, p.party_type, p.code, p.legal_name, p.trade_name, p.gstin, p.state_code, p.email, p.phone, p.segment,
-        p.credit_limit, p.rating, p.tags, p.status, p.updated_at, pt.name AS payment_term,
+        p.credit_limit, p.rating, p.tags, p.profile, p.status, p.updated_at, pt.name AS payment_term,
         EXISTS (SELECT 1 FROM pending_changes pc WHERE pc.party_id = p.id AND pc.status = 'pending')
           OR EXISTS (SELECT 1 FROM party_bank_accounts b WHERE b.party_id = p.id AND b.status = 'pending_approval') AS has_pending_approval,
         (SELECT c.name FROM party_contacts c WHERE c.party_id = p.id ORDER BY c.is_primary DESC, c.created_at LIMIT 1) AS primary_contact,

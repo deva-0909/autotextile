@@ -1,6 +1,7 @@
 import {
-  Banknote, Boxes, Building2, ClipboardCheck, Cog, Factory, FileStack, History, KeyRound, Layers, LayoutDashboard, LineChart, Package,
-  Rocket, ShieldCheck, ShoppingCart, Sparkles, Truck, UserCog, Users, Warehouse, Workflow, BookMarked, type LucideIcon,
+  AlarmClock, Banknote, BookMarked, Boxes, Building2, ClipboardCheck, ClipboardList, Cog, Factory, FileSearch, FileStack, Gauge, History, KeyRound, Layers,
+  LayoutDashboard, LineChart, Medal, Package, Receipt, Rocket, ScanText, ShieldAlert, ShieldCheck, ShoppingCart, Sparkles, Truck, UserCog, Users, Warehouse,
+  Workflow, type LucideIcon,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon; perms?: string[]; phase?: string }
@@ -31,6 +32,28 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
+    label: 'Procurement',
+    items: [
+      { to: '/procurement', label: 'Overview', icon: Gauge, perms: ['procurement.read', 'procurement.invoice.read'] },
+      { to: '/procurement/requisitions', label: 'Requisitions', icon: ClipboardList, perms: ['procurement.read'] },
+      { to: '/procurement/rfqs', label: 'RFQs & quotes', icon: FileSearch, perms: ['procurement.read'] },
+      { to: '/procurement/purchase-orders', label: 'Purchase orders', icon: ShoppingCart, perms: ['procurement.read'] },
+      { to: '/procurement/invoice-workbench', label: 'Invoice workbench', icon: ScanText, perms: ['procurement.invoice.read'] },
+      { to: '/procurement/invoices', label: 'Supplier invoices & AP', icon: Receipt, perms: ['procurement.invoice.read'] },
+      { to: '/procurement/match', label: 'Three-way match', icon: ShieldAlert, perms: ['procurement.invoice.read', 'procurement.read'] },
+      { to: '/procurement/suppliers', label: 'Supplier scorecards', icon: Medal, perms: ['procurement.read'] },
+    ],
+  },
+  {
+    label: 'Mill job work',
+    items: [
+      { to: '/jobwork', label: 'Deadline cockpit', icon: AlarmClock, perms: ['jobwork.read'] },
+      { to: '/jobwork/orders', label: 'Job-work orders', icon: Factory, perms: ['jobwork.read'] },
+      { to: '/jobwork/mills', label: 'Mills & rates', icon: Building2, perms: ['jobwork.read'] },
+      { to: '/jobwork/claims', label: 'Quality claims', icon: ShieldAlert, perms: ['jobwork.read'] },
+    ],
+  },
+  {
     label: 'Security & governance',
     items: [
       { to: '/security/users', label: 'Users', icon: UserCog, perms: ['identity.user.read'] },
@@ -43,8 +66,6 @@ export const NAV: NavGroup[] = [
   {
     label: 'Coming next',
     items: [
-      { to: '/roadmap/P2', label: 'Procurement', icon: ShoppingCart, phase: 'P2' },
-      { to: '/roadmap/P3', label: 'Mill job work', icon: Factory, phase: 'P3' },
       { to: '/roadmap/P4', label: 'Inventory & WMS', icon: Boxes, phase: 'P4' },
       { to: '/roadmap/P5', label: 'CRM & sales', icon: LineChart, phase: 'P5' },
       { to: '/roadmap/P6', label: 'B2B commerce', icon: Layers, phase: 'P6' },

@@ -16,6 +16,7 @@ const userBody = z.object({
   phone: optText(20),
   employee_code: optText(30),
   designation: optText(80),
+  party_id: z.preprocess((v) => (v === '' ? null : v), z.uuid().nullable().optional()),
 });
 
 export function adminRoutes(r: Router, ctx: ServiceContext) {
@@ -167,9 +168,9 @@ export function adminRoutes(r: Router, ctx: ServiceContext) {
     if (problem) throw badRequest(`Temporary password: ${problem}`);
     const created = await tx(pool, async (c) => {
       const u = await one<{ id: string }>(c, `
-        INSERT INTO users (email, name, phone, employee_code, designation, password_hash, must_change_password, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, true, $7) RETURNING id`,
-        [body.email, body.name, body.phone ?? null, body.employee_code ?? null, body.designation ?? null, await hashPassword(body.password), req.user!.id]);
+        INSERT INTO users (email, name, phone, employee_code, designation, password_hash, must_change_password, created_by, party_id)
+        VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8) RETURNING id`,
+        [body.email, body.name, body.phone ?? null, body.employee_code ?? null, body.designation ?? null, await hashPassword(body.password), req.user!.id, body.party_id ?? null]);
       for (const roleId of body.roleIds) await c.query('INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)', [u!.id, roleId]);
       await saveScope(c, u!.id, body.scope as DataScope);
       const { password: _p, ...safe } = body;
@@ -186,9 +187,9 @@ export function adminRoutes(r: Router, ctx: ServiceContext) {
       const before = await one<Record<string, unknown>>(c, `SELECT ${PUBLIC_USER_COLUMNS} FROM users u WHERE id = $1 FOR UPDATE`, [req.params.id]);
       if (!before) throw notFound('User');
       const after = await one<Record<string, unknown>>(c, `
-        UPDATE users u SET email = $2, name = $3, phone = $4, employee_code = $5, designation = $6, status = $7, updated_at = now()
+        UPDATE users u SET email = $2, name = $3, phone = $4, employee_code = $5, designation = $6, status = $7, party_id = $8, updated_at = now()
         WHERE id = $1 RETURNING ${PUBLIC_USER_COLUMNS}`,
-        [req.params.id, body.email, body.name, body.phone ?? null, body.employee_code ?? null, body.designation ?? null, body.status]);
+        [req.params.id, body.email, body.name, body.phone ?? null, body.employee_code ?? null, body.designation ?? null, body.status, body.party_id ?? null]);
       if (body.status === 'inactive') await c.query('UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [req.params.id]);
       await audit(c, 'identity', contextOf(req), { entity: 'user', entityId: String(req.params.id), action: 'updated', ...diff(before, after!) });
       return after;
@@ -285,6 +286,6 @@ export function adminRoutes(r: Router, ctx: ServiceContext) {
 
   // Directory lookup for other screens (names for audit/approvals). Minimal fields only.
   r.get('/directory', async (_req, res) => {
-    res.json(await many(pool, `SELECT id, name, email, status FROM users ORDER BY name`));
+    res.json(await many(pool, `SELECT id, name, email, status, party_id FROM users ORDER BY name`));
   });
 }

@@ -10,6 +10,8 @@ const PROCS: [string, string, number][] = [
   ['organisation', 'services/organisation/src/main.ts', 32],
   ['masters', 'services/masters/src/main.ts', 35],
   ['governance', 'services/governance/src/main.ts', 33],
+  ['procurement', 'services/procurement/src/main.ts', 92],
+  ['jobwork', 'services/jobwork/src/main.ts', 95],
   ['gateway', 'services/gateway/src/main.ts', 34],
 ];
 

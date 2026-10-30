@@ -10,3 +10,4 @@ export * from './http.ts';
 export * from './india.ts';
 export * from './service.ts';
 export * from './crud.ts';
+export * from './client.ts';

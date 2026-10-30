@@ -1,4 +1,4 @@
-# Requirement traceability — release P1
+# Requirement traceability — releases P1–P3
 
 Source: *Textile_Trading_ERP_Development_and_Figma_Tracker.xlsx*, Requirements and Figma Screens sheets.
 Statuses:
@@ -29,7 +29,33 @@ Statuses:
 | REQ-0011 | Configuration & workflow framework | **Built / partial** | Numbering per GSTIN and fiscal year, fiscal years, typed settings (token %, warehouse strategy, credit policy, dispatch gates, feature toggles) with audited changes; approval workflow for sensitive master changes | Configurable multi-step workflow engine, escalations and notification templates in P9 |
 | REQ-0012 | Document management foundation | **Built / partial** | Secure upload, versioning, metadata, linking to any record, permission-based access, PDF/image preview, expiry dates, SHA-256 | Spreadsheet in-browser preview and automatic retention purge in P9 (retention years are already configured per type) |
 
-### Known P1 gaps
+## P2 — Procurement, supplier portal & invoice AI
+
+| ID | Requirement | Status | Implementation | Remaining (phase) |
+|---|---|---|---|---|
+| REQ-0013 | Supplier onboarding and performance | **Built / partial** | Supplier master (P1) + scorecard (delivery 40 %, quality 30 %, invoice accuracy 20 %, open issues 10 %), KYC checklist, risk score, price history, disputes, recommendation | Automated bank verification (penny drop) needs a banking integration (P8) |
+| REQ-0014 | RFQ and tender management | **Built / partial** | RFQ to several suppliers, quotes per supplier with lead time and terms, landed-cost comparison, award to draft PO | Quotes are entered by the buyer from the supplier’s reply or upload; suppliers cannot yet submit quotes in the portal |
+| REQ-0015 | Purchase requisition and PO | **Built** | Requisition approval, PO with threshold approval, send, revise (history), cancel, close; supplier accept/reject, qty/date confirmation, dispatch and documents in the portal | — |
+| REQ-0016 | Direct-to-mill purchase | **Built** | PO delivering to a mill; mill confirms receipt in its portal; event creates traceable mill stock linked to PO, dispatch and receipt | Lot/roll-level stock ledger in P4 |
+| REQ-0017 | Bulk invoice OCR and extraction | **Built / partial** | Batch upload (PDF, images, multipage), Claude extraction of header, lines, HSN, taxes and totals; parallel worker queue | Throughput (100–150/hour) must be load-tested with real invoices and an API key |
+| REQ-0018 | Duplicate and missing invoice detection | **Built** | Duplicate on supplier + normalised number (DB unique) and similar value; missing-invoice alert for receipts without invoices; qty/rate/tax mismatches; exceptions queue with escalation | — |
+| REQ-0019 | AI exception workbench | **Built** | Split-screen review: document beside fields, per-field confidence, corrections, exception reasons, reviewer approval; never auto-posts | — |
+| REQ-0020 | Supplier invoice and payment readiness | **Built / partial** | Posting to append-only supplier ledger, due dates from payment terms, payment approval, links to PO, GRN, job work and documents | Double-entry GL and bank payment files in P8 |
+
+## P3 — Mill job work
+
+| ID | Requirement | Status | Implementation | Remaining (phase) |
+|---|---|---|---|---|
+| REQ-0021 | Mill capability and commercial profile | **Built** | Mill master (P1) + processes, capacity, TAT, rate cards, performance (yield, on-time, claims), documents | — |
+| REQ-0022 | Job-work order and challan | **Built / partial** | Source PO/mill stock or warehouse, product, lot reference, kg, process, rate basis, dates, transport (transporter, LR, vehicle, e-way bill no.), documents | Roll-level selection with barcodes in P4; e-way bill / e-invoice generation via GSP later |
+| REQ-0023 | Mill receipt and process updates | **Built** | Mill portal: receipt acknowledgement with discrepancies, stage updates, ready for collection, invoice submission (into the AI workbench), claim responses | — |
+| REQ-0024 | Configurable stage tracking | **Built** | Process templates with ordered stages, editable per process | — |
+| REQ-0025 | Combination processing rate model | **Built** | Per-kg, fixed and slab rates; mill/process/product-specific; minimum charge; effective dates; rate history; rate quote | — |
+| REQ-0026 | Material return, yield and loss | **Built** | Sent, received, good, rejected, damaged, balance, wastage, yield %, processing charge; low-yield exception | Stock valuation of losses in P4/P8 |
+| REQ-0027 | Commercial, operational and statutory clocks | **Built / partial** | Three separate dates per order, cockpit, alerts before and escalation after | The statutory period is a setting with a placeholder value; the CA must confirm it |
+| REQ-0028 | Mill QC and disputes | **Built / partial** | Defects, affected kg, photos, root cause, responsibility, debit/credit amount, mill response, closure | Debit/credit notes post to accounts in P8 |
+
+### Known gaps
 
 - **MFA is optional per user.** The setting *Require MFA for privileged users* exists, but the login does not force enrolment yet.
 - **Password-reset emails.** These need the notification service (P9). Until then the reset link appears on screen outside production.
@@ -45,7 +71,21 @@ Statuses:
 | FIG-005 | Users, roles & permission matrix | `/security/users`, `/security/roles`, `/security/activity` |
 | FIG-006 | Audit log viewer | `/governance/audit` |
 | FIG-007 | Customer / supplier / mill / product masters | `/partners/:type`, `/partners/:type/:id`, `/catalogue/*`, `/reference` |
-| extra | Approvals inbox, document library, configuration, programme tracker | `/approvals`, `/governance/documents`, `/organisation/configuration`, `/programme` |
+| FIG-008 | Supplier onboarding and profile | `/procurement/suppliers`, `/partners/supplier/:id` |
+| FIG-009 | RFQ creation and supplier invitation | `/procurement/rfqs` |
+| FIG-010 | Quote comparison | `/procurement/rfqs/:id` |
+| FIG-011 | Purchase requisition and PO | `/procurement/requisitions`, `/procurement/purchase-orders/:id` |
+| FIG-012 | Supplier PO response and dispatch update | `/portal`, `/portal/orders/:id` (supplier user) |
+| FIG-013 | Invoice batch upload and queue | `/procurement/invoice-workbench` |
+| FIG-014 | Invoice split-screen review | `/procurement/invoice-workbench/:id` |
+| FIG-015 | Missing invoice and three-way match dashboard | `/procurement/match`, `/procurement/invoices` |
+| FIG-016 | Mill master and capability profile | `/jobwork/mills`, `/jobwork/mills/:id` |
+| FIG-017 | Job-work order and challan | `/jobwork/orders`, `/jobwork/orders/:id` |
+| FIG-018 | Mill receipt confirmation | `/portal`, `/portal/jobs/:id` (mill user) |
+| FIG-019 | Process stage update | `/portal/jobs/:id` (mill user) |
+| FIG-020 | Return inward and yield reconciliation | `/jobwork/orders/:id` |
+| FIG-021 | Overdue and statutory deadline cockpit | `/jobwork` |
+| extra | Approvals inbox, document library, configuration, programme tracker, claims | `/approvals`, `/governance/documents`, `/organisation/configuration`, `/programme`, `/jobwork/claims` |
 
 ## Acceptance tests (tracker sheet) touched by P1
 
@@ -65,3 +105,17 @@ The P1 end-to-end tests (`tests/p1.integration.test.ts`) also cover:
 - MFA;
 - refresh-token rotation;
 - document content validation.
+
+The P2/P3 end-to-end tests (`tests/p2p3.integration.test.ts`) cover:
+- requisition approval by a different person;
+- RFQ landed-cost comparison, and a mandatory reason for not awarding the cheapest quote;
+- the PO lifecycle: approval, supplier acceptance in the portal, receipt tolerance;
+- three-way match (billing beyond receipt), duplicate invoice numbers (normalised), variance maker-checker and payment approval;
+- the rule that the person who entered an invoice can never post it;
+- the capture workbench: upload, corrections, approval into a draft invoice;
+- automation for unaccepted POs and receipts without invoices;
+- direct-to-mill receipt in the mill portal becoming mill stock;
+- the rate engine: history, product-specific override, slabs and minimum charges;
+- the job-work cycle: allocation, mill acknowledgement, stages, return, yield and claims;
+- deadline clocks and overdue automation;
+- portal and role isolation (a portal user or a sales user gets 403 outside their remit).

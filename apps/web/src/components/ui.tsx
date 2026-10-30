@@ -166,6 +166,14 @@ const STATUS: Record<string, [Tone, string]> = {
   pending: ['warning', 'Pending'], pending_approval: ['warning', 'Awaiting approval'], approved: ['success', 'Approved'], rejected: ['danger', 'Rejected'],
   open: ['success', 'Open'], closed: ['neutral', 'Closed'], discontinued: ['neutral', 'Discontinued'], draft: ['neutral', 'Draft'],
   locked: ['danger', 'Locked'], success: ['success', 'Success'],
+  submitted: ['info', 'Submitted'], converted: ['violet', 'Sourced'], cancelled: ['neutral', 'Cancelled'], awarded: ['success', 'Awarded'], not_awarded: ['neutral', 'Not awarded'], received_quote: ['info', 'Received'],
+  sent: ['info', 'Sent to supplier'], accepted: ['success', 'Accepted'], rejected_by_supplier: ['danger', 'Rejected by supplier'], partially_received: ['warning', 'Partly received'], received: ['success', 'Received'],
+  queued: ['neutral', 'Queued'], extracting: ['info', 'Extracting'], needs_review: ['warning', 'Needs review'], failed: ['danger', 'Failed'],
+  posted: ['success', 'Posted'], matched: ['success', 'Matched'], variance: ['danger', 'Variance'], no_po: ['warning', 'No PO'], no_receipt: ['warning', 'No receipt'], not_run: ['neutral', 'Not matched'],
+  unpaid: ['neutral', 'Unpaid'], paid: ['success', 'Paid'],
+  issued: ['info', 'Issued'], acknowledged: ['violet', 'At mill'], in_process: ['brand', 'In process'], ready: ['success', 'Ready to collect'], partially_returned: ['warning', 'Partly returned'], returned: ['success', 'Returned'],
+  under_review: ['warning', 'Under review'], resolved: ['success', 'Resolved'], dismissed: ['neutral', 'Dismissed'],
+  info: ['info', 'Info'], warning: ['warning', 'Warning'], critical: ['danger', 'Critical'],
 };
 export function StatusBadge({ status }: { status: string }) {
   const [tone, label] = STATUS[status] ?? ['neutral', status.replace(/_/g, ' ')];
@@ -340,5 +348,44 @@ export function Notice({ tone = 'info', title, children, icon, action }: { tone?
       </div>
       {action}
     </div>
+  );
+}
+
+export function Progress({ value, max, tone = 'brand', label }: { value: number; max: number; tone?: 'brand' | 'success' | 'warning' | 'danger'; label?: ReactNode }) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  const bar = { brand: 'bg-brand-500', success: 'bg-emerald-500', warning: 'bg-amber-500', danger: 'bg-rose-500' }[tone];
+  return (
+    <div className="min-w-[90px]">
+      {label && <div className="mb-1 text-[11.5px] text-slate-500 tabular">{label}</div>}
+      <div className="h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={clsx('h-full rounded-full transition-all', bar)} style={{ width: `${pct}%` }} /></div>
+    </div>
+  );
+}
+
+export function Stat({ label, value, sub, tone }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: 'danger' | 'warning' | 'success' }) {
+  const t = tone === 'danger' ? 'text-rose-600' : tone === 'warning' ? 'text-amber-600' : tone === 'success' ? 'text-emerald-600' : 'text-slate-900';
+  return (
+    <div className="card px-4 py-3.5">
+      <p className="text-[12px] font-medium text-slate-500">{label}</p>
+      <p className={clsx('mt-1 text-[22px] leading-tight font-semibold tracking-tight tabular', t)}>{value}</p>
+      {sub && <p className="mt-0.5 text-[12px] text-slate-500">{sub}</p>}
+    </div>
+  );
+}
+
+export interface TimelineItem { id: string | number; title: ReactNode; detail?: ReactNode; meta?: ReactNode; tone?: 'brand' | 'success' | 'warning' | 'danger' | 'neutral' }
+export function Timeline({ items }: { items: TimelineItem[] }) {
+  const dot = { brand: 'bg-brand-500', success: 'bg-emerald-500', warning: 'bg-amber-500', danger: 'bg-rose-500', neutral: 'bg-slate-300' };
+  return (
+    <ol className="relative space-y-4 before:absolute before:top-1.5 before:bottom-1.5 before:left-[5px] before:w-px before:bg-slate-200">
+      {items.map((i) => (
+        <li key={i.id} className="relative pl-6">
+          <span className={clsx('absolute top-1.5 left-0 size-[11px] rounded-full ring-4 ring-white', dot[i.tone ?? 'brand'])} />
+          <p className="text-[13px] font-medium text-slate-900">{i.title}</p>
+          {i.detail && <p className="mt-0.5 text-[12.5px] text-slate-600">{i.detail}</p>}
+          {i.meta && <p className="mt-0.5 text-[11.5px] text-slate-400">{i.meta}</p>}
+        </li>
+      ))}
+    </ol>
   );
 }

@@ -7,13 +7,14 @@ import { Badge, Card, EmptyState, PageHeader, Segmented } from '../components/ui
 
 type Status = 'delivered' | 'in_delivery' | 'planned';
 /** Delivery status of each phase. P0 artefacts and P1 software ship in this release. */
-const PHASE_STATUS: Record<string, Status> = { P0: 'in_delivery', P1: 'in_delivery' };
+const PHASE_STATUS: Record<string, Status> = { P0: 'in_delivery', P1: 'in_delivery', P2: 'in_delivery', P3: 'in_delivery' };
 /** Requirement-level status for the current release (see docs/traceability.md). */
 const REQ_STATUS: Record<string, Status> = {
   'REQ-0007': 'delivered', 'REQ-0008': 'delivered', 'REQ-0009': 'delivered', 'REQ-0010': 'delivered', 'REQ-0011': 'delivered', 'REQ-0012': 'delivered',
   'REQ-0002': 'in_delivery', 'REQ-0004': 'in_delivery', 'REQ-0005': 'in_delivery',
+  ...Object.fromEntries(['REQ-0013', 'REQ-0014', 'REQ-0015', 'REQ-0016', 'REQ-0017', 'REQ-0018', 'REQ-0019', 'REQ-0020', 'REQ-0021', 'REQ-0022', 'REQ-0023', 'REQ-0024', 'REQ-0025', 'REQ-0026', 'REQ-0027', 'REQ-0028'].map((r) => [r, 'delivered' as Status])),
 };
-const SCREEN_STATUS: Record<string, Status> = { 'FIG-001': 'delivered', 'FIG-002': 'delivered', 'FIG-003': 'delivered', 'FIG-004': 'delivered', 'FIG-005': 'delivered', 'FIG-006': 'delivered', 'FIG-007': 'delivered' };
+const SCREEN_STATUS: Record<string, Status> = Object.fromEntries(Array.from({ length: 21 }, (_, i) => [`FIG-${String(i + 1).padStart(3, '0')}`, 'delivered' as Status]));
 
 const STATUS_BADGE: Record<Status, React.ReactNode> = {
   delivered: <Badge tone="success" dot>Built</Badge>,
@@ -21,7 +22,7 @@ const STATUS_BADGE: Record<Status, React.ReactNode> = {
   planned: <Badge dot>Planned</Badge>,
 };
 
-const SCREEN_ROUTES: Record<string, string> = { 'FIG-001': '/login', 'FIG-002': '/', 'FIG-003': '/organisation/entities', 'FIG-004': '/organisation/warehouses', 'FIG-005': '/security/users', 'FIG-006': '/governance/audit', 'FIG-007': '/partners/customer' };
+const SCREEN_ROUTES: Record<string, string> = { 'FIG-001': '/login', 'FIG-002': '/', 'FIG-003': '/organisation/entities', 'FIG-004': '/organisation/warehouses', 'FIG-005': '/security/users', 'FIG-006': '/governance/audit', 'FIG-007': '/partners/customer', 'FIG-008': '/procurement/suppliers', 'FIG-009': '/procurement/rfqs', 'FIG-010': '/procurement/rfqs', 'FIG-011': '/procurement/purchase-orders', 'FIG-013': '/procurement/invoice-workbench', 'FIG-014': '/procurement/invoice-workbench', 'FIG-015': '/procurement/match', 'FIG-016': '/jobwork/mills', 'FIG-017': '/jobwork/orders', 'FIG-020': '/jobwork/orders', 'FIG-021': '/jobwork' };
 
 export function ProgrammePage() {
   const total = programme.requirements.length;
@@ -34,7 +35,7 @@ export function ProgrammePage() {
           { label: 'Phases', value: programme.phases.length, icon: <Flag className="size-4" /> },
           { label: 'Requirements', value: `${done} / ${total} built`, icon: <ListChecks className="size-4" /> },
           { label: 'Screens', value: `${Object.keys(SCREEN_STATUS).length} / ${programme.screens.length} built`, icon: <PenTool className="size-4" /> },
-          { label: 'Current release', value: 'P1 · built, awaiting UAT', icon: <Target className="size-4" /> },
+          { label: 'Current release', value: 'P1–P3 · built, awaiting UAT', icon: <Target className="size-4" /> },
         ].map((k) => (
           <div key={k.label} className="card p-4"><p className="flex items-center gap-2 text-[12.5px] text-slate-500">{k.icon}{k.label}</p><p className="mt-1 text-[18px] font-semibold">{k.value}</p></div>
         ))}

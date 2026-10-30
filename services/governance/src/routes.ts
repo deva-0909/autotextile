@@ -7,6 +7,8 @@ import {
 import { MAX_UPLOAD_BYTES, checkFile, fullPath, store } from './storage.ts';
 
 const S = 'governance';
+/** Service-to-service calls carry a non-UUID identity (svc:<name>); store it as unknown. */
+const uuidOrNull = (id: string | undefined) => (id && /^[0-9a-f-]{36}$/i.test(id) ? id : null);
 
 /** Notifications visible to the user: addressed to them or to a permission they hold. */
 function audienceClause(req: Request, params: unknown[]) {
@@ -54,8 +56,14 @@ export function routes(r: Router, { pool }: ServiceContext) {
     const lq = listQuery(req, ['requested_at', 'decided_at', 'status', 'approval_type'], 'requested_at');
     const params: unknown[] = [];
     const where: string[] = [];
-    const canSeeAll = hasPermission(req.user, 'governance.approval.read') || hasPermission(req.user, 'governance.approval.decide');
-    if (lq.filters.box === 'mine' || !canSeeAll) { params.push(req.user!.id); where.push(`requested_by = $${params.length}`); }
+    const canSeeAll = hasPermission(req.user, 'governance.approval.read') || req.user!.permissions.includes('*');
+    if (lq.filters.box === 'mine') { params.push(req.user!.id); where.push(`requested_by = $${params.length}`); }
+    else if (lq.filters.box === 'inbox' || !canSeeAll) {
+      // Requests this user can decide, plus their own.
+      params.push(req.user!.permissions, req.user!.id);
+      where.push(`(required_permission = ANY($${params.length - 1}) OR '*' = ANY($${params.length - 1}) OR requested_by = $${params.length})`);
+      if (lq.filters.box === 'inbox') where.push(`requested_by <> $${params.length}`);
+    }
     if (lq.filters.status) { params.push(lq.filters.status); where.push(`status = $${params.length}`); }
     if (lq.q) { params.push(`%${lq.q}%`); where.push(`(title ILIKE $${params.length} OR summary ILIKE $${params.length})`); }
     const rows = await many<{ total_count: number }>(pool, `
@@ -65,9 +73,9 @@ export function routes(r: Router, { pool }: ServiceContext) {
   });
 
   r.get('/approvals/:id', async (req, res) => {
-    const a = await one<{ requested_by: string }>(pool, 'SELECT * FROM approval_requests WHERE id = $1', [req.params.id]);
+    const a = await one<{ requested_by: string; required_permission: string }>(pool, 'SELECT * FROM approval_requests WHERE id = $1', [req.params.id]);
     if (!a) throw notFound('Approval request');
-    if (a.requested_by !== req.user!.id && !hasPermission(req.user, 'governance.approval.read') && !hasPermission(req.user, 'governance.approval.decide')) throw forbidden();
+    if (a.requested_by !== req.user!.id && !hasPermission(req.user, 'governance.approval.read') && !hasPermission(req.user, a.required_permission)) throw forbidden();
     res.json(a);
   });
 
@@ -169,11 +177,11 @@ export function routes(r: Router, { pool }: ServiceContext) {
     const doc = await tx(pool, async (c) => {
       const d = await one<{ id: string }>(c, `
         INSERT INTO documents (document_type, title, entity_type, entity_id, expires_on, created_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [m.document_type, m.title, m.entity_type, m.entity_id, m.expires_on ?? null, req.user!.id]);
+        [m.document_type, m.title, m.entity_type, m.entity_id, m.expires_on ?? null, uuidOrNull(req.user!.id)]);
       await c.query(`
         INSERT INTO document_versions (document_id, version, file_name, mime_type, size_bytes, sha256, storage_key, note, uploaded_by, uploaded_by_name)
         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [d!.id, fileName, mime, body.length, stored.sha256, stored.key, m.note ?? null, req.user!.id, req.user!.name]);
+        [d!.id, fileName, mime, body.length, stored.sha256, stored.key, m.note ?? null, uuidOrNull(req.user!.id), req.user!.name]);
       await audit(c, S, contextOf(req), { entity: 'document', entityId: d!.id, action: 'uploaded', after: { ...m, file_name: fileName, size_bytes: body.length, sha256: stored.sha256 } });
       return d;
     });
@@ -194,7 +202,7 @@ export function routes(r: Router, { pool }: ServiceContext) {
       await c.query(`
         INSERT INTO document_versions (document_id, version, file_name, mime_type, size_bytes, sha256, storage_key, note, uploaded_by, uploaded_by_name)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [req.params.id, v, fileName, mime, body.length, stored.sha256, stored.key, note ?? null, req.user!.id, req.user!.name]);
+        [req.params.id, v, fileName, mime, body.length, stored.sha256, stored.key, note ?? null, uuidOrNull(req.user!.id), req.user!.name]);
       await c.query('UPDATE documents SET current_version = $2, updated_at = now() WHERE id = $1', [req.params.id, v]);
       await audit(c, S, contextOf(req), { entity: 'document', entityId: String(req.params.id), action: 'new_version', after: { version: v, file_name: fileName, sha256: stored.sha256 }, reason: note });
       return { version: v };
@@ -224,9 +232,8 @@ export function routes(r: Router, { pool }: ServiceContext) {
 
   // ---------- dashboard summary ----------
   r.get('/summary', async (req, res) => {
-    const canDecide = hasPermission(req.user, 'governance.approval.decide');
     const [pending, mine, events, docs, expiring] = await Promise.all([
-      canDecide ? one<{ n: number }>(pool, `SELECT count(*)::int AS n FROM approval_requests WHERE status = 'pending' AND requested_by <> $1`, [req.user!.id]) : { n: 0 },
+      one<{ n: number }>(pool, `SELECT count(*)::int AS n FROM approval_requests WHERE status = 'pending' AND requested_by <> $1 AND (required_permission = ANY($2) OR '*' = ANY($2))`, [req.user!.id, req.user!.permissions]),
       one<{ n: number }>(pool, `SELECT count(*)::int AS n FROM approval_requests WHERE status = 'pending' AND requested_by = $1`, [req.user!.id]),
       hasPermission(req.user, 'governance.audit.read') ? one<{ n: number }>(pool, `SELECT count(*)::int AS n FROM audit_log WHERE at > now() - interval '24 hours'`) : { n: 0 },
       one<{ n: number }>(pool, `SELECT count(*)::int AS n FROM documents WHERE status = 'active'`),
@@ -245,6 +252,12 @@ export function consumers(): Record<string, Handler> {
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) ON CONFLICT (event_id) DO NOTHING`,
         [ev.id, p.service, p.entity, p.entityId, p.action, p.before === undefined ? null : JSON.stringify(p.before), p.after === undefined ? null : JSON.stringify(p.after),
           p.reason ?? null, p.approvedBy ?? null, p.userId ?? null, p.userName ?? null, p.sessionId ?? null, p.ip ?? null, p.userAgent ?? null, p.at]);
+    },
+    'notification.requested': async (ev: BusEvent, c: Client) => {
+      const n = ev.payload as { user_id?: string | null; audience_permission?: string | null; kind?: string; title: string; body?: string | null; link?: string | null };
+      if (!n.user_id && !n.audience_permission) return;
+      await c.query(`INSERT INTO notifications (user_id, audience_permission, kind, title, body, link) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [n.user_id ?? null, n.user_id ? null : n.audience_permission, ['info', 'success', 'warning', 'action'].includes(n.kind ?? '') ? n.kind : 'info', n.title, n.body ?? null, n.link ?? null]);
     },
     'approval.requested': async (ev: BusEvent, c: Client) => {
       const p = ev.payload as Record<string, string> & { payload: object };

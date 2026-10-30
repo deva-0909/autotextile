@@ -4,7 +4,7 @@ const KINDS = ['entity', 'gstin', 'branch', 'warehouse'] as const;
 
 /** Builds the token identity (roles, effective permissions, data scope) for a user. */
 export async function loadAuthUser(c: Pool | Client, userId: string, sessionId?: string): Promise<AuthUser> {
-  const u = await one<{ id: string; name: string; email: string }>(c, 'SELECT id, name, email FROM users WHERE id = $1', [userId]);
+  const u = await one<{ id: string; name: string; email: string; party_id: string | null }>(c, 'SELECT id, name, email, party_id FROM users WHERE id = $1', [userId]);
   if (!u) throw new Error('user vanished');
   const roles = await many<{ code: string }>(c, 'SELECT r.code FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = $1 ORDER BY r.code', [userId]);
   const perms = await many<{ permission: string }>(
@@ -12,7 +12,7 @@ export async function loadAuthUser(c: Pool | Client, userId: string, sessionId?:
     'SELECT DISTINCT rp.permission FROM user_roles ur JOIN role_permissions rp ON rp.role_id = ur.role_id WHERE ur.user_id = $1 ORDER BY 1',
     [userId],
   );
-  return { id: u.id, name: u.name, email: u.email, roles: roles.map((r) => r.code), permissions: perms.map((p) => p.permission), scope: await loadScope(c, userId), sessionId };
+  return { id: u.id, name: u.name, email: u.email, roles: roles.map((r) => r.code), permissions: perms.map((p) => p.permission), scope: await loadScope(c, userId), sessionId, partyId: u.party_id };
 }
 
 export async function loadScope(c: Pool | Client, userId: string): Promise<DataScope> {
@@ -35,4 +35,4 @@ export async function saveScope(c: Client, userId: string, scope: DataScope) {
 }
 
 export const PUBLIC_USER_COLUMNS = `u.id, u.email, u.name, u.phone, u.employee_code, u.designation, u.status, u.mfa_enabled,
-  u.must_change_password, u.last_login_at, u.locked_until, u.failed_attempts, u.created_at, u.updated_at`;
+  u.must_change_password, u.last_login_at, u.locked_until, u.failed_attempts, u.party_id, u.created_at, u.updated_at`;

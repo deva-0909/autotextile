@@ -99,16 +99,22 @@ export function subscribe(pool: Pool, consumer: string, handlers: Record<string,
 
   async function drain() {
     while (running) await running;
-    running = (async () => {
+    if (stopped) return;
+    // Track this run explicitly: clearing `running` inside the run itself could happen before the
+    // assignment below when the run finishes synchronously, leaving a settled promise that stop() spins on.
+    const run = (async () => {
       try {
         while (!stopped && (await batch()) > 0) { /* keep going */ }
       } catch (err) {
         console.error(`[bus:${consumer}] handler failed, will retry`, (err as Error).message);
-      } finally {
-        running = null;
       }
     })();
-    await running;
+    running = run;
+    try {
+      await run;
+    } finally {
+      if (running === run) running = null;
+    }
   }
 
   const timer = setInterval(() => void drain(), opts.pollMs ?? 2000);
@@ -133,4 +139,9 @@ export function subscribe(pool: Pool, consumer: string, handlers: Record<string,
       }
     },
   };
+}
+
+/** Queues a notification for governance to deliver (same transaction as the triggering change). */
+export async function notify(c: Client, source: string, n: { user_id?: string | null; audience_permission?: string | null; kind?: string; title: string; body?: string | null; link?: string | null }) {
+  await publish(c, source, 'notification.requested', n);
 }

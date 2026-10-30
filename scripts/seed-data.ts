@@ -74,8 +74,8 @@ export async function seedOrganisation(c: Client) {
         [doc, g, fy.id, `${short[state]}${p}/2627/`]);
     }
   }
-  for (const [doc, p] of [['purchase_order', 'PO/2627/'], ['job_work_challan', 'JW/2627/'], ['transfer_order', 'TO/2627/'], ['quotation', 'QT/2627/']]) {
-    await c.query(`INSERT INTO organisation.number_series (doc_type, fiscal_year_id, prefix, padding) VALUES ($1, $2, $3, 5)`, [doc, fy.id, p]);
+  for (const [doc, p] of [['purchase_order', 'PO/2627/'], ['job_work_challan', 'JW/2627/'], ['transfer_order', 'TO/2627/'], ['quotation', 'QT/2627/'], ['purchase_requisition', 'PR/2627/'], ['rfq', 'RFQ/2627/'], ['goods_receipt', 'GRN/2627/'], ['quality_claim', 'QC/2627/']]) {
+    await c.query(`INSERT INTO organisation.number_series (doc_type, fiscal_year_id, prefix, padding) VALUES ($1, $2, $3, 5) ON CONFLICT DO NOTHING`, [doc, fy.id, p]);
   }
   return { entityId: e.id as string, regs, warehouses: wh };
 }
@@ -148,7 +148,7 @@ export async function seedMasters(c: Client, ownerId: string | null) {
   return ids;
 }
 
-export const DEMO_USERS: { email: string; name: string; designation: string; role: string; scope: 'all' | 'surat' }[] = [
+export const DEMO_USERS: { email: string; name: string; designation: string; role: string; scope: 'all' | 'surat' | 'none'; party?: string }[] = [
   { email: 'admin@textile.local', name: 'System Administrator', designation: 'IT Administrator', role: 'super_admin', scope: 'all' },
   { email: 'owner@textile.local', name: 'Amit Deva', designation: 'Director', role: 'owner', scope: 'all' },
   { email: 'purchase@textile.local', name: 'Priya Shah', designation: 'Purchase Manager', role: 'purchase_manager', scope: 'all' },
@@ -156,4 +156,28 @@ export const DEMO_USERS: { email: string; name: string; designation: string; rol
   { email: 'accounts@textile.local', name: 'Lakshmi Narayanan', designation: 'Accounts Manager', role: 'accounts_manager', scope: 'all' },
   { email: 'sales@textile.local', name: 'Arjun Mehta', designation: 'Sales Executive', role: 'sales_executive', scope: 'all' },
   { email: 'auditor@textile.local', name: 'CA Review Desk', designation: 'Statutory Auditor', role: 'auditor', scope: 'all' },
+  { email: 'millops@textile.local', name: 'Karthik Raman', designation: 'Mill Operations Manager', role: 'mill_ops_manager', scope: 'all' },
+  { email: 'supplier@ambica.example', name: 'Ambica Dispatch Desk', designation: 'Supplier portal user', role: 'supplier_portal', scope: 'none', party: 'Shree Ambica Knitters' },
+  { email: 'mill@suratprocess.example', name: 'Surat Process House Desk', designation: 'Mill portal user', role: 'mill_user', scope: 'none', party: 'Surat Process House' },
 ];
+
+/** Creates demo users with roles and data scope. Portal users are linked to their partner after masters exist. */
+export async function seedUsers(c: Client, org: { entityId: string; regs: Record<string, string>; warehouses: Record<string, string> }, hash: string) {
+  const ids: Record<string, string> = {};
+  for (const u of DEMO_USERS) {
+    const { rows: [row] } = await c.query(`INSERT INTO identity.users (email, name, designation, password_hash) VALUES ($1, $2, $3, $4) RETURNING id`, [u.email, u.name, u.designation, hash]);
+    ids[u.email] = row.id;
+    await c.query(`INSERT INTO identity.user_roles (user_id, role_id) SELECT $1, id FROM identity.roles WHERE code = $2`, [row.id, u.role]);
+    if (u.scope === 'all') {
+      for (const k of ['entity', 'gstin', 'branch', 'warehouse']) await c.query(`INSERT INTO identity.user_scopes (user_id, kind, ref_id) VALUES ($1, $2, NULL)`, [row.id, k]);
+    } else if (u.scope === 'surat') {
+      await c.query(`INSERT INTO identity.user_scopes (user_id, kind, ref_id) VALUES ($1, 'entity', $2), ($1, 'gstin', $3), ($1, 'warehouse', $4)`, [row.id, org.entityId, org.regs['24'], org.warehouses.SRT]);
+      await c.query(`INSERT INTO identity.user_scopes (user_id, kind, ref_id) SELECT $1, 'branch', id FROM organisation.branches WHERE code = 'SRT-HO'`, [row.id]);
+    }
+  }
+  return ids;
+}
+
+export async function linkPortalUsers(c: Client, parties: Record<string, string>) {
+  for (const u of DEMO_USERS.filter((x) => x.party)) await c.query(`UPDATE identity.users SET party_id = $2 WHERE email = $1`, [u.email, parties[u.party!]]);
+}

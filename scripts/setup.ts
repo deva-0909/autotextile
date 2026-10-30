@@ -12,8 +12,11 @@ import { identityService, syncRoles } from '../services/identity/src/service.ts'
 import { organisationService } from '../services/organisation/src/service.ts';
 import { mastersService } from '../services/masters/src/service.ts';
 import { governanceService } from '../services/governance/src/service.ts';
+import { procurementService } from '../services/procurement/src/service.ts';
+import { jobworkService } from '../services/jobwork/src/service.ts';
 import { hashPassword } from '../services/identity/src/security.ts';
-import { DEMO_PASSWORD, DEMO_USERS, seedMasters, seedOrganisation } from './seed-data.ts';
+import { DEMO_PASSWORD, DEMO_USERS, linkPortalUsers, seedMasters, seedOrganisation, seedUsers } from './seed-data.ts';
+import { seedOperations } from './seed-operations.ts';
 
 const url = new URL(config.databaseUrl());
 const dbName = url.pathname.slice(1);
@@ -49,7 +52,7 @@ await ensureDatabase();
 
 console.log('• Running migrations');
 const services = [];
-for (const def of [governanceService, identityService, organisationService, mastersService]) {
+for (const def of [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService]) {
   services.push(await bootService(def, { pollMs: 200 }));
   console.log(`  ✓ ${def.name}`);
 }
@@ -65,21 +68,9 @@ if (n > 0) {
   await tx(pool, async (c) => {
     const org = await seedOrganisation(c);
     const hash = await hashPassword(DEMO_PASSWORD);
-    const userIds: Record<string, string> = {};
-    for (const u of DEMO_USERS) {
-      const { rows: [row] } = await c.query(
-        `INSERT INTO identity.users (email, name, designation, password_hash) VALUES ($1, $2, $3, $4) RETURNING id`, [u.email, u.name, u.designation, hash]);
-      userIds[u.email] = row.id;
-      await c.query(`INSERT INTO identity.user_roles (user_id, role_id) SELECT $1, id FROM identity.roles WHERE code = $2`, [row.id, u.role]);
-      if (u.scope === 'all') {
-        for (const k of ['entity', 'gstin', 'branch', 'warehouse']) await c.query(`INSERT INTO identity.user_scopes (user_id, kind, ref_id) VALUES ($1, $2, NULL)`, [row.id, k]);
-      } else {
-        await c.query(`INSERT INTO identity.user_scopes (user_id, kind, ref_id) VALUES ($1, 'entity', $2), ($1, 'gstin', $3), ($1, 'warehouse', $4)`,
-          [row.id, org.entityId, org.regs['24'], org.warehouses.SRT]);
-        await c.query(`INSERT INTO identity.user_scopes (user_id, kind, ref_id) SELECT $1, 'branch', id FROM organisation.branches WHERE code = 'SRT-HO'`, [row.id]);
-      }
-    }
+    const userIds = await seedUsers(c, org, hash);
     const parties = await seedMasters(c, userIds['sales@textile.local']);
+    await linkPortalUsers(c, parties);
 
     // One open maker-checker request so the approvals inbox has something to show.
     const purchase = userIds['purchase@textile.local'];
@@ -96,7 +87,9 @@ if (n > 0) {
   });
   await governance.consumer?.drain();
   await masters.consumer?.drain();
-  console.log('  ✓ 1 legal entity, 3 GST registrations, 5 warehouses with locations, 15 parties, 8 fabric SKUs, 7 users');
+  console.log('  ✓ 1 legal entity, 3 GST registrations, 5 warehouses with locations, 15 parties, 8 fabric SKUs, 10 users');
+  await seedOperations(services);
+  console.log('  ✓ procurement and job-work examples (requisition, RFQ, POs, receipts, invoices, job-work orders)');
 }
 
 for (const s of services) await s.close();

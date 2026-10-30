@@ -14,6 +14,19 @@ import { LoginActivityPage, RolesPage, UsersPage } from './pages/Security';
 import { ApprovalsPage, AuditPage, DocumentsPage } from './pages/Governance';
 import { AccountPage } from './pages/Account';
 import { ProgrammePage, RoadmapPage } from './pages/Programme';
+import { ProcurementOverview } from './pages/procurement/Overview';
+import { RequisitionsPage } from './pages/procurement/Requisitions';
+import { RfqDetailPage, RfqsPage } from './pages/procurement/Rfqs';
+import { PurchaseOrderDetailPage, PurchaseOrdersPage } from './pages/procurement/PurchaseOrders';
+import { CaptureReviewPage, InvoiceWorkbenchPage } from './pages/procurement/InvoiceWorkbench';
+import { InvoiceDetailPage, InvoicesPage } from './pages/procurement/Invoices';
+import { MatchPage } from './pages/procurement/Match';
+import { SuppliersPage } from './pages/procurement/Suppliers';
+import { JobworkCockpit } from './pages/jobwork/Cockpit';
+import { JobOrderDetailPage, JobOrdersPage } from './pages/jobwork/Orders';
+import { MillDetailPage, MillsPage } from './pages/jobwork/Mills';
+import { ClaimsPage } from './pages/jobwork/Claims';
+import { MillClaims, MillHome, MillJob, MillJobs, PortalLayout, SupplierHome, SupplierOrder } from './pages/portal/Portal';
 import type { ReactNode } from 'react';
 
 function Guard({ perms, children }: { perms?: string[]; children: ReactNode }) {
@@ -40,6 +53,24 @@ export default function App() {
   }
   if (mustChangePassword) return <ChangePasswordRequired />;
 
+  // Supplier and mill users act for one business partner and only see the partner portal.
+  if (user.partyId) {
+    const mill = user.permissions.includes('portal.mill.access');
+    return (
+      <PortalLayout>
+        <Routes>
+          <Route path="/portal" element={mill ? <MillHome /> : <SupplierHome />} />
+          <Route path="/portal/orders/:id" element={<SupplierOrder />} />
+          <Route path="/portal/jobs" element={<MillJobs />} />
+          <Route path="/portal/jobs/:id" element={<MillJob />} />
+          <Route path="/portal/claims" element={<MillClaims />} />
+          <Route path="/portal/claims/:id" element={<MillClaims />} />
+          <Route path="*" element={<Navigate to="/portal" replace />} />
+        </Routes>
+      </PortalLayout>
+    );
+  }
+
   return (
     <Layout>
       <Routes>
@@ -61,6 +92,26 @@ export default function App() {
         <Route path="/security/activity" element={<Guard perms={['identity.session.read']}><LoginActivityPage /></Guard>} />
         <Route path="/governance/audit" element={<Guard perms={['governance.audit.read']}><AuditPage /></Guard>} />
         <Route path="/governance/documents" element={<Guard perms={['governance.document.read']}><DocumentsPage /></Guard>} />
+        <Route path="/procurement" element={<Guard perms={['procurement.read', 'procurement.invoice.read']}><ProcurementOverview /></Guard>} />
+        <Route path="/procurement/requisitions" element={<Guard perms={['procurement.read']}><RequisitionsPage /></Guard>} />
+        <Route path="/procurement/rfqs" element={<Guard perms={['procurement.read']}><RfqsPage /></Guard>} />
+        <Route path="/procurement/rfqs/:id" element={<Guard perms={['procurement.read']}><RfqDetailPage /></Guard>} />
+        <Route path="/procurement/purchase-orders" element={<Guard perms={['procurement.read']}><PurchaseOrdersPage /></Guard>} />
+        <Route path="/procurement/purchase-orders/:id" element={<Guard perms={['procurement.read']}><PurchaseOrderDetailPage /></Guard>} />
+        <Route path="/procurement/invoice-workbench" element={<Guard perms={['procurement.invoice.read']}><InvoiceWorkbenchPage /></Guard>} />
+        <Route path="/procurement/invoice-workbench/:id" element={<Guard perms={['procurement.invoice.read']}><CaptureReviewPage /></Guard>} />
+        <Route path="/procurement/invoices" element={<Guard perms={['procurement.invoice.read']}><InvoicesPage /></Guard>} />
+        <Route path="/procurement/invoices/:id" element={<Guard perms={['procurement.invoice.read']}><InvoiceDetailPage /></Guard>} />
+        <Route path="/procurement/match" element={<Guard perms={['procurement.invoice.read', 'procurement.read']}><MatchPage /></Guard>} />
+        <Route path="/procurement/suppliers" element={<Guard perms={['procurement.read']}><SuppliersPage /></Guard>} />
+        <Route path="/jobwork" element={<Guard perms={['jobwork.read']}><JobworkCockpit /></Guard>} />
+        <Route path="/jobwork/deadlines" element={<Navigate to="/jobwork" replace />} />
+        <Route path="/jobwork/orders" element={<Guard perms={['jobwork.read']}><JobOrdersPage /></Guard>} />
+        <Route path="/jobwork/orders/:id" element={<Guard perms={['jobwork.read']}><JobOrderDetailPage /></Guard>} />
+        <Route path="/jobwork/mills" element={<Guard perms={['jobwork.read']}><MillsPage /></Guard>} />
+        <Route path="/jobwork/mills/:id" element={<Guard perms={['jobwork.read']}><MillDetailPage /></Guard>} />
+        <Route path="/jobwork/claims" element={<Guard perms={['jobwork.read']}><ClaimsPage /></Guard>} />
+        <Route path="/jobwork/claims/:id" element={<Navigate to="/jobwork/claims" replace />} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/programme" element={<ProgrammePage />} />
         <Route path="/roadmap/:phase" element={<RoadmapPage />} />

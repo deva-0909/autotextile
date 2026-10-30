@@ -20,6 +20,8 @@ export interface AuthUser {
   permissions: string[];
   scope: DataScope;
   sessionId?: string;
+  /** Set for supplier/mill portal users: the business partner they act for. */
+  partyId?: string | null;
 }
 
 export const FULL_SCOPE: DataScope = { entity: '*', gstin: '*', branch: '*', warehouse: '*' };
@@ -34,7 +36,7 @@ const secret = () => new TextEncoder().encode(config.jwtSecret());
 const ISSUER = 'textile-erp';
 
 export async function signAccessToken(user: AuthUser, ttl = '15m'): Promise<string> {
-  return new SignJWT({ name: user.name, email: user.email, roles: user.roles, perms: user.permissions, scp: user.scope, sid: user.sessionId })
+  return new SignJWT({ name: user.name, email: user.email, roles: user.roles, perms: user.permissions, scp: user.scope, sid: user.sessionId, pid: user.partyId ?? null })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(user.id)
     .setIssuer(ISSUER)
@@ -53,6 +55,7 @@ export async function verifyAccessToken(token: string): Promise<AuthUser> {
     permissions: (payload.perms as string[]) ?? [],
     scope: (payload.scp as DataScope) ?? { entity: [], gstin: [], branch: [], warehouse: [] },
     sessionId: payload.sid as string | undefined,
+    partyId: (payload.pid as string | null | undefined) ?? null,
   };
 }
 

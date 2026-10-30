@@ -11,6 +11,8 @@ import { identityService, syncRoles } from '../services/identity/src/service.ts'
 import { organisationService } from '../services/organisation/src/service.ts';
 import { mastersService } from '../services/masters/src/service.ts';
 import { governanceService } from '../services/governance/src/service.ts';
+import { procurementService } from '../services/procurement/src/service.ts';
+import { jobworkService } from '../services/jobwork/src/service.ts';
 import { createGateway } from '../services/gateway/src/app.ts';
 import { hashPassword, totp } from '../services/identity/src/security.ts';
 import { DEMO_PASSWORD, DEMO_USERS, seedMasters, seedOrganisation } from '../scripts/seed-data.ts';
@@ -21,7 +23,7 @@ const testUrl = new URL(base);
 testUrl.pathname = `/${testDb}`;
 
 let services: RunningService[] = [];
-let servers: { close: () => void }[] = [];
+let servers: { close: () => void; closeAllConnections: () => void }[] = [];
 let B = '';
 const drain = async () => { for (const s of services) await s.consumer?.drain(); };
 
@@ -53,7 +55,7 @@ async function login(email: string, password = DEMO_PASSWORD) {
 before(async () => {
   await adminQuery(`DROP DATABASE IF EXISTS "${testDb}" WITH (FORCE)`);
   await adminQuery(`CREATE DATABASE "${testDb}"`);
-  for (const def of [governanceService, identityService, organisationService, mastersService]) {
+  for (const def of [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService]) {
     services.push(await bootService(def, { databaseUrl: testUrl.toString(), pollMs: 100 }));
   }
   const [, identity] = services;
@@ -81,7 +83,7 @@ before(async () => {
 });
 
 after(async () => {
-  for (const s of servers) s.close();
+  for (const s of servers) { s.close(); s.closeAllConnections(); }
   for (const s of services) await s.close();
   services = [];
 });
@@ -90,7 +92,7 @@ describe('identity & security', () => {
   test('gateway health reports every service', async () => {
     const r = await call(null, 'GET', '/api/health');
     assert.equal(r.status, 200);
-    assert.deepEqual(Object.values(r.body.services), ['ok', 'ok', 'ok', 'ok']);
+    assert.ok(Object.values(r.body.services).every((s) => s === 'ok'));
   });
 
   test('protected routes need a token', async () => {

@@ -8,7 +8,7 @@ be too fine to run on a single PC or operate with a small team.
 
 Each service:
 
-- owns its own PostgreSQL **schema** (`identity`, `organisation`, `masters`, `governance`) and connects with
+- owns its own PostgreSQL **schema** (`identity`, `organisation`, `masters`, `governance`, `procurement`, `jobwork`) and connects with
   `search_path` set to that schema only. No service reads another service’s tables;
 - runs its own migrations at start-up (`services/<name>/migrations/NNN_*.sql`);
 - exposes a REST API and runs as its own Node process (separate port);
@@ -22,7 +22,9 @@ Browser ──► gateway :4000 ──► /api/identity/*      identity :4101   
                           ├─► /api/organisation/*  organisation :4102  schema organisation
                           ├─► /api/masters/*       masters :4103       schema masters
                           ├─► /api/governance/*    governance :4104    schema governance
-                          └─► / (web app)
+                          ├─► /api/procurement/*   procurement :4105   schema procurement
+                          ├─► /api/jobwork/*       jobwork :4106       schema jobwork
+                          └─► / (web app, incl. supplier and mill portals)
                        services ⇄ bus.events / bus.offsets (PostgreSQL event bus)
 ```
 
@@ -30,9 +32,9 @@ Browser ──► gateway :4000 ──► /api/identity/*      identity :4101   
 
 | Phase | Service(s) |
 |---|---|
-| P1 | identity, organisation, masters, governance (+ gateway) |
-| P2 | procurement (requisition, RFQ, PO, supplier invoices, three-way match), document-ai worker |
-| P3 | jobwork (mill orders/challans, stages, rate engine, yield) |
+| P1 ✅ | identity, organisation, masters, governance (+ gateway) |
+| P2 ✅ | procurement (requisition, RFQ, PO, receipts, supplier invoices, AI capture worker, three-way match, AP ledger, supplier portal) |
+| P3 ✅ | jobwork (process templates, rate engine, mill stock, job-work orders/challans, stages, returns/yield, claims, mill portal) |
 | P4 | inventory (lots, rolls, barcodes, immutable stock ledger, transfers, WMS) |
 | P5 | crm (leads, allocation, quotations, pricing approvals) |
 | P6 | commerce (catalogue, cart, token booking, ICICI gateway, customer portal) |
@@ -63,7 +65,41 @@ Events in P1:
 | `audit.recorded` | every service | governance → `audit_log` |
 | `approval.requested` | masters | governance → approval request + notification |
 | `approval.decided` | governance | masters → activates bank account / applies held change |
+| `notification.requested` | procurement, jobwork | governance → notification for the named users |
+| `procurement.receipt.recorded` | procurement (receipt at a mill) | jobwork → creates mill stock for the direct-to-mill material |
+| `procurement.invoice.posted` | procurement | (accounting GL in P8) |
+| `jobwork.order.issued` / `jobwork.return.recorded` / `jobwork.claim.accepted` | jobwork | (inventory P4, accounting P8) |
 | `<service>.<entity>.changed` | all | (future read-model caches) |
+
+## Synchronous service-to-service calls
+
+Where a service needs a *current* answer from another (a supplier’s GSTIN, a warehouse, the next document
+number, a setting), it calls that service’s REST API through `callService` (`packages/platform/src/client.ts`)
+with a short-lived service token (`svc:<name>`). It never reads the other service’s tables. Examples:
+procurement asks organisation for the next PO number and masters for party details; the mill portal sends a
+mill’s invoice to procurement’s `/captures/inbound`; uploaded files go to governance’s document store.
+
+## P2/P3 design notes
+
+- **AI invoice capture.** Uploaded files are stored in governance; a capture row is queued. A worker in the
+  procurement service claims rows with `FOR UPDATE SKIP LOCKED` (`EXTRACTION_CONCURRENCY` in parallel) and sends the
+  PDF or image to Claude (`claude-opus-5-5`, structured output validated by a Zod schema, server-side fallback
+  enabled). The output is validated (GSTIN checksum, arithmetic, PO lookup, duplicate check) and waits in the
+  review queue with per-field confidence. A person approves every invoice; nothing posts automatically. Without
+  `ANTHROPIC_API_KEY` the capture goes to manual entry.
+- **Three-way match.** Quantity against received kg, rate against the PO within `rate_tolerance_percent`, tax type
+  from the supplier and buyer GSTIN state codes, and totals arithmetic. A clean match can be posted by a different
+  user holding `procurement.invoice.approve`; a variance needs a maker-checker approval first.
+- **AP ledger.** `procurement.ap_ledger` is append-only (triggers), like the audit log. Payment approval is a
+  separate permission. Double-entry GL posting arrives with the accounting service (P8).
+- **Direct-to-mill.** A PO can deliver to a mill. The mill’s receipt in its portal records a GRN at the mill and
+  publishes `procurement.receipt.recorded`; jobwork turns it into `mill_stock` (unique per receipt and product, so a
+  replayed event cannot double it), and job-work orders draw from that stock.
+- **Clocks.** Each job-work order stores the expected return date, an internal due date (expected − `internal_buffer_days`)
+  and a statutory deadline (issue + `statutory_return_days`). An hourly automation raises alerts
+  `statutory_alert_days` before the deadline and escalates when it passes.
+- **Portals.** Portal users are ordinary identity users with a `party_id` and a `portal.*` permission. Every portal
+  query filters by that party id in SQL, so a supplier or mill can see only its own documents.
 
 ## Security model
 
