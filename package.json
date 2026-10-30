@@ -8,7 +8,7 @@
     "client"
   ],
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.18.0"
   },
   "scripts": {
     "dev": "concurrently -n api,web -c blue,green \"npm run dev -w server\" \"npm run dev -w client\"",

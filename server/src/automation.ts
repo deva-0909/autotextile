@@ -7,8 +7,10 @@ export const MAX_LOT_M = 1500;
 export const MAX_REWORKS = 1;
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  status: number;
+  constructor(status: number, message: string) {
     super(message);
+    this.status = status;
   }
 }
 

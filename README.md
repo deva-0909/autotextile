@@ -37,7 +37,7 @@ so you can watch the plant run a shift.
 
 ## Run locally
 
-Requires **Node.js 22.13 or newer** (it uses Node's built-in SQLite, so there's no database to install).
+Requires **Node.js 22.18 or newer** (Node runs the TypeScript server directly) (it uses Node's built-in SQLite, so there's no database to install).
 
 ```bash
 git clone https://github.com/deva-0909/autotextile.git
@@ -64,7 +64,7 @@ Environment variables (optional): `PORT` (default 4000), `DB_FILE`, `AUTOMATION_
 ## Project layout
 
 ```
-server/            Express API (TypeScript, run with tsx)
+server/            Express API (TypeScript, run directly by Node)
   src/automation.ts  scheduling, routing, dye issue, QC routing, alerts, simulation
   src/stages.ts      process route and loss limits
   src/qc.ts          4-point inspection maths
