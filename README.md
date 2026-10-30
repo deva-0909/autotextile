@@ -46,7 +46,18 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. The API runs on http://localhost:4000. On first start the database
+Open http://localhost:5173. The API runs on http://localhost:4000.
+
+**Quickest way (no build tools needed):** a pre-built copy of the UI is committed in `client/dist`, so
+
+```bash
+npm install
+npm start
+```
+
+serves the whole app from plain Node at http://localhost:4000. Use this if `npm run dev` fails on your
+machine (for example esbuild crashing with "out of memory"). After changing client code, run
+`npm run build` to refresh `client/dist`. On first start the database
 (`server/data/textile.db`) is created and loaded with demo machines, stock, recipes and orders.
 
 | Command | Purpose |
