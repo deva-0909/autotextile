@@ -74,7 +74,7 @@ export async function seedOrganisation(c: Client) {
         [doc, g, fy.id, `${short[state]}${p}/2627/`]);
     }
   }
-  for (const [doc, p] of [['purchase_order', 'PO/2627/'], ['job_work_challan', 'JW/2627/'], ['transfer_order', 'TO/2627/'], ['quotation', 'QT/2627/'], ['purchase_requisition', 'PR/2627/'], ['rfq', 'RFQ/2627/'], ['goods_receipt', 'GRN/2627/'], ['quality_claim', 'QC/2627/']]) {
+  for (const [doc, p] of [['purchase_order', 'PO/2627/'], ['job_work_challan', 'JW/2627/'], ['transfer_order', 'TO/2627/'], ['quotation', 'QT/2627/'], ['purchase_requisition', 'PR/2627/'], ['rfq', 'RFQ/2627/'], ['goods_receipt', 'GRN/2627/'], ['quality_claim', 'QC/2627/'], ['stocktake', 'ST/2627/'], ['lead', 'LD/2627/'], ['credit_application', 'CR/2627/'], ['reservation', 'RS/2627/']]) {
     await c.query(`INSERT INTO organisation.number_series (doc_type, fiscal_year_id, prefix, padding) VALUES ($1, $2, $3, 5) ON CONFLICT DO NOTHING`, [doc, fy.id, p]);
   }
   return { entityId: e.id as string, regs, warehouses: wh };
@@ -154,7 +154,10 @@ export const DEMO_USERS: { email: string; name: string; designation: string; rol
   { email: 'purchase@textile.local', name: 'Priya Shah', designation: 'Purchase Manager', role: 'purchase_manager', scope: 'all' },
   { email: 'surat.stores@textile.local', name: 'Rakesh Patel', designation: 'Stores Manager, Surat', role: 'warehouse_manager', scope: 'surat' },
   { email: 'accounts@textile.local', name: 'Lakshmi Narayanan', designation: 'Accounts Manager', role: 'accounts_manager', scope: 'all' },
-  { email: 'sales@textile.local', name: 'Arjun Mehta', designation: 'Sales Executive', role: 'sales_executive', scope: 'all' },
+  { email: 'sales@textile.local', name: 'Arjun Mehta', designation: 'Sales Executive, West & North', role: 'sales_executive', scope: 'all' },
+  { email: 'salesmgr@textile.local', name: 'Neha Kapoor', designation: 'Sales Manager', role: 'sales_manager', scope: 'all' },
+  { email: 'sales.south@textile.local', name: 'Selvi Raman', designation: 'Sales Executive, South', role: 'sales_executive', scope: 'all' },
+  { email: 'sales.east@textile.local', name: 'Sourav Ghosh', designation: 'Sales Executive, East', role: 'sales_executive', scope: 'all' },
   { email: 'auditor@textile.local', name: 'CA Review Desk', designation: 'Statutory Auditor', role: 'auditor', scope: 'all' },
   { email: 'millops@textile.local', name: 'Karthik Raman', designation: 'Mill Operations Manager', role: 'mill_ops_manager', scope: 'all' },
   { email: 'supplier@ambica.example', name: 'Ambica Dispatch Desk', designation: 'Supplier portal user', role: 'supplier_portal', scope: 'none', party: 'Shree Ambica Knitters' },
@@ -180,4 +183,22 @@ export async function seedUsers(c: Client, org: { entityId: string; regs: Record
 
 export async function linkPortalUsers(c: Client, parties: Record<string, string>) {
   for (const u of DEMO_USERS.filter((x) => x.party)) await c.query(`UPDATE identity.users SET party_id = $2 WHERE email = $1`, [u.email, parties[u.party!]]);
+}
+
+/** The sales team for lead allocation (P5): territories, languages and caps, plus regional allocation rules. */
+export async function seedSalesTeam(c: Client, ids: Record<string, string>) {
+  const team: [string, string, string[], string[], number][] = [
+    ['sales@textile.local', 'Arjun Mehta', ['27', '07', '24', '03', '08'], ['Hindi', 'English', 'Gujarati'], 5],
+    ['sales.south@textile.local', 'Selvi Raman', ['33', '29', '32', '36'], ['Tamil', 'English'], 4],
+    ['sales.east@textile.local', 'Sourav Ghosh', ['19', '21', '10', '20'], ['Bengali', 'Hindi', 'English'], 4],
+  ];
+  for (const [email, name, states, languages, disc] of team)
+    await c.query(`INSERT INTO crm.sales_team (user_id, name, email, states, languages, max_active_leads, max_discount_pct, weekly_off) VALUES ($1, $2, $3, $4, $5, 40, $6, '{0}')`,
+      [ids[email], name, email, states, languages, disc]);
+  await c.query(`INSERT INTO crm.allocation_rules (name, priority, conditions, strategy, member_ids) VALUES
+    ('Large enquiries (₹10 lakh and above)', 10, '{"min_value": 1000000}', 'least_loaded', $1),
+    ('South: Tamil Nadu, Karnataka, Kerala, Telangana', 20, '{"states": ["33","29","32","36"]}', 'round_robin', $2),
+    ('East: West Bengal, Odisha, Bihar, Jharkhand', 30, '{"states": ["19","21","10","20"]}', 'round_robin', $3),
+    ('West & North', 40, '{"states": ["27","07","24","03","08","09","06"]}', 'round_robin', $4)`,
+    [[ids['sales@textile.local'], ids['sales.south@textile.local']], [ids['sales.south@textile.local']], [ids['sales.east@textile.local']], [ids['sales@textile.local']]]);
 }

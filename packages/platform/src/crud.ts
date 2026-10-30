@@ -6,12 +6,15 @@ import { AppError, notFound } from './errors.ts';
 
 type Row = Record<string, unknown>;
 
+/** User id for created_by/updated_by columns; service-to-service calls have no user. */
+const actorId = (req: Request) => (req.user?.id && !req.user.id.startsWith('svc:') ? req.user.id : null);
+
 /** INSERT ... RETURNING *, plus audit + change event, inside the caller's transaction. */
 export async function insertAudited(c: Client, req: Request, service: string, table: string, entity: string, data: Row): Promise<Row> {
   const cols = Object.keys(data);
   const r = await c.query(
     `INSERT INTO ${table} (${cols.join(', ')}, created_by) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')}, $${cols.length + 1}) RETURNING *`,
-    [...cols.map((k) => data[k]), req.user?.id ?? null],
+    [...cols.map((k) => data[k]), actorId(req)],
   );
   const row = r.rows[0] as Row;
   await audit(c, service, contextOf(req), { entity, entityId: String(row.id), action: 'created', after: data });
@@ -33,7 +36,7 @@ export async function updateAudited(
   const r = await c.query(
     `UPDATE ${table} SET ${cols.map((k, i) => `${k} = $${i + 2}`).join(', ')}, version = version + 1, updated_at = now(), updated_by = $${cols.length + 2}
      WHERE id = $1 RETURNING *`,
-    [id, ...cols.map((k) => data[k]), req.user?.id ?? null],
+    [id, ...cols.map((k) => data[k]), actorId(req)],
   );
   const after = r.rows[0] as Row;
   const d = diff(before, after);

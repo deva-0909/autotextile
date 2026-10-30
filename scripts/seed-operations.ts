@@ -7,6 +7,7 @@ import { type RunningService, type ServiceName, setServicePorts } from '@erp/pla
 import { DEMO_PASSWORD } from './seed-data.ts';
 import { runProcurementChecks } from '../services/procurement/src/automation.ts';
 import { runJobworkChecks } from '../services/jobwork/src/automation.ts';
+import { runCrmChecks } from '../services/crm/src/automation.ts';
 
 export async function seedOperations(services: RunningService[]) {
   const ports: Partial<Record<ServiceName, number>> = {};
@@ -40,9 +41,14 @@ export async function seedOperations(services: RunningService[]) {
     const millops = await login('millops@textile.local');
     const supplierPortal = await login('supplier@ambica.example');
     const millPortal = await login('mill@suratprocess.example');
+    const stores = await login('surat.stores@textile.local');
+    const salesMgr = await login('salesmgr@textile.local');
+    const salesWest = await login('sales@textile.local');
+    const salesSouth = await login('sales.south@textile.local');
 
     const wh = await call<{ id: string; code: string }[]>('organisation', admin, 'GET', '/warehouses');
     const SRT = wh.find((w) => w.code === 'SRT')!.id;
+    const KOL = wh.find((w) => w.code === 'KOL')!.id;
     const parties = (await call<{ items: { id: string; legal_name: string }[] }>('masters', admin, 'GET', '/parties?pageSize=100')).items;
     const party = (name: string) => parties.find((p) => p.legal_name === name)!.id;
     const products = (await call<{ items: { id: string; sku: string }[] }>('masters', admin, 'GET', '/products?pageSize=100')).items;
@@ -139,9 +145,61 @@ export async function seedOperations(services: RunningService[]) {
     for (const [code, status] of [['INSPECTION', 'completed'], ['PRETREATMENT', 'completed'], ['DYEING', 'completed'], ['WASHING', 'started']] as const)
       await call('jobwork', millPortal, 'POST', `/portal/mill/jobs/${jw1.id}/stages`, { stage_code: code, status });
 
+    // ---------- P4 helpers: weigh/scan rolls, grade, put away ----------
+    const weights = (n: number, base: number, total?: number) => {
+      const w = Array.from({ length: n }, (_, i) => Math.round((base + (((i * 37) % 11) - 5) * 0.12) * 10) / 10);
+      if (total) w[n - 1] = Math.round((total - w.slice(0, -1).reduce((a, b) => a + b, 0)) * 10) / 10;
+      return w;
+    };
+    async function scanInward(inwardId: string, perLine: { weights: number[]; dye_lot?: string; shade?: string; gsm?: number; width?: number }[]) {
+      const d = await call('inventory', stores, 'GET', `/inwards/${inwardId}`);
+      const out: { barcode: string; lot_id: string }[][] = [];
+      for (const [i, l] of perLine.entries()) {
+        const rolls = [];
+        for (const w of l.weights) rolls.push(await call('inventory', stores, 'POST', `/inwards/${inwardId}/rolls`, { line_id: d.lines[i].id, weight_kg: w, dye_lot: l.dye_lot ?? null, shade_code: l.shade ?? null, gsm: l.gsm ?? null, width_in: l.width ?? null }));
+        out.push(rolls);
+      }
+      return out;
+    }
+    const grade = (rolls: { barcode: string }[], g: (i: number) => 'A' | 'B' | 'C' | 'reject' = () => 'A', defects: (i: number) => string[] = () => []) =>
+      call('inventory', stores, 'POST', '/qc', { results: rolls.map((r, i) => ({ barcode: r.barcode, grade: g(i), defects: defects(i) })) });
+    const srtMap = await call('inventory', stores, 'GET', `/warehouses/${SRT}/map`);
+    const bins = srtMap.locations.filter((l: { kind: string; purpose: string }) => l.kind === 'bin' && l.purpose === 'storage').map((l: { id: string }) => l.id);
+    let binIx = 0;
+    const putaway = async (rolls: { barcode: string }[], per = 8) => {
+      for (let i = 0; i < rolls.length; i += per) await call('inventory', stores, 'POST', '/putaway', { barcodes: rolls.slice(i, i + per).map((r) => r.barcode), location_id: bins[binIx++ % bins.length] });
+    };
+    async function opening(sku_: string, n: number, base: number, cost: number, days: number, ref: string, opts: { total?: number; dye_lot?: string; shade?: string; price?: number } = {}) {
+      const inw = await call('inventory', stores, 'POST', '/inwards', { warehouse_id: SRT, source_ref: ref, party_name: 'Opening stock', received_date: daysAgo(days), lines: [{ product_id: sku(sku_), expected_kg: opts.total ?? Math.round(n * base * 10) / 10, cost_per_kg: cost, lot_ref: opts.dye_lot ?? null }] });
+      const [rolls] = await scanInward(inw.id, [{ weights: weights(n, base, opts.total), dye_lot: opts.dye_lot, shade: opts.shade }]);
+      await call('inventory', stores, 'POST', `/inwards/${inw.id}/complete`, { note: 'Opening stock count' });
+      await grade(rolls, (i) => (i % 9 === 4 ? 'B' : 'A'));
+      await putaway(rolls);
+      if (opts.price) await call('inventory', purchase, 'POST', `/lots/${rolls[0].lot_id}/price`, { price_per_kg: opts.price });
+      return rolls;
+    }
+    // Opening stock in Surat, with its original receipt dates (drives ageing).
+    const ribRolls = await opening('RIB-240-NVY', 26, 24.5, 288, 40, 'OPENING/RIB/01', { total: 637, dye_lot: 'DL-R412', shade: 'NVY-1', price: 332 });
+    const intRolls = await opening('INT-220-RFD', 56, 25.4, 232, 25, 'OPENING/INT/01', { price: 266 });
+    await opening('SJ-180-BLK', 36, 25, 258, 200, 'OPENING/BLK/01', { dye_lot: 'DL-B209', shade: 'BLK-1', price: 299 });
+    await opening('PIQ-210-WHT', 14, 22, 276, 400, 'OPENING/PIQ/01', { price: 318 });
+    await opening('FLC-320-CHR', 20, 20, 305, 75, 'OPENING/FLC/01', { price: 352 });
+    const scanIssue = async (jobOrderId: string, rolls: { barcode: string }[], kg: number) => {
+      await drain();
+      const issue = (await call<{ id: string; job_order_id: string }[]>('inventory', stores, 'GET', '/mill-issues?status=open')).find((i) => i.job_order_id === jobOrderId)!;
+      let sent = 0;
+      for (const r of rolls) {
+        if (sent >= kg - 0.5) break;
+        const x = await call('inventory', stores, 'POST', `/mill-issues/${issue.id}/scan`, { barcode: r.barcode });
+        sent += x.kg;
+        if (x.done) break;
+      }
+    };
+
     // 7. Compacting job from the Surat warehouse, returned with low yield and a quality claim
     const jw2 = await call('jobwork', millops, 'POST', '/orders', { mill_id: party('Palladam Compacting Works'), process_code: 'COMPACT_ONLY', expected_return_date: daysAgo(2), lines: [{ source: 'warehouse', warehouse_id: SRT, product_id: sku('RIB-240-NVY'), kg_sent: 588, rolls: 24, lot_ref: 'L-SRT-0412' }] });
     await call('jobwork', millops, 'POST', `/orders/${jw2.id}/issue`, { issue_date: daysAgo(10) });
+    await scanIssue(jw2.id, ribRolls, 588);
     await call('jobwork', millops, 'POST', `/orders/${jw2.id}/acknowledge`, { kg_received: 588 });
     await call('jobwork', millops, 'POST', `/orders/${jw2.id}/stages`, { stage_code: 'COMPACTING', status: 'completed' });
     await call('jobwork', millops, 'POST', `/orders/${jw2.id}/stages`, { stage_code: 'FINAL_QC', status: 'qc_failed', note: 'Shade bleeding on 3 rolls after compacting' });
@@ -153,9 +211,94 @@ export async function seedOperations(services: RunningService[]) {
     const jw3 = await call('jobwork', millops, 'POST', '/orders', { mill_id: party('Tiruppur Dyeing & Finishing'), process_code: 'REACTIVE_DYE', expected_return_date: inDays(6), lines: [{ source: 'warehouse', warehouse_id: SRT, product_id: sku('INT-220-RFD'), kg_sent: 1400, rolls: 56, lot_ref: 'L-SRT-0398' }] });
     await call('jobwork', millops, 'POST', `/orders/${jw3.id}/issue`, { issue_date: daysAgo(5) });
 
+    // ---------- P4: weigh and scan the Ambica receipt, transfers, reservations, approvals, a count in progress ----------
+    await drain();
+    const inwards = await call<{ id: string; source_type: string; source_ref: string }[]>('inventory', stores, 'GET', '/inwards?status=open');
+    const grn = inwards.find((i) => i.source_type === 'po_receipt')!;
+    const [sjRolls, ribNew] = await scanInward(grn.id, [
+      { weights: weights(48, 24.9, 1194.8), dye_lot: 'SAK-N118', shade: 'NVY-118', gsm: 161, width: 72 },
+      { weights: weights(24, 24.5, 588), dye_lot: 'SAK-R77', shade: 'NVY-2', gsm: 238, width: 36 },
+    ]);
+    await call('inventory', stores, 'POST', `/inwards/${grn.id}/complete`, {});
+    await grade(sjRolls, (i) => (i === 7 ? 'reject' : i % 6 === 5 ? 'B' : 'A'), (i) => (i === 7 ? ['Holes', 'Oil stains'] : i % 6 === 5 ? ['Minor slubs'] : []));
+    await grade(ribNew.slice(0, 18));
+    await putaway(sjRolls.filter((_, i) => i !== 7).slice(0, 32));
+    await putaway(ribNew.slice(0, 18), 6);
+    const sjLot = sjRolls[0].lot_id;
+    await call('inventory', purchase, 'POST', `/lots/${sjLot}/price`, { price_per_kg: 289 });
+
+    // Inter-GSTIN transfer Surat → Kolkata: approved, dispatched on a tax invoice, partly received.
+    const tr1 = await call('inventory', stores, 'POST', '/transfers', { from_warehouse_id: SRT, to_warehouse_id: KOL, reason: 'Kolkata hosiery orders for navy jersey', needed_by: inDays(4), lines: [{ product_id: sku('SJ-160-NVY'), requested_kg: 250, lot_id: sjLot }] });
+    await decide(tr1.id);
+    const loadable = sjRolls.filter((_, i) => i !== 7).slice(30, 40);
+    for (const r of loadable) await call('inventory', stores, 'POST', `/transfers/${tr1.id}/scan-out`, { barcode: r.barcode });
+    await call('inventory', stores, 'POST', `/transfers/${tr1.id}/dispatch`, { transporter_name: 'VRL Logistics', lr_number: 'VRL-771204', vehicle_no: 'GJ05AB4471', eway_bill_no: '381200441122' });
+    for (const r of loadable.slice(0, 6)) await call('inventory', admin, 'POST', `/transfers/${tr1.id}/scan-in`, { barcode: r.barcode });
+    // A second transfer waiting for approval (Surat → Tiruppur, different GSTIN).
+    await call('inventory', stores, 'POST', '/transfers', { from_warehouse_id: SRT, to_warehouse_id: wh.find((w) => w.code === 'TUP1')!.id, reason: 'Exporter programme in Tiruppur', needed_by: inDays(6), lines: [{ product_id: sku('INT-220-RFD'), requested_kg: 300 }] });
+    // Clearance price on aged black jersey: below margin, so it waits for a checker.
+    const blk = (await call<{ items: { id: string; sku: string }[] }>('inventory', admin, 'GET', `/lots?f_product=${sku('SJ-180-BLK')}`)).items[0];
+    await call('inventory', purchase, 'POST', `/lots/${blk.id}/price`, { price_per_kg: 272, reason: 'Clearance: 200 days old, move before winter' });
+    // A count in progress on one aisle.
+    const st = await call('inventory', stores, 'POST', '/stocktakes', { warehouse_id: SRT, location_prefix: 'A-01' });
+    const toCount = await call<{ barcode: string; location_path: string }[]>('inventory', stores, 'GET', `/rolls?warehouse=${SRT}&state=available`);
+    for (const r of toCount.filter((x) => x.location_path?.startsWith('A-01')).slice(0, 12)) await call('inventory', stores, 'POST', `/stocktakes/${st.id}/count`, { barcode: r.barcode });
+
+    // ---------- P5: leads from every channel, allocation, pipeline, quotations, credit, targets ----------
+    const team = await call<{ user_id: string; name: string }[]>('crm', salesMgr, 'GET', '/team');
+    const member = (n: string) => team.find((m) => m.name === n)!.user_id;
+    await call('crm', salesMgr, 'PUT', '/attendance', { user_id: member('Sourav Ghosh'), day: daysAgo(0), status: 'leave', note: 'Family function' });
+    const sources = await call<{ code: string; webhook_key: string }[]>('crm', salesMgr, 'GET', '/sources');
+    const hook = (code: string) => sources.find((x) => x.code === code)!.webhook_key;
+    const webhook = (code: string, body: object) => fetch(`http://127.0.0.1:${ports.crm}/public/leads/${hook(code)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+    await webhook('INDIAMART', { UNIQUE_QUERY_ID: 'IM-2611-8841', SENDER_NAME: 'Murali Krishnan', SENDER_MOBILE: '+91-9843011111', SENDER_COMPANY: 'Kovai Knits', SENDER_CITY: 'Coimbatore', QUERY_PRODUCT_NAME: 'Cotton single jersey 160 GSM', QUERY_MESSAGE: 'Need 800 kg navy single jersey 160 GSM, compacted. Please share best rate.' });
+    await webhook('META', { leadgen_id: 'FB-55102', full_name: 'Harpreet Singh', phone_number: '+919814022222', email: 'harpreet@ludhianaknits.example', city: 'Ludhiana', company_name: 'HS Knit Exports', message: 'Fleece 320 GSM for winter programme, 2 tonnes' });
+    await webhook('WEBSITE', { id: 'WEB-1032', name: 'Ritika Jain', phone: '9820133333', email: 'ritika@jainfashions.example', company: 'Jain Fashions', city: 'Mumbai', message: 'Pique 210 white for polo T-shirts', quantity_kg: 600 });
+    await webhook('JUSTDIAL', { leadid: 'JD-90021', name: 'Subrata Paul', mobile: '9830144444', city: 'Kolkata', category: 'Hosiery fabric dealers' });
+    await webhook('INDIAMART', { UNIQUE_QUERY_ID: 'IM-2611-8902', SENDER_NAME: 'Murali K', SENDER_MOBILE: '9843011111', SENDER_COMPANY: 'Kovai Knits', SENDER_CITY: 'Coimbatore', QUERY_MESSAGE: 'Also need rib 2x2 navy matching' });
+    const manual = async (token: string, body: object) => call('crm', token, 'POST', '/leads', body);
+    const big = await manual(salesMgr, { source_code: 'EXHIBITION', name: 'Anand Rao', company: 'Bengaluru Apparel Co', mobile: '9845055555', email: 'anand@blrapparel.example', city: 'Bengaluru', state_code: '29', category: 'Single Jersey', est_value: 1800000, requirement_kg: 6000, message: 'Met at Knit Show Tiruppur; annual contract for jersey and rib' });
+    const smg = await manual(salesMgr, { source_code: 'REFERRAL', name: 'S. Murugan', company: 'Sri Murugan Garments', mobile: '9443066666', city: 'Tiruppur', state_code: '33', est_value: 450000, requirement_kg: 1500, message: 'Repeat buyer; navy jersey for export order', owner_id: member('Selvi Raman') });
+    const delhi = await manual(salesWest, { source_code: 'PHONE', name: 'Vikas Arora', company: 'Delhi Fashion Hub', mobile: '9810077777', city: 'Delhi', state_code: '07', est_value: 260000, requirement_kg: 900, message: 'Interlock RFD for dyeing at their end' });
+    const lost = await manual(salesWest, { source_code: 'TRADE', name: 'Pooja Desai', company: 'Surat Kids Wear', mobile: '9825088888', city: 'Surat', state_code: '24', est_value: 120000 });
+    const leads = (await call<{ items: { id: string; name: string; owner_id: string | null }[] }>('crm', salesMgr, 'GET', '/leads?pageSize=50')).items;
+    const lead = (n: string) => leads.find((l) => l.name === n)!;
+    // Work the pipeline.
+    const at = (d: number, h = 11) => new Date(Date.now() + d * 86_400_000 + h * 3_600_000).toISOString();
+    await call('crm', salesSouth, 'POST', `/leads/${lead('Murali Krishnan').id}/activities`, { kind: 'call', summary: 'Called Murali; needs 800 kg navy SJ 160, compacted, within 10 days', outcome: 'Interested', next_action_at: at(1), next_action: 'Send quotation' });
+    await call('crm', salesSouth, 'POST', `/leads/${lead('Murali Krishnan').id}/stage`, { stage: 'qualified', next_action_at: at(1) });
+    await call('crm', salesSouth, 'POST', `/leads/${smg.id}/activities`, { kind: 'visit', summary: 'Visited factory, confirmed export programme', next_action_at: at(0, 4) });
+    await call('crm', salesWest, 'POST', `/leads/${delhi.id}/activities`, { kind: 'whatsapp', summary: 'Shared interlock RFD photos and GSM report', next_action_at: at(-1), next_action: 'Chase for sample feedback' });
+    await call('crm', salesWest, 'POST', `/leads/${lead('Ritika Jain').id}/activities`, { kind: 'email', summary: 'Sent pique swatch card', next_action_at: at(2) });
+    await call('crm', salesWest, 'POST', `/leads/${lost.id}/activities`, { kind: 'call', summary: 'Wants price below ₹240 for jersey', next_action_at: at(1) });
+    await call('crm', salesWest, 'POST', `/leads/${lost.id}/stage`, { stage: 'lost', lost_reason: 'Price: buying from a local knitter at ₹236', competitor: 'Local knitter' });
+    await call('crm', salesMgr, 'POST', `/leads/${big.id}/stage`, { stage: 'nurture', nurture_reason: 'Budget approval in January', next_action_at: at(30) });
+
+    // Customers, credit and quotations.
+    const murugan = party('Sri Murugan Garments');
+    await call('crm', salesSouth, 'POST', `/leads/${smg.id}/convert`, { customer_id: murugan });
+    await call('crm', salesSouth, 'POST', `/leads/${lead('Murali Krishnan').id}/convert`, { legal_name: 'Kovai Knits', state_code: '33' });
+    const cr1 = await call('crm', salesSouth, 'POST', '/credit/applications', { customer_id: murugan, requested_mode: 'credit', requested_limit: 500000, requested_days: 45, justification: 'Buying from us since 2021, pays within 40 days' });
+    await decide(cr1.id);
+    await call('crm', salesWest, 'POST', '/credit/applications', { customer_id: party('Delhi Fashion Hub'), requested_mode: 'credit', requested_limit: 300000, requested_days: 30, justification: 'New wholesale account; bank reference attached' });
+    await call('crm', accounts, 'POST', `/credit/${party('Ludhiana Knit Exports')}/block`, { blocked: true, reason: 'Two cheques returned in September' });
+    const quote = async (token: string, body: object) => call('crm', token, 'POST', '/quotations', body);
+    const q1 = await quote(salesSouth, { lead_id: smg.id, warehouse_id: SRT, freight_amount: 2500, payment_terms: '45 days credit', delivery_terms: 'Door delivery Tiruppur', lines: [{ product_id: sku('SJ-160-NVY'), lot_id: sjLot, kg: 400, requested_price: 286 }] });
+    await call('crm', salesSouth, 'POST', `/quotations/${q1.id}/submit`);
+    await call('crm', salesSouth, 'POST', `/quotations/${q1.id}/send`);
+    await call('crm', salesSouth, 'POST', `/quotations/${q1.id}/outcome`, { outcome: 'accepted' });
+    const q2 = await quote(salesSouth, { lead_id: lead('Murali Krishnan').id, warehouse_id: SRT, freight_amount: 1800, payment_terms: 'Advance', lines: [{ product_id: sku('SJ-160-NVY'), lot_id: sjLot, kg: 300, requested_price: 262, approval_reason: 'Kovai matched a Tiruppur mill at ₹265; first order' }] });
+    await call('crm', salesSouth, 'POST', `/quotations/${q2.id}/submit`);
+    const q3 = await quote(salesWest, { lead_id: delhi.id, warehouse_id: SRT, freight_amount: 4200, payment_terms: 'Advance 50%, balance on delivery', lines: [{ product_id: sku('INT-220-RFD'), kg: 900, requested_price: 264 }] });
+    await call('crm', salesWest, 'POST', `/quotations/${q3.id}/submit`);
+    await call('crm', salesWest, 'POST', `/quotations/${q3.id}/send`);
+    for (const [n, rev, kg] of [['Selvi Raman', 900000, 3000], ['Arjun Mehta', 1200000, 4500], ['Sourav Ghosh', 600000, 2200]] as const)
+      await call('crm', salesMgr, 'PUT', '/targets', { user_id: member(n), period: new Date().toISOString().slice(0, 7), leads: 40, qualified: 15, quotes: 12, kg, revenue: rev, margin_pct: 10, new_customers: 3 });
+
     await drain();
     await runProcurementChecks(services.find((s) => s.ctx.name === 'procurement')!.ctx.pool);
     await runJobworkChecks(services.find((s) => s.ctx.name === 'jobwork')!.ctx.pool);
+    await runCrmChecks(services.find((s) => s.ctx.name === 'crm')!.ctx.pool);
     await drain();
   } finally {
     for (const s of servers) s.close();

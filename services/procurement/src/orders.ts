@@ -276,7 +276,7 @@ export async function recordReceipt(c: Client, req: Request, poId: string, body:
     locationName = `${w.code} · ${w.name}`;
   }
   const tolerance = Number(await setting('procurement.three_way_tolerance_percent', 2)) / 100;
-  const poLines = await many<{ id: string; qty_kg: number; received_kg: number; sku: string; product_id: string; product_name: string }>(c, 'SELECT * FROM po_lines WHERE po_id = $1', [poId]);
+  const poLines = await many<{ id: string; qty_kg: number; received_kg: number; sku: string; product_id: string; product_name: string; hsn_code: string; gst_rate: number; rate_per_kg: number }>(c, 'SELECT * FROM po_lines WHERE po_id = $1', [poId]);
   for (const l of body.lines) {
     const pl = poLines.find((x) => x.id === l.po_line_id);
     if (!pl) throw badRequest('Receipt lines must belong to this PO');
@@ -307,7 +307,7 @@ export async function recordReceipt(c: Client, req: Request, poId: string, body:
     supplier_id: po.supplier_id, supplier_name: po.supplier_name, receipt_date: body.receipt_date, source,
     lines: body.lines.filter((l) => l.received_kg > 0).map((l) => {
       const pl = poLines.find((x) => x.id === l.po_line_id)!;
-      return { po_line_id: l.po_line_id, product_id: pl.product_id, sku: pl.sku, product_name: pl.product_name, accepted_kg: l.received_kg - l.rejected_kg, rejected_kg: l.rejected_kg, rolls: l.rolls ?? null };
+      return { po_line_id: l.po_line_id, product_id: pl.product_id, sku: pl.sku, product_name: pl.product_name, hsn_code: pl.hsn_code, gst_rate: pl.gst_rate, rate_per_kg: pl.rate_per_kg, accepted_kg: l.received_kg - l.rejected_kg, rejected_kg: l.rejected_kg, rolls: l.rolls ?? null };
     }),
   });
   await resolveExceptions(c, 'po_not_accepted', poId, 'Goods received');

@@ -14,8 +14,10 @@ import { mastersService } from '../services/masters/src/service.ts';
 import { governanceService } from '../services/governance/src/service.ts';
 import { procurementService } from '../services/procurement/src/service.ts';
 import { jobworkService } from '../services/jobwork/src/service.ts';
+import { inventoryService } from '../services/inventory/src/service.ts';
+import { crmService } from '../services/crm/src/service.ts';
 import { hashPassword } from '../services/identity/src/security.ts';
-import { DEMO_PASSWORD, DEMO_USERS, linkPortalUsers, seedMasters, seedOrganisation, seedUsers } from './seed-data.ts';
+import { DEMO_PASSWORD, DEMO_USERS, linkPortalUsers, seedMasters, seedOrganisation, seedSalesTeam, seedUsers } from './seed-data.ts';
 import { seedOperations } from './seed-operations.ts';
 
 const url = new URL(config.databaseUrl());
@@ -52,7 +54,7 @@ await ensureDatabase();
 
 console.log('• Running migrations');
 const services = [];
-for (const def of [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService]) {
+for (const def of [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService, inventoryService, crmService]) {
   services.push(await bootService(def, { pollMs: 200 }));
   console.log(`  ✓ ${def.name}`);
 }
@@ -71,6 +73,7 @@ if (n > 0) {
     const userIds = await seedUsers(c, org, hash);
     const parties = await seedMasters(c, userIds['sales@textile.local']);
     await linkPortalUsers(c, parties);
+    await seedSalesTeam(c, userIds);
 
     // One open maker-checker request so the approvals inbox has something to show.
     const purchase = userIds['purchase@textile.local'];
@@ -87,9 +90,10 @@ if (n > 0) {
   });
   await governance.consumer?.drain();
   await masters.consumer?.drain();
-  console.log('  ✓ 1 legal entity, 3 GST registrations, 5 warehouses with locations, 15 parties, 8 fabric SKUs, 10 users');
+  console.log(`  ✓ 1 legal entity, 3 GST registrations, 5 warehouses with locations, 15 parties, 8 fabric SKUs, ${DEMO_USERS.length} users`);
   await seedOperations(services);
   console.log('  ✓ procurement and job-work examples (requisition, RFQ, POs, receipts, invoices, job-work orders)');
+  console.log('  ✓ inventory and sales examples (lots and rolls, transfers, a stock count, leads, quotations, credit)');
 }
 
 for (const s of services) await s.close();

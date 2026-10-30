@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, ChevronRight, Clock, ShieldAlert, XCircle } from 'lucide-react';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, invalidatePrefix } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -75,6 +75,31 @@ export function AuditPage() {
       )}
     </>
   );
+}
+
+/** Where the record behind an approval lives, by request type. */
+function recordLink(a: { approval_type: string; ref_id: string; payload: Record<string, unknown> }) {
+  const p = a.payload;
+  switch (a.approval_type) {
+    case 'purchase_order': return `/procurement/purchase-orders/${a.ref_id}`;
+    case 'invoice_posting': return `/procurement/invoices/${a.ref_id}`;
+    case 'requisition': return '/procurement/requisitions';
+    case 'price_change': return p.lot_id ? `/inventory/lots/${p.lot_id}` : '/inventory/pricing';
+    case 'stock_transfer': return `/inventory/transfers/${a.ref_id}`;
+    case 'stock_adjustment': return `/inventory/stocktakes/${a.ref_id}`;
+    case 'quotation_price': return `/crm/quotations/${a.ref_id}`;
+    case 'credit_limit': case 'credit_override': return p.customer_id ? `/crm/credit/${p.customer_id}` : '/crm/credit';
+    default: return null;
+  }
+}
+
+/** Approval payload values can be lists of lines; show them readably instead of [object Object]. */
+function showValue(v: unknown): ReactNode {
+  if (v === null || v === undefined || v === '') return '—';
+  if (Array.isArray(v)) return <span className="block whitespace-pre-line">{v.map((x) => (x && typeof x === 'object' ? Object.entries(x).filter(([, y]) => y !== null && y !== '').map(([k, y]) => `${humanize(k)}: ${y}`).join(' · ') : String(x))).join('\n')}</span>;
+  if (typeof v === 'object') return Object.entries(v as Record<string, unknown>).map(([k, y]) => `${humanize(k)}: ${y}`).join(' · ');
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  return String(v);
 }
 
 interface Approval { id: string; source_service: string; approval_type: string; ref_id: string; title: string; summary: string | null; payload: Record<string, unknown>; required_permission: string; status: string; requested_by: string; requested_by_name: string | null; requested_at: string; decided_by_name: string | null; decided_at: string | null; comment: string | null }
@@ -152,7 +177,7 @@ function ApprovalDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const before = payload.before as Record<string, unknown> | undefined;
   const after = payload.after as Record<string, unknown> | undefined;
   const details = Object.entries(payload).filter(([k]) => !['before', 'after', 'party_id'].includes(k));
-  const partyLink = payload.party_id ? `/partners/${payload.party_type ?? 'supplier'}/${payload.party_id}` : null;
+  const partyLink = payload.party_id ? `/partners/${payload.party_type ?? 'supplier'}/${payload.party_id}` : a ? recordLink(a) : null;
 
   return (
     <Drawer open onClose={onClose} width="lg" title={a?.title ?? 'Approval request'} description={a && <>Requested by {a.requested_by_name} · {fmtDateTime(a.requested_at)}</>}
@@ -168,7 +193,7 @@ function ApprovalDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             <div><h3 className="mb-2 text-[13px] font-semibold">Proposed change</h3><Diff before={before ?? null} after={after ?? null} /></div>
           ) : (
             <div><h3 className="mb-2 text-[13px] font-semibold">Details</h3>
-              <KeyValue columns={2} items={details.map(([k, v]) => ({ label: humanize(k), value: String(v ?? '—'), mono: /number|ifsc|code/.test(k) }))} />
+              <KeyValue columns={2} items={details.map(([k, v]) => ({ label: humanize(k), value: showValue(v), mono: /number|ifsc|code/.test(k) }))} />
             </div>
           )}
           {partyLink && <Link className="link text-[13px]" to={partyLink}>Open the record →</Link>}

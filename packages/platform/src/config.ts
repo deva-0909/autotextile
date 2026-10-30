@@ -13,7 +13,7 @@ function env(name: string, fallback?: string): string {
   return v;
 }
 
-export const SERVICES = ['identity', 'organisation', 'masters', 'governance', 'procurement', 'jobwork'] as const;
+export const SERVICES = ['identity', 'organisation', 'masters', 'governance', 'procurement', 'jobwork', 'inventory', 'crm'] as const;
 export type ServiceName = (typeof SERVICES)[number];
 
 export const config = {
@@ -23,5 +23,5 @@ export const config = {
   anthropicKey: () => process.env.ANTHROPIC_API_KEY || null,
   storageDir: () => path.resolve(ROOT_DIR, env('STORAGE_DIR', './storage')),
   port: (service: ServiceName | 'gateway') =>
-    Number(env(`${service.toUpperCase()}_PORT`, String({ gateway: 4000, identity: 4101, organisation: 4102, masters: 4103, governance: 4104, procurement: 4105, jobwork: 4106 }[service]))),
+    Number(env(`${service.toUpperCase()}_PORT`, String({ gateway: 4000, identity: 4101, organisation: 4102, masters: 4103, governance: 4104, procurement: 4105, jobwork: 4106, inventory: 4107, crm: 4108 }[service]))),
 };

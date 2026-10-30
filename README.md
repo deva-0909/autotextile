@@ -7,11 +7,13 @@ It is built phase by phase from the *Developer Brief & Functional Specification 
 - **P1 — Core masters, security, organisation & platform foundation**
 - **P2 — Procurement, supplier portal & AI invoice capture**
 - **P3 — Mill job work, mill portal, rate engine, yield & deadlines**
+- **P4 — Inventory: lots & roll barcodes, QC, price tags, immutable stock ledger, WMS, transfers, stock counts**
+- **P5 — Sales & CRM: lead capture, allocation, pipeline, customer 360, quotations, pricing & credit approvals**
 
 | | |
 |---|---|
 | **Architecture** | Domain microservices behind an API gateway, PostgreSQL (schema per service), Postgres-backed event bus |
-| **Services in this release** | `identity` · `organisation` · `masters` · `governance` · `procurement` · `jobwork` · `gateway` |
+| **Services in this release** | `identity` · `organisation` · `masters` · `governance` · `procurement` · `jobwork` · `inventory` · `crm` · `gateway` |
 | **Web app** | React 19 + TypeScript + Tailwind CSS, served by the gateway |
 | **Runs on** | Windows, macOS or Linux — Node.js and PostgreSQL only, no Docker needed |
 
@@ -63,6 +65,33 @@ See [docs/architecture.md](docs/architecture.md) for the design and
 - **Return and yield:** returns record good, rejected and damaged kg; reconciliation shows sent, received, balance, wastage and yield %; yield below the threshold raises an exception automatically.
 - **Quality claims:** defects, affected quantity, photos, root cause, responsibility, debit/credit amount, the mill’s response and closure.
 
+## What’s in P4 — Inventory & warehouse
+
+- **Every kilogram is a roll with a barcode.** Lots hold rolls; each roll has its own barcode (QR label printed from the browser) and a lot barcode for the batch.
+- **Inward:** goods receipts and mill returns arrive automatically as inwards to weigh and scan, roll by roll, with GSM, width, dye lot and shade. Differences against the document are flagged.
+- **Quality inspection:** grade each roll A / B / C / reject with measured GSM and width; out-of-spec measurements and rejects raise exceptions.
+- **Price tagging:** selling price per kg on each lot. The first price is set directly; changes and any price below the minimum margin need a checker. Full price history.
+- **Immutable stock ledger:** balances (physical, available, reserved, allocated, in transit, at mill, QC hold, damaged, rejected) are derived only from append-only movements; a built-in check proves the ledger and the roll positions agree.
+- **Warehouse map & putaway:** zones, aisles, racks and bins with fill levels; directed putaway suggests the bin already holding the lot.
+- **Reservations & picking:** whole rolls reserved (the last one cut to size), never double-booked; picking by scan, each roll exactly once.
+- **Shade control:** dye lots don’t mix in one reservation without a reason; a shade a customer rejected is never reserved for them.
+- **Transfers:** request → approval → scan onto the vehicle → dispatch with LR and e-way bill → scan in at the destination → close. Between different GSTINs a transfer is a taxable supply: it always needs approval and gets a tax invoice from the source GSTIN’s series with IGST or CGST+SGST.
+- **Stock counts:** scan an area; missing, unexpected, mis-located and re-weighed rolls form a variance that a checker approves before the ledger is adjusted.
+- **Issue to mill:** job-work orders that draw from a warehouse are scanned out; when the processed fabric returns, the grey rolls are consumed and a finished lot is created with its genealogy and a yield-adjusted cost.
+- **Ageing:** configurable buckets (0–30 … >365 days), slow and dead stock with a clearance recommendation.
+- **Scan station:** a phone-friendly page for handheld scanners to look up, put away, cut or mark rolls damaged.
+
+## What’s in P5 — Sales & CRM
+
+- **Lead capture from every channel:** each source (IndiaMART, Meta lead ads, Justdial, website, WhatsApp, phone, email, referral, exhibition, trade platforms) has a private webhook URL and a field map; CSV import for lists. New sources are configuration, not code.
+- **Duplicates:** matched on mobile, email and GSTIN against open leads and customers; merge, link, keep separate or escalate — nothing is deleted.
+- **Allocation:** rules by state, city, source, fabric, language and deal value; round robin or least-loaded. Absent, on-leave, weekly-off, on-break, inactive and capped salespeople are skipped, and every lead records why it went where it did. Repeat enquiries go to the salesperson already handling the contact.
+- **Pipeline:** new → assigned → contacted → qualified → quotation → negotiation → order confirmed → won / lost / nurture. No open lead without a next follow-up; lost and nurture need a reason; first-response time is measured and SLA breaches escalate.
+- **Customer 360:** enquiries, quotations, prices, fabric preferences, credit, shade decisions, reservations and timeline on one page.
+- **Quotations:** built from stock lots with live pricing — list price, requested price, discount, cost and margin per line. Lines beyond the salesperson’s discount authority or below the minimum margin go to a price approver. Revisions are new versions with the negotiation history and competitor prices kept.
+- **Credit:** advance by default; credit limits, one-time overrides and blocks through a checker. Accepting a quotation runs the credit check and reserves the quoted lots.
+- **Targets & performance:** leads, response time, qualified leads, quotes, kg, revenue, margin and new vs repeat customers against monthly targets, counting only verified outcomes; incentive eligibility.
+
 ## Run it on Windows (no Docker)
 
 ### 1. Install the prerequisites (one time)
@@ -113,10 +142,10 @@ npm start
 ```
 
 `npm run setup` creates the `textile_erp` database, runs every service’s migrations and loads demo data,
-including sample requisitions, RFQs, purchase orders, invoices and job-work orders.
-`npm start` launches the six services and the gateway in one window. Open **http://localhost:4000**.
+including sample requisitions, RFQs, purchase orders, invoices, job-work orders, scanned stock, transfers, leads, quotations and credit.
+`npm start` launches the eight services and the gateway in one window. Open **http://localhost:4000**.
 
-> Upgrading from the P1 release? Run `npm install` and then `npm run setup -- --reset` once, to load the P2/P3 demo data.
+> Upgrading from an earlier release? Run `npm install` and then `npm run setup -- --reset` once, to load the demo data for the new modules.
 
 Demo users all share the password `Textile@2026`:
 
@@ -125,9 +154,12 @@ Demo users all share the password `Textile@2026`:
 | `admin@textile.local` | Super Admin | everything |
 | `owner@textile.local` | Owner / Director | approvals, read-only everywhere |
 | `purchase@textile.local` | Purchase Manager | suppliers & mills, masked bank numbers, maker side of approvals |
-| `surat.stores@textile.local` | Warehouse Manager | data scope limited to the Surat warehouse and GSTIN |
+| `surat.stores@textile.local` | Warehouse Manager | inventory screens, data scope limited to the Surat warehouse and GSTIN |
 | `accounts@textile.local` | Accounts Manager | reference data, full bank numbers |
-| `sales@textile.local` | Sales Executive | customers only |
+| `sales@textile.local` | Sales Executive (West & North) | own leads and quotations |
+| `sales.south@textile.local` | Sales Executive (South) | own leads and quotations |
+| `sales.east@textile.local` | Sales Executive (East) | own leads (on leave in the demo, so skipped by allocation) |
+| `salesmgr@textile.local` | Sales Manager | whole team, allocation rules, attendance, targets, price approvals |
 | `auditor@textile.local` | Auditor / CA | read-only, including the audit trail |
 | `millops@textile.local` | Mill Operations Manager | job-work orders, mills, rate cards, claims |
 | `supplier@ambica.example` | Supplier portal (Shree Ambica Knitters) | the supplier’s own POs, dispatches and invoices |
@@ -139,7 +171,10 @@ A good first tour:
 2. Open *Invoice workbench* and *Three-way match*: one demo invoice has a rate variance waiting for approval.
 3. Sign in as **millops** and open *Mill job work*: the cockpit shows overdue and statutory deadlines; one returned job has low yield and an open claim.
 4. Sign in as **mill@suratprocess.example** to see the same work from the mill’s side, and as **supplier@ambica.example** for the supplier portal.
-5. Sign in as **admin** → *Approvals* to approve what is waiting, then look at the *Audit trail*.
+5. Sign in as **surat.stores** → *Inventory*: open the inward waiting to be scanned, the QC queue, a lot’s genealogy, the warehouse map, the transfer to Kolkata (tax invoice, IGST) and the stock count in progress. Try the *Scan station* on your phone.
+6. Sign in as **salesmgr** → *Sales & CRM*: the lead inbox (one Kolkata lead is unassigned because Sourav is on leave — open it to see why), *Lead allocation*, the customer 360 for Sri Murugan Garments, and *Price approvals*.
+7. Sign in as **sales.south** to see only your own leads, then build a quotation and watch the margin and approval flag change as you type a price.
+8. Sign in as **admin** → *Approvals* to approve what is waiting, then look at the *Audit trail*.
 
 ### Optional: AI invoice extraction
 
@@ -185,6 +220,8 @@ services/masters      Business partners, contacts, addresses, bank accounts, fab
 services/governance   Audit trail, approvals, notifications, documents
 services/procurement  Requisitions, RFQs, POs, receipts, supplier invoices, AI capture, three-way match, AP ledger, supplier portal
 services/jobwork      Process templates, rate cards, mill stock, job-work orders, stages, returns/yield, claims, mill portal
+services/inventory    Lots, rolls, stock ledger, inward/QC, price tags, putaway, reservations, transfers, stock counts, ageing
+services/crm          Lead sources and webhooks, duplicates, allocation, pipeline, quotations, credit, targets, customer 360
 apps/web              React web app (design system, ERP screens, supplier and mill portals)
 scripts               setup (DB + demo data, created through the APIs) and run (process launcher)
 tests                 Unit and end-to-end integration tests

@@ -8,7 +8,7 @@ be too fine to run on a single PC or operate with a small team.
 
 Each service:
 
-- owns its own PostgreSQL **schema** (`identity`, `organisation`, `masters`, `governance`, `procurement`, `jobwork`) and connects with
+- owns its own PostgreSQL **schema** (`identity`, `organisation`, `masters`, `governance`, `procurement`, `jobwork`, `inventory`, `crm`) and connects with
   `search_path` set to that schema only. No service reads another service’s tables;
 - runs its own migrations at start-up (`services/<name>/migrations/NNN_*.sql`);
 - exposes a REST API and runs as its own Node process (separate port);
@@ -24,6 +24,8 @@ Browser ──► gateway :4000 ──► /api/identity/*      identity :4101   
                           ├─► /api/governance/*    governance :4104    schema governance
                           ├─► /api/procurement/*   procurement :4105   schema procurement
                           ├─► /api/jobwork/*       jobwork :4106       schema jobwork
+                          ├─► /api/inventory/*     inventory :4107     schema inventory
+                          ├─► /api/crm/*           crm :4108           schema crm (+ public lead webhooks)
                           └─► / (web app, incl. supplier and mill portals)
                        services ⇄ bus.events / bus.offsets (PostgreSQL event bus)
 ```
@@ -35,8 +37,8 @@ Browser ──► gateway :4000 ──► /api/identity/*      identity :4101   
 | P1 ✅ | identity, organisation, masters, governance (+ gateway) |
 | P2 ✅ | procurement (requisition, RFQ, PO, receipts, supplier invoices, AI capture worker, three-way match, AP ledger, supplier portal) |
 | P3 ✅ | jobwork (process templates, rate engine, mill stock, job-work orders/challans, stages, returns/yield, claims, mill portal) |
-| P4 | inventory (lots, rolls, barcodes, immutable stock ledger, transfers, WMS) |
-| P5 | crm (leads, allocation, quotations, pricing approvals) |
+| P4 ✅ | inventory (lots, rolls, barcodes, immutable stock ledger, inward/QC, price tags, WMS, reservations, transfers, stock counts) |
+| P5 ✅ | crm (lead sources/webhooks, duplicates, allocation, pipeline, quotations, pricing and credit approvals, targets) |
 | P6 | commerce (catalogue, cart, token booking, ICICI gateway, customer portal) |
 | P7 | fulfilment (allocation engine, pick/pack, dispatch, transport, POD) |
 | P8 | accounting (double-entry GL, AP/AR, GST, TDS, bank reconciliation) |
@@ -66,9 +68,15 @@ Events in P1:
 | `approval.requested` | masters | governance → approval request + notification |
 | `approval.decided` | governance | masters → activates bank account / applies held change |
 | `notification.requested` | procurement, jobwork | governance → notification for the named users |
-| `procurement.receipt.recorded` | procurement (receipt at a mill) | jobwork → creates mill stock for the direct-to-mill material |
+| `procurement.receipt.recorded` | procurement | jobwork → mill stock (direct-to-mill receipts); inventory → an inward to weigh and scan (warehouse receipts) |
+| `jobwork.order.issued` | jobwork | inventory → rolls to issue to the mill (warehouse-sourced lines) |
+| `jobwork.return.recorded` | jobwork | inventory → consumes the grey rolls at the mill and opens an inward for the finished lot |
+| `inventory.price.changed` | inventory | (catalogue/commerce P6) |
+| `inventory.transfer.dispatched` | inventory | (accounting P8: inter-GSTIN supply) |
+| `inventory.reservation.picked` | inventory | (fulfilment P7) |
+| `crm.lead.created`, `crm.quotation.accepted` | crm | (sales orders P7, analytics P10) |
 | `procurement.invoice.posted` | procurement | (accounting GL in P8) |
-| `jobwork.order.issued` / `jobwork.return.recorded` / `jobwork.claim.accepted` | jobwork | (inventory P4, accounting P8) |
+| `jobwork.claim.accepted` | jobwork | (accounting P8) |
 | `<service>.<entity>.changed` | all | (future read-model caches) |
 
 ## Synchronous service-to-service calls
@@ -98,6 +106,24 @@ mill’s invoice to procurement’s `/captures/inbound`; uploaded files go to go
 - **Clocks.** Each job-work order stores the expected return date, an internal due date (expected − `internal_buffer_days`)
   and a statutory deadline (issue + `statutory_return_days`). An hourly automation raises alerts
   `statutory_alert_days` before the deadline and escalates when it passes.
+- **Stock ledger (P4).** `inventory.stock_movements` is append-only (triggers block UPDATE, DELETE and TRUNCATE).
+  Every change is a movement from one (warehouse, state) to another; `stock_balances` is a view that sums them.
+  The `rolls` table holds each roll's current position as a projection updated in the same transaction, and
+  `GET /inventory/ledger/verify` proves the two agree (the tests run it after every scenario). Weight-only changes
+  (splits, re-weighing) are flagged `moves_roll = false` so roll counts stay right.
+- **No double deduction.** Reservations, picks, transfers and issues lock the roll row (`FOR UPDATE`) and check its
+  state, so the same roll cannot be reserved, picked or loaded twice. Partial quantities are cut into a child roll
+  with its own barcode.
+- **Inter-GSTIN transfers.** Warehouses map to GST registrations. A transfer between different registrations
+  always needs approval and is dispatched on a document from the source GSTIN's number series (tax invoice by
+  default, configurable with the CA), with IGST or CGST+SGST from the state codes. Valuation is at lot cost.
+- **Lead allocation (P5).** `decide()` returns the owner plus a trace of every candidate and why they were skipped
+  (absent, leave, weekly off, break, inactive, at cap). Order: sticky owner of the same contact, then the first
+  matching rule's pool, else profile match. Round robin uses `last_assigned_at`; least-loaded uses open leads.
+- **Record ownership.** Salespeople see only leads and quotations they own (`owner_id` filter in SQL) unless
+  they hold `crm.lead.read_all`.
+- **Public webhooks.** `POST /api/crm/public/leads/<key>` is the only unauthenticated business endpoint. The key
+  identifies one source, can be rotated, and the source can be switched off.
 - **Portals.** Portal users are ordinary identity users with a `party_id` and a `portal.*` permission. Every portal
   query filters by that party id in SQL, so a supplier or mill can see only its own documents.
 

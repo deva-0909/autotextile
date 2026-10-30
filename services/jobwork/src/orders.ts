@@ -181,7 +181,9 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
       await c.query(`INSERT INTO stage_updates (job_order_id, stage_code, stage_name, status, note, source, by_name) VALUES ($1, 'ISSUED', 'Challan issued', 'completed', NULL, 'internal', $2)`, [o.id, req.user!.name]);
       for (const uid of await portalUsers(o.mill_id))
         await notify(c, S, { user_id: uid, kind: 'action', title: `Job-work challan ${o.number}`, body: 'Please acknowledge the material when it arrives.', link: `/portal/jobs/${o.id}` });
-      await publish(c, S, 'jobwork.order.issued', { job_order_id: o.id, number: o.number, mill_id: o.mill_id });
+      const whLines = await many<{ warehouse_id: string; product_id: string; sku: string; kg_sent: number }>(c, `SELECT warehouse_id, product_id, sku, kg_sent FROM job_order_lines WHERE job_order_id = $1 AND source = 'warehouse'`, [o.id]);
+      // Inventory (P4) asks the stores to scan these rolls out to the mill.
+      await publish(c, S, 'jobwork.order.issued', { job_order_id: o.id, number: o.number, mill_id: o.mill_id, mill_name: o.mill_name, warehouse_lines: whLines });
       await auditReq(c, req, 'job_order', o.id, 'issued', { after: { issue_date: issued } });
     });
     res.json({ ok: true });
@@ -262,7 +264,15 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
       if (rec.yield_pct !== null && rec.yield_pct < minYield)
         await raiseException(c, { kind: 'low_yield', severity: 'warning', ref_id: o.id, ref_label: `${o.number} · ${o.mill_name}`, message: `Yield ${rec.yield_pct}% on ${o.number} is below the ${minYield}% threshold — investigate process loss at ${o.mill_name}`, notifyPermission: 'jobwork.claim.manage', link: `/jobwork/orders/${o.id}` });
       // Inventory (P4) creates finished lots from this event.
-      await publish(c, S, 'jobwork.return.recorded', { job_order_id: o.id, number: o.number, return_id: ret!.id, warehouse_id: w.id, kg_good: b.kg_good, kg_rejected: b.kg_rejected, lot_ref: b.lot_ref ?? null, charge });
+      const products = await many<{ product_id: string; sku: string; product_name: string; kg_sent: number; grey_cost_per_kg: number | null }>(c, `
+        SELECT l.product_id, l.sku, l.product_name, sum(l.kg_sent)::float AS kg_sent,
+          sum(l.kg_sent * s.cost_per_kg) / nullif(sum(l.kg_sent) FILTER (WHERE s.cost_per_kg IS NOT NULL), 0) AS grey_cost_per_kg
+        FROM job_order_lines l LEFT JOIN mill_stock s ON s.id = l.mill_stock_id WHERE l.job_order_id = $1 GROUP BY l.product_id, l.sku, l.product_name ORDER BY min(l.line_no)`, [o.id]);
+      // Inventory (P4) receives the good kg as a new finished lot and consumes the grey rolls at the mill.
+      await publish(c, S, 'jobwork.return.recorded', {
+        job_order_id: o.id, number: o.number, return_id: ret!.id, return_date: b.return_date, mill_name: o.mill_name, process_code: o.process_code, warehouse_id: w.id, warehouse_name: `${w.code} · ${w.name}`,
+        kg_good: b.kg_good, kg_rejected: b.kg_rejected, kg_consumed: thisTotal, rolls: b.rolls ?? null, lot_ref: b.lot_ref ?? null, charge, products,
+      });
       await auditReq(c, req, 'job_order', o.id, 'return_recorded', { after: { ...b, charge }, reason: b.loss_reason });
       return { ...ret, reconciliation: rec };
     });
@@ -340,14 +350,14 @@ export const stageBody = z.object({
 export function receiptConsumer() {
   return async (ev: BusEvent, c: Client) => {
     const p = ev.payload as { receipt_id: string; receipt_number: string; po_id: string; po_number: string; receipt_type: string; location_id: string; location_name: string; supplier_name: string; receipt_date: string;
-      lines: { product_id: string; sku: string; product_name: string; accepted_kg: number; rolls: number | null }[] };
+      lines: { product_id: string; sku: string; product_name: string; accepted_kg: number; rolls: number | null; rate_per_kg?: number }[] };
     if (p.receipt_type !== 'mill') return;
     for (const l of p.lines) {
       if (l.accepted_kg <= 0) continue;
       await c.query(`
-        INSERT INTO mill_stock (mill_id, mill_name, source_type, source_ref, receipt_id, po_id, po_number, supplier_name, product_id, sku, product_name, kg_in, rolls, received_date)
-        VALUES ($1, $2, 'po_receipt', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) ON CONFLICT (receipt_id, product_id) DO NOTHING`,
-        [p.location_id, p.location_name.replace(/^[A-Z]{3}-\d+ · /, ''), p.receipt_number, p.receipt_id, p.po_id, p.po_number, p.supplier_name, l.product_id, l.sku, l.product_name, l.accepted_kg, l.rolls, p.receipt_date]);
+        INSERT INTO mill_stock (mill_id, mill_name, source_type, source_ref, receipt_id, po_id, po_number, supplier_name, product_id, sku, product_name, kg_in, rolls, received_date, cost_per_kg)
+        VALUES ($1, $2, 'po_receipt', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) ON CONFLICT (receipt_id, product_id) DO NOTHING`,
+        [p.location_id, p.location_name.replace(/^[A-Z]{3}-\d+ · /, ''), p.receipt_number, p.receipt_id, p.po_id, p.po_number, p.supplier_name, l.product_id, l.sku, l.product_name, l.accepted_kg, l.rolls, p.receipt_date, l.rate_per_kg ?? null]);
     }
   };
 }

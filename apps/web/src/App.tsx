@@ -26,6 +26,17 @@ import { JobworkCockpit } from './pages/jobwork/Cockpit';
 import { JobOrderDetailPage, JobOrdersPage } from './pages/jobwork/Orders';
 import { MillDetailPage, MillsPage } from './pages/jobwork/Mills';
 import { ClaimsPage } from './pages/jobwork/Claims';
+import { InventoryOverview } from './pages/inventory/Overview';
+import { InwardDetailPage, InwardsPage } from './pages/inventory/Inward';
+import { QcPage, ScanStationPage } from './pages/inventory/Qc';
+import { LotDetailPage, LotsPage, PricingPage, WarehouseMapPage } from './pages/inventory/Lots';
+import { StockPage } from './pages/inventory/Stock';
+import { TransferDetailPage, TransfersPage } from './pages/inventory/Transfers';
+import { MillIssuesPage, ReservationsPage, StocktakeDetailPage, StocktakesPage } from './pages/inventory/Operations';
+import { LeadDetailPage, LeadsPage } from './pages/crm/Leads';
+import { AllocationPage } from './pages/crm/Allocation';
+import { PriceApprovalsPage, QuotationBuilderPage, QuotationDetailPage, QuotationsPage } from './pages/crm/Quotations';
+import { CreditDetailPage, CreditPage, Customer360Page, CustomersPage, CrmDashboard, PerformancePage } from './pages/crm/Customers';
 import { MillClaims, MillHome, MillJob, MillJobs, PortalLayout, SupplierHome, SupplierOrder } from './pages/portal/Portal';
 import type { ReactNode } from 'react';
 
@@ -112,6 +123,36 @@ export default function App() {
         <Route path="/jobwork/mills/:id" element={<Guard perms={['jobwork.read']}><MillDetailPage /></Guard>} />
         <Route path="/jobwork/claims" element={<Guard perms={['jobwork.read']}><ClaimsPage /></Guard>} />
         <Route path="/jobwork/claims/:id" element={<Navigate to="/jobwork/claims" replace />} />
+        <Route path="/inventory" element={<Guard perms={['inventory.read']}><InventoryOverview /></Guard>} />
+        <Route path="/inventory/scan" element={<Guard perms={['inventory.read']}><ScanStationPage /></Guard>} />
+        <Route path="/inventory/inward" element={<Guard perms={['inventory.read']}><InwardsPage /></Guard>} />
+        <Route path="/inventory/inward/:id" element={<Guard perms={['inventory.read']}><InwardDetailPage /></Guard>} />
+        <Route path="/inventory/qc" element={<Guard perms={['inventory.read']}><QcPage /></Guard>} />
+        <Route path="/inventory/lots" element={<Guard perms={['inventory.read']}><LotsPage /></Guard>} />
+        <Route path="/inventory/lots/:id" element={<Guard perms={['inventory.read']}><LotDetailPage /></Guard>} />
+        <Route path="/inventory/pricing" element={<Guard perms={['inventory.read']}><PricingPage /></Guard>} />
+        <Route path="/inventory/map" element={<Guard perms={['inventory.read']}><WarehouseMapPage /></Guard>} />
+        <Route path="/inventory/stock" element={<Guard perms={['inventory.read']}><StockPage /></Guard>} />
+        <Route path="/inventory/transfers" element={<Guard perms={['inventory.read']}><TransfersPage /></Guard>} />
+        <Route path="/inventory/transfers/:id" element={<Guard perms={['inventory.read']}><TransferDetailPage /></Guard>} />
+        <Route path="/inventory/stocktakes" element={<Guard perms={['inventory.read']}><StocktakesPage /></Guard>} />
+        <Route path="/inventory/stocktakes/:id" element={<Guard perms={['inventory.read']}><StocktakeDetailPage /></Guard>} />
+        <Route path="/inventory/reservations" element={<Guard perms={['inventory.read']}><ReservationsPage /></Guard>} />
+        <Route path="/inventory/mill-issues" element={<Guard perms={['inventory.read']}><MillIssuesPage /></Guard>} />
+        <Route path="/crm" element={<Guard perms={['crm.read']}><CrmDashboard /></Guard>} />
+        <Route path="/crm/leads" element={<Guard perms={['crm.read']}><LeadsPage /></Guard>} />
+        <Route path="/crm/leads/:id" element={<Guard perms={['crm.read']}><LeadDetailPage /></Guard>} />
+        <Route path="/crm/allocation" element={<Guard perms={['crm.read']}><AllocationPage /></Guard>} />
+        <Route path="/crm/customers" element={<Guard perms={['crm.read']}><CustomersPage /></Guard>} />
+        <Route path="/crm/customers/:id" element={<Guard perms={['crm.read']}><Customer360Page /></Guard>} />
+        <Route path="/crm/quotations" element={<Guard perms={['crm.read']}><QuotationsPage /></Guard>} />
+        <Route path="/crm/quotations/new" element={<Guard perms={['crm.quote.manage']}><QuotationBuilderPage /></Guard>} />
+        <Route path="/crm/quotations/:id" element={<Guard perms={['crm.read']}><QuotationDetailPage /></Guard>} />
+        <Route path="/crm/quotations/:id/edit" element={<Guard perms={['crm.quote.manage']}><QuotationBuilderPage /></Guard>} />
+        <Route path="/crm/price-approvals" element={<Guard perms={['crm.read']}><PriceApprovalsPage /></Guard>} />
+        <Route path="/crm/credit" element={<Guard perms={['crm.read']}><CreditPage /></Guard>} />
+        <Route path="/crm/credit/:id" element={<Guard perms={['crm.read']}><CreditDetailPage /></Guard>} />
+        <Route path="/crm/performance" element={<Guard perms={['crm.read']}><PerformancePage /></Guard>} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/programme" element={<ProgrammePage />} />
         <Route path="/roadmap/:phase" element={<RoadmapPage />} />

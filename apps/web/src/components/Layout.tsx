@@ -36,7 +36,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 <NavLink
                   key={i.to}
                   to={i.to}
-                  end={i.to === '/'}
+                  end={i.to === '/' || ALL_ITEMS.some((x) => x.to.startsWith(`${i.to}/`))}
                   onClick={onNavigate}
                   className={({ isActive }) =>
                     clsx(
@@ -58,7 +58,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
       </nav>
-      <div className="border-t border-nav-800 px-5 py-3 text-[11px] text-slate-500">Releases P1–P3 · Foundation, procurement, job work</div>
+      <div className="border-t border-nav-800 px-5 py-3 text-[11px] text-slate-500">Releases P1–P5 · Foundation, procurement, job work, inventory, sales</div>
     </div>
   );
 }

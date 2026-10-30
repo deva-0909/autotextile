@@ -174,6 +174,12 @@ const STATUS: Record<string, [Tone, string]> = {
   issued: ['info', 'Issued'], acknowledged: ['violet', 'At mill'], in_process: ['brand', 'In process'], ready: ['success', 'Ready to collect'], partially_returned: ['warning', 'Partly returned'], returned: ['success', 'Returned'],
   under_review: ['warning', 'Under review'], resolved: ['success', 'Resolved'], dismissed: ['neutral', 'Dismissed'],
   info: ['info', 'Info'], warning: ['warning', 'Warning'], critical: ['danger', 'Critical'],
+  qc_hold: ['warning', 'QC hold'], available: ['success', 'Available'], reserved: ['violet', 'Reserved'], allocated: ['brand', 'Allocated'], in_transit: ['info', 'In transit'],
+  at_mill: ['violet', 'At mill'], damaged: ['danger', 'Damaged'], dispatched: ['neutral', 'Dispatched'], consumed: ['neutral', 'Consumed'], written_off: ['danger', 'Written off'],
+  passed: ['success', 'QC passed'], partial: ['warning', 'Partly passed'], completed: ['success', 'Completed'], counting: ['info', 'Counting'], picked: ['success', 'Picked'], expired: ['neutral', 'Expired'],
+  superseded: ['neutral', 'Superseded'], used: ['neutral', 'Used'], rejected_internal: ['danger', 'Price rejected'], lost: ['danger', 'Lost'], won: ['success', 'Won'], merged: ['neutral', 'Merged'],
+  new: ['info', 'New'], assigned: ['brand', 'Assigned'], contact_pending: ['warning', 'Contact pending'], contacted: ['brand', 'Contacted'], qualified: ['violet', 'Qualified'], quotation: ['info', 'Quotation'],
+  negotiation: ['warning', 'Negotiation'], order_confirmed: ['success', 'Order confirmed'], nurture: ['neutral', 'Nurture'], missing: ['danger', 'Missing'],
 };
 export function StatusBadge({ status }: { status: string }) {
   const [tone, label] = STATUS[status] ?? ['neutral', status.replace(/_/g, ' ')];

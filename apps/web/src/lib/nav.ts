@@ -1,4 +1,5 @@
 import {
+  ArrowRightLeft, BadgeIndianRupee, CircleDollarSign, ClipboardPen, Contact, Inbox, Map as MapIcon, PackageCheck, PackageOpen, ScanLine, Shuffle, Tag, Target,
   AlarmClock, Banknote, BookMarked, Boxes, Building2, ClipboardCheck, ClipboardList, Cog, Factory, FileSearch, FileStack, Gauge, History, KeyRound, Layers,
   LayoutDashboard, LineChart, Medal, Package, Receipt, Rocket, ScanText, ShieldAlert, ShieldCheck, ShoppingCart, Sparkles, Truck, UserCog, Users, Warehouse,
   Workflow, type LucideIcon,
@@ -54,6 +55,36 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
+    label: 'Inventory & warehouse',
+    items: [
+      { to: '/inventory', label: 'Overview', icon: Boxes, perms: ['inventory.read'] },
+      { to: '/inventory/scan', label: 'Scan station', icon: ScanLine, perms: ['inventory.read'] },
+      { to: '/inventory/inward', label: 'Inward', icon: PackageOpen, perms: ['inventory.read'] },
+      { to: '/inventory/qc', label: 'Quality inspection', icon: ClipboardCheck, perms: ['inventory.read'] },
+      { to: '/inventory/lots', label: 'Lots & rolls', icon: Package, perms: ['inventory.read'] },
+      { to: '/inventory/pricing', label: 'Price tagging', icon: Tag, perms: ['inventory.read'] },
+      { to: '/inventory/stock', label: 'Stock & ledger', icon: Layers, perms: ['inventory.read'] },
+      { to: '/inventory/map', label: 'Warehouse map', icon: MapIcon, perms: ['inventory.read'] },
+      { to: '/inventory/reservations', label: 'Reservations', icon: PackageCheck, perms: ['inventory.read'] },
+      { to: '/inventory/transfers', label: 'Transfers', icon: ArrowRightLeft, perms: ['inventory.read'] },
+      { to: '/inventory/mill-issues', label: 'Issue to mill', icon: Factory, perms: ['inventory.read'] },
+      { to: '/inventory/stocktakes', label: 'Stock counts', icon: ClipboardPen, perms: ['inventory.read'] },
+    ],
+  },
+  {
+    label: 'Sales & CRM',
+    items: [
+      { to: '/crm', label: 'Sales overview', icon: LineChart, perms: ['crm.read'] },
+      { to: '/crm/leads', label: 'Lead inbox', icon: Inbox, perms: ['crm.read'] },
+      { to: '/crm/customers', label: 'Customers', icon: Contact, perms: ['crm.read'] },
+      { to: '/crm/quotations', label: 'Quotations', icon: FileStack, perms: ['crm.read'] },
+      { to: '/crm/price-approvals', label: 'Price approvals', icon: BadgeIndianRupee, perms: ['crm.price.approve', 'crm.lead.read_all'] },
+      { to: '/crm/credit', label: 'Customer credit', icon: CircleDollarSign, perms: ['crm.read'] },
+      { to: '/crm/allocation', label: 'Lead allocation', icon: Shuffle, perms: ['crm.read'] },
+      { to: '/crm/performance', label: 'Targets & performance', icon: Target, perms: ['crm.read'] },
+    ],
+  },
+  {
     label: 'Security & governance',
     items: [
       { to: '/security/users', label: 'Users', icon: UserCog, perms: ['identity.user.read'] },
@@ -66,8 +97,6 @@ export const NAV: NavGroup[] = [
   {
     label: 'Coming next',
     items: [
-      { to: '/roadmap/P4', label: 'Inventory & WMS', icon: Boxes, phase: 'P4' },
-      { to: '/roadmap/P5', label: 'CRM & sales', icon: LineChart, phase: 'P5' },
       { to: '/roadmap/P6', label: 'B2B commerce', icon: Layers, phase: 'P6' },
       { to: '/roadmap/P7', label: 'Dispatch & transport', icon: Truck, phase: 'P7' },
       { to: '/roadmap/P8', label: 'Accounting & GST', icon: Banknote, phase: 'P8' },

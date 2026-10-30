@@ -9,9 +9,11 @@ import { mastersService } from '../services/masters/src/service.ts';
 import { governanceService } from '../services/governance/src/service.ts';
 import { procurementService } from '../services/procurement/src/service.ts';
 import { jobworkService } from '../services/jobwork/src/service.ts';
+import { inventoryService } from '../services/inventory/src/service.ts';
+import { crmService } from '../services/crm/src/service.ts';
 import { createGateway } from '../services/gateway/src/app.ts';
 import { hashPassword } from '../services/identity/src/security.ts';
-import { DEMO_PASSWORD, linkPortalUsers, seedMasters, seedOrganisation, seedUsers } from '../scripts/seed-data.ts';
+import { DEMO_PASSWORD, linkPortalUsers, seedMasters, seedOrganisation, seedSalesTeam, seedUsers } from '../scripts/seed-data.ts';
 
 export async function bootAll(dbSuffix: string) {
   const base = new URL(config.databaseUrl());
@@ -26,7 +28,7 @@ export async function bootAll(dbSuffix: string) {
   await c0.end();
 
   const services: RunningService[] = [];
-  for (const def of [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService])
+  for (const def of [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService, inventoryService, crmService])
     services.push(await bootService(def, { databaseUrl: testUrl.toString(), pollMs: 100 }));
   const svc = (n: ServiceName) => services.find((s) => s.ctx.name === n)!;
   await syncRoles(svc('identity').ctx.pool);
@@ -36,6 +38,7 @@ export async function bootAll(dbSuffix: string) {
     const ids = await seedUsers(c, org, await hashPassword(DEMO_PASSWORD));
     parties = await seedMasters(c, ids['sales@textile.local']!);
     await linkPortalUsers(c, parties);
+    await seedSalesTeam(c, ids);
   });
   const ports: Partial<Record<ServiceName, number>> = {};
   const servers: { close: () => void; closeAllConnections: () => void }[] = [];

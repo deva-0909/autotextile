@@ -1,4 +1,4 @@
-# Requirement traceability — releases P1–P3
+# Requirement traceability — releases P1–P5
 
 Source: *Textile_Trading_ERP_Development_and_Figma_Tracker.xlsx*, Requirements and Figma Screens sheets.
 Statuses:
@@ -55,6 +55,36 @@ Statuses:
 | REQ-0027 | Commercial, operational and statutory clocks | **Built / partial** | Three separate dates per order, cockpit, alerts before and escalation after | The statutory period is a setting with a placeholder value; the CA must confirm it |
 | REQ-0028 | Mill QC and disputes | **Built / partial** | Defects, affected kg, photos, root cause, responsibility, debit/credit amount, mill response, closure | Debit/credit notes post to accounts in P8 |
 
+## P4 — Inventory, barcode, warehouse management & transfers
+
+| ID | Requirement | Status | Implementation | Remaining (phase) |
+|---|---|---|---|---|
+| REQ-0029 | Lot and roll barcode hierarchy | **Built / partial** | Lot → rolls, each with a barcode; partial quantities are cut into child rolls so nothing is deducted twice; labels with QR codes printed from the browser | Labels carry a QR code only; Code 128 (1-D) labels for 1-D-only scanners still to add |
+| REQ-0030 | Warehouse inward and QC | **Built / partial** | Inwards from goods receipts, mill returns and opening stock; weigh and scan per roll; GSM, width, shade, dye lot; grade A/B/C/reject; out-of-spec flags; putaway from the receiving bay | Weighing-scale integration (weights are typed or come from a keyboard-wedge scale) |
+| REQ-0031 | Selling price tagging | **Built / partial** | Price per kg per lot; first price direct, changes and below-margin prices approved by a checker; full history | Roll-level price overrides |
+| REQ-0032 | Immutable movement-based inventory | **Built / partial** | Append-only ledger; balances derived only from movements; physical, available, reserved, allocated, in transit, at mill, QC hold, damaged, rejected; ledger ↔ roll reconciliation check | Allocation to sales orders and customer returns arrive with fulfilment (P7) |
+| REQ-0033 | Warehouse locations and operations | **Built / partial** | Zones/aisles/racks/bins with receiving, QC, staging and damaged areas; directed putaway; warehouse map; cycle counts by area; pick by scan against a reservation | Optimised pick paths, batch and zone picking (P7) |
+| REQ-0034 | Inter-warehouse transfer | **Built** | Request, approval, scan dispatch, LR/transporter/vehicle/e-way bill number, in transit, destination scan receipt with re-weigh, shortages written off with an exception, closure | E-way bill is entered, not generated (GSP integration later) |
+| REQ-0035 | Distinct GST registration transfer | **Built / partial** | Inter-GSTIN transfers always need approval and go on a tax invoice from the source GSTIN series with IGST or CGST+SGST; event for accounting | Valuation basis and document type must be confirmed by the CA (configurable); accounting entries in P8; e-invoice IRN not generated |
+| REQ-0036 | Physical verification and adjustment | **Built** | Barcode count per warehouse or area; missing, found, mis-located and weight variances; reason; maker-checker approval; ledger adjustments referenced to the count | — |
+| REQ-0037 | Shade and fabric compatibility | **Built / partial** | Shade and dye-lot groups; mixing blocked without a reason (configurable to warn); customer shade acceptance/rejection enforced on reservations | Customer shade claims arrive with customer care (P7); mill shade claims are in P3 |
+| REQ-0038 | Inventory ageing and slow stock | **Built** | Configurable buckets (0–30 … >365), slow and dead stock, value at cost, clearance recommendation | — |
+
+## P5 — CRM, sales team, quotation & commercial controls
+
+| ID | Requirement | Status | Implementation | Remaining (phase) |
+|---|---|---|---|---|
+| REQ-0039 | Dynamic lead source integration | **Built / partial** | Configurable sources with private webhook URLs and JSON field maps (IndiaMART, Meta, Justdial, website, WhatsApp seeded), CSV import with column mapping, manual entry | Each platform’s own push setup (Meta app/connector, WhatsApp Business API, IndiaMART CRM key) is configured on their side |
+| REQ-0040 | Duplicate detection and merge | **Built** | Mobile, email and GSTIN against open leads and customers; merge, link, keep separate, escalate; merged leads stay readable; audited | — |
+| REQ-0041 | Round robin and rule-based allocation | **Built / partial** | Rules by city, state, source, fabric category, language and value; round robin or least-loaded; manual assignment and reassignment history; sticky owner for repeat contacts | “Specialisation” is stored on the profile but not yet a matching criterion |
+| REQ-0042 | Attendance-aware allocation | **Built / partial** | Skips absent, leave, weekly off, break, inactive and capped people; trace per lead; waiting leads retried automatically | Attendance is marked in CRM until HRMS (P9) feeds it |
+| REQ-0043 | Lead pipeline and next action | **Built** | Stages as specified; no open lead without a next follow-up; lost/nurture need a reason; first-response SLA and overdue follow-up alerts | — |
+| REQ-0044 | Unified customer timeline | **Built / partial** | Enquiries, quotations, prices, preferences, credit, salesperson, value, shade decisions, reservations, activity timeline | Orders, dispatch, payments/outstanding and complaints arrive with P7/P8 |
+| REQ-0045 | Quotation versioning and follow-up | **Built** | Versions with validity, lot, kg, price, taxes, freight, terms, negotiation history, competitor price and lost reason; expiry automation | PDF quotation document and sending by email/WhatsApp (P9 notifications) |
+| REQ-0046 | Negotiated pricing and margin approval | **Built** | List, requested, discount, cost, margin, approver and reason kept per line; per-salesperson discount authority; below-minimum margin blocked without approval | Customer-specific price lists |
+| REQ-0047 | Advance and credit by approval | **Built / partial** | Advance by default; credit limit and days, one-time overrides and blocks by a checker; exposure check on order acceptance | Outstanding, ageing and the overdue hold use accounts receivable (P8) |
+| REQ-0048 | Targets and incentives | **Built / partial** | Monthly targets; leads, response time, qualified, quotes, kg, revenue, margin, new/repeat customers from verified outcomes; incentive eligibility | Collections (P8); incentive slabs and payout calculation |
+
 ### Known gaps
 
 - **MFA is optional per user.** The setting *Require MFA for privileged users* exists, but the login does not force enrolment yet.
@@ -85,7 +115,23 @@ Statuses:
 | FIG-019 | Process stage update | `/portal/jobs/:id` (mill user) |
 | FIG-020 | Return inward and yield reconciliation | `/jobwork/orders/:id` |
 | FIG-021 | Overdue and statutory deadline cockpit | `/jobwork` |
-| extra | Approvals inbox, document library, configuration, programme tracker, claims | `/approvals`, `/governance/documents`, `/organisation/configuration`, `/programme`, `/jobwork/claims` |
+| FIG-022 | Barcode scan and inward (warehouse app) | `/inventory/scan`, `/inventory/inward/:id` |
+| FIG-023 | Lot and roll genealogy | `/inventory/lots/:id` |
+| FIG-024 | Quality inspection and grade | `/inventory/qc` |
+| FIG-025 | Price tagging and approval | `/inventory/pricing` |
+| FIG-026 | Warehouse map and putaway | `/inventory/map`, `/inventory/scan` |
+| FIG-027 | Stock ledger and availability | `/inventory/stock` |
+| FIG-028 | Transfer request and approval | `/inventory/transfers` |
+| FIG-029 | Transfer dispatch and destination receipt | `/inventory/transfers/:id` |
+| FIG-030 | Stocktake and variance approval | `/inventory/stocktakes/:id` |
+| FIG-031 | Lead inbox and source integration | `/crm/leads`, `/crm/allocation?tab=sources` |
+| FIG-032 | Lead profile and activity timeline | `/crm/leads/:id` |
+| FIG-033 | Lead allocation rules and attendance view | `/crm/allocation` |
+| FIG-034 | Customer 360 profile | `/crm/customers/:id` |
+| FIG-035 | Quotation builder and version history | `/crm/quotations/new`, `/crm/quotations/:id` |
+| FIG-036 | Price negotiation and approval | `/crm/price-approvals` |
+| FIG-037 | Customer credit application and limit | `/crm/credit`, `/crm/credit/:id` |
+| extra | Approvals inbox, document library, configuration, programme tracker, claims, reservations, issue to mill, sales dashboard, targets | `/approvals`, `/governance/documents`, `/organisation/configuration`, `/programme`, `/jobwork/claims`, `/inventory/reservations`, `/inventory/mill-issues`, `/crm`, `/crm/performance` |
 
 ## Acceptance tests (tracker sheet) touched by P1
 
@@ -119,3 +165,22 @@ The P2/P3 end-to-end tests (`tests/p2p3.integration.test.ts`) cover:
 - the job-work cycle: allocation, mill acknowledgement, stages, return, yield and claims;
 - deadline clocks and overdue automation;
 - portal and role isolation (a portal user or a sales user gets 403 outside their remit).
+
+The P4/P5 end-to-end tests (`tests/p4p5.integration.test.ts`) cover:
+- goods receipt → inward → weighing and scanning rolls with labels; QC grading with spec flags; directed putaway;
+- price tagging with approval and history;
+- reservations that cut rolls to size, refuse double-booking and duplicate picks;
+- shade mixing and customer shade rejections;
+- an inter-GSTIN transfer (approval, tax invoice number, IGST, scan dispatch and receipt, re-weigh) and warehouse data scope;
+- a stock count with missing and re-weighed rolls, approval, and ledger adjustments;
+- issue to mill by scan and the processed return creating a finished lot with genealogy and yield-adjusted cost;
+- the append-only ledger and the ledger ↔ roll reconciliation after every scenario;
+- allocation by rule, attendance and cap, with the trace; record ownership for salespeople;
+- webhook capture (field map, idempotency, duplicates, merge) and CSV import;
+- the pipeline rules; quotation pricing, approval and versioning; credit limit, override, block and acceptance with stock reservation;
+- customer 360 and performance from verified outcomes.
+
+### Known P4/P5 gaps (also listed in the tables above)
+
+- The inventory dashboard totals are company-wide; lists and actions respect warehouse data scope.
+- Barcode labels are QR codes; add Code 128 labels if the stores use 1-D-only scanners.
