@@ -1,96 +1,143 @@
-# AutoTextile — Textile Process Automation
+# Textile Trading ERP
 
-Order-to-dispatch production automation for a woven-fabric mill. It plans lots, schedules machines,
-issues dyes and chemicals, runs 4-point QC, and raises alerts, all from one local app.
+ERP for a B2B knitted-fabric trading business: manufacturer → mill processing → warehouse → customer.
+It is built phase by phase from the *Developer Brief & Functional Specification v1.0* and the
+*Development & Figma Tracker*. This release delivers **P1 — Core masters, security, organisation &
+platform foundation**, the base every later module builds on.
 
-```
-Warping → Sizing → Weaving → Desizing & Scouring → Dyeing → Stenter Finishing → QC Inspection → Packing → Dispatch
-```
-
-![Dashboard](docs/dashboard.png)
-
-## What the automation engine does
-
-| Rule | Behaviour |
+| | |
 |---|---|
-| **Lot planning** | A new order is split into lots of up to 1,500 m and queued at warping. |
-| **Auto-scheduling** | Whenever a machine is free, it picks the next queued lot for its stage: urgent priority first, then earliest due date, then FIFO. |
-| **Routing** | Completing a stage moves the lot to the next process. Undyed orders skip dyeing. |
-| **Dye-house issue** | When a lot starts dyeing, recipe quantities are calculated (`% owf` from fabric weight, `g/L` from liquor ratio) and deducted from stock. |
-| **Shortage hold** | If any dye or chemical is short, the lot is held and a critical alert is raised. Receiving stock releases held lots automatically. |
-| **Process loss** | Loss above each stage's limit (e.g. 2 % at dyeing) raises an alert. |
-| **4-point QC** | Points per 100 sq yd = points × 3600 ÷ (yards × width in inches). ≤ 40 passes to packing; the first failure goes back to finishing for rework; a second failure rejects the lot. |
-| **Due-date risk** | Every 15 s, remaining machine-hours are compared with the time left; at-risk and overdue orders are flagged. |
-| **Low stock** | Items at or below reorder level raise an alert. |
-| **Order closure** | An order completes when all of its lots are dispatched or rejected. |
+| **Architecture** | Domain microservices behind an API gateway, PostgreSQL (schema per service), Postgres-backed event bus |
+| **Services in this release** | `identity` · `organisation` · `masters` · `governance` · `gateway` |
+| **Web app** | React 19 + TypeScript + Tailwind CSS, served by the gateway |
+| **Runs on** | Windows, macOS or Linux — Node.js and PostgreSQL only, no Docker needed |
 
-## Screens
+See [docs/architecture.md](docs/architecture.md) for the design and
+[docs/traceability.md](docs/traceability.md) for requirement-by-requirement status.
 
-Dashboard (KPIs, WIP by stage, machines, alerts) · Production floor (machine and queue board per stage) ·
-Orders and order detail (lot progress, process history, losses) · QC inspection entry with live pass/fail ·
-Inventory with goods receipt · Dye recipes and batch consumption calculator · Alerts.
+## What’s in P1
 
-The sidebar has a **simulation** that completes every running stage with realistic losses and defects,
-so you can watch the plant run a shift.
+- **Sign-in and security:** login, TOTP two-step verification (MFA), lockout after 5 failed attempts, password policy and reset, rotating refresh sessions, and login history.
+- **Users and roles:** the 22 baseline roles from the brief and an editable permission matrix.
+- **Data scope:** each user is limited by legal entity, GSTIN, branch and warehouse.
+- **Organisation:** Legal entity → GST registration → branch → warehouse → zone/aisle/rack/bin.
+  - GSTIN checksum and PAN validation.
+  - Surat-first dispatch priority.
+  - GSTIN-wise document numbering (16-character limit enforced).
+  - Fiscal years.
+  - Configurable business rules, with CA-validation flags.
+- **Master data:**
+  - Customers, suppliers, manufacturers, mills and transporters, with contacts, addresses and bank accounts.
+  - Duplicate detection on GSTIN, phone and email.
+  - A fabric catalogue whose attribute dictionary is configurable per category (product, lot and roll level).
+  - HSN/GST codes, UOM, payment terms, reason codes, document types and price lists.
+- **Governance:**
+  - Maker-checker approvals for bank accounts, GSTIN, legal name and credit-limit changes.
+  - An append-only audit trail (database-enforced) with before/after values, reason, approver, IP and session.
+  - Notifications.
+  - A document store with versions, SHA-256 fingerprints and content-type checks.
+- **Programme tracker:** every phase, requirement and screen from the Excel tracker, with its status.
 
-![Production floor](docs/production-floor.png)
+## Run it on Windows (no Docker)
 
-## Run locally
+### 1. Install the prerequisites (one time)
 
-Requires **Node.js 22.18 or newer** (Node runs the TypeScript server directly) (it uses Node's built-in SQLite, so there's no database to install).
+1. **Node.js 22.18 or newer** (Node 24 LTS recommended): https://nodejs.org. Check it with:
+   ```bash
+   node -v
+   ```
+2. **PostgreSQL 16 or 17**: https://www.postgresql.org/download/windows/ (the EDB installer).
+   During setup, keep port **5432** and choose a password for the `postgres` user. Remember it.
+   The installer adds a Windows service that starts PostgreSQL automatically. You don’t need Stack Builder.
+3. **Git**: https://git-scm.com/download/win
+
+### 2. Get the code and configure it
 
 ```bash
 git clone https://github.com/deva-0909/autotextile.git
-cd autotextile
-npm install
-npm run dev
 ```
 
-Open http://localhost:5173. The API runs on http://localhost:4000.
+```bash
+cd autotextile
+```
 
-**Quickest way (no build tools needed):** a pre-built copy of the UI is committed in `client/dist`, so
+```bash
+copy .env.example .env
+```
+
+Open `.env` in Notepad and put your PostgreSQL password into `DATABASE_URL`:
+
+```
+DATABASE_URL=postgres://postgres:YOUR_PASSWORD@localhost:5432/textile_erp
+```
+
+(If the password contains `@`, `:` or `/`, write it URL-encoded, e.g. `@` → `%40`.)
+
+### 3. Install, set up the database, start
 
 ```bash
 npm install
+```
+
+```bash
+npm run setup
+```
+
+```bash
 npm start
 ```
 
-serves the whole app from plain Node at http://localhost:4000. Use this if `npm run dev` fails on your
-machine (for example esbuild crashing with "out of memory"). After changing client code, run
-`npm run build` to refresh `client/dist`. On first start the database
-(`server/data/textile.db`) is created and loaded with demo machines, stock, recipes and orders.
+`npm run setup` creates the `textile_erp` database, runs every service’s migrations and loads demo data.
+`npm start` launches the four services and the gateway in one window. Open **http://localhost:4000**.
 
-| Command | Purpose |
+Demo users all share the password `Textile@2026`:
+
+| Email | Role | Shows |
+|---|---|---|
+| `admin@textile.local` | Super Admin | everything |
+| `owner@textile.local` | Owner / Director | approvals, read-only everywhere |
+| `purchase@textile.local` | Purchase Manager | suppliers & mills, masked bank numbers, maker side of approvals |
+| `surat.stores@textile.local` | Warehouse Manager | data scope limited to the Surat warehouse and GSTIN |
+| `accounts@textile.local` | Accounts Manager | reference data, full bank numbers |
+| `sales@textile.local` | Sales Executive | customers only |
+| `auditor@textile.local` | Auditor / CA | read-only, including the audit trail |
+
+A good first tour: sign in as **purchase**, open a supplier → *Bank accounts* → request a new account.
+Sign out, sign in as **admin** → *Approvals* → approve it, then look at the *Audit trail*.
+
+### Everyday commands
+
+| Command | What it does |
 |---|---|
-| `npm run dev` | API + UI with hot reload |
-| `npm run build && npm start` | Production build served from one port (http://localhost:4000) |
-| `npm test` | Automation-engine tests |
-| `npm run seed` | Reset the database to fresh demo data |
-| `npm run typecheck` | Type-check server and client |
+| `npm start` | Start everything (Ctrl+C stops it) |
+| `npm run dev` | Same, restarting a service when its code changes |
+| `npm run setup -- --reset` | Drop the database and reload fresh demo data |
+| `npm test` | Unit + end-to-end tests (uses a separate `textile_erp_test` database) |
+| `npm run typecheck` | Type-check every service and the web app |
+| `npm run dev:web` | Web app with hot reload on http://localhost:5173 (needs `npm start` running) |
+| `npm run build` | Rebuild the web app into `apps/web/dist` |
 
-Environment variables (optional): `PORT` (default 4000), `DB_FILE`, `AUTOMATION_INTERVAL_MS` (default 15000).
+The built web app is committed, so `npm start` works without running the Vite build tool.
+That matters on low-memory PCs where Vite’s esbuild can crash.
 
-> Node prints `ExperimentalWarning: SQLite is an experimental feature` on start. It is harmless.
+### Troubleshooting
 
-## Project layout
+- **`Cannot connect to PostgreSQL … ECONNREFUSED`.** PostgreSQL isn’t running. Open *Services*, find `postgresql-x64-16` (or 17) and start it.
+- **`Wrong password`.** Fix `DATABASE_URL` in `.env`.
+- **`The identity service is not reachable`** in the browser. One service failed to start; scroll up in the terminal for the error.
+- **Port already in use.** Change `GATEWAY_PORT` (or a service port) in `.env`.
+
+## Repository layout
 
 ```
-server/            Express API (TypeScript, run directly by Node)
-  src/automation.ts  scheduling, routing, dye issue, QC routing, alerts, simulation
-  src/stages.ts      process route and loss limits
-  src/qc.ts          4-point inspection maths
-  src/recipes.ts     dye recipe consumption
-  src/app.ts         REST endpoints (/api/...)
-  src/seed.ts        demo data
-  test/              node:test suite
-client/            React + Vite UI
+packages/platform     Shared service kit: config, DB, migrations, auth/RBAC/scope, event bus, audit, validation
+services/gateway      Single entry point: routes /api/<service>/*, login rate limit, security headers, serves the web app
+services/identity     Users, roles, permission matrix, data scope, sessions, MFA, login history
+services/organisation Legal entities, GST registrations, branches, warehouses, locations, numbering, fiscal years, settings
+services/masters      Business partners, contacts, addresses, bank accounts, fabric catalogue, reference data
+services/governance   Audit trail, approvals, notifications, documents
+apps/web              React web app (design system + P1 screens)
+scripts               setup (DB + demo data) and run (process launcher)
+tests                 Unit and end-to-end integration tests
+docs                  Architecture and requirement traceability
 ```
-
-## API overview
-
-`GET /api/dashboard` · `GET|POST /api/orders` · `GET /api/orders/:id` · `GET /api/lots?stage=&status=` ·
-`POST /api/lots/:id/complete {output_m}` · `POST /api/lots/:id/inspection {defects:[{type,points,count}], inspector}` ·
-`POST /api/lots/:id/{dispatch|hold|release}` · `GET /api/machines` · `PATCH /api/machines/:id {status}` ·
-`GET /api/inventory` · `POST /api/inventory/:id/receive {qty}` · `GET|POST /api/recipes` ·
-`GET /api/recipes/:shade/consumption?quantity_m=&width_cm=&gsm=` · `GET /api/alerts` · `POST /api/alerts/:id/ack` ·
-`POST /api/automation/run` · `POST /api/simulation/step`

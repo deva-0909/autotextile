@@ -1,24 +1,30 @@
 {
-  "name": "textile-process-automation",
+  "name": "textile-erp",
   "private": true,
   "version": "0.1.0",
-  "description": "Textile process automation: order-to-dispatch production tracking, auto-scheduling, dye-house recipe consumption, 4-point QC and alerts.",
+  "description": "Textile Trading ERP — domain microservices (identity, organisation, masters, governance) behind an API gateway, with a React ERP web app.",
+  "type": "module",
   "workspaces": [
-    "server",
-    "client"
+    "packages/*",
+    "services/*",
+    "apps/*"
   ],
   "engines": {
     "node": ">=22.18.0"
   },
   "scripts": {
-    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w server\" \"npm run dev -w client\"",
-    "build": "npm run build -w client",
-    "start": "npm run start -w server",
-    "seed": "npm run seed -w server",
-    "test": "npm test -w server",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w client"
+    "setup": "node scripts/setup.ts",
+    "start": "node scripts/run.ts",
+    "dev": "node scripts/run.ts --watch",
+    "dev:web": "npm run dev -w apps/web",
+    "build": "npm run build -w apps/web",
+    "test": "node --test --test-concurrency=1 \"tests/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json && npm run typecheck -w apps/web"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.18.0",
+    "@types/pg": "^8.23.1",
+    "typescript": "^5.9.2"
   }
 }

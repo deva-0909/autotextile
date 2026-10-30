@@ -1,9 +1,7 @@
 node_modules/
 dist/
-!client/dist/
-*.db
-*.db-shm
-*.db-wal
+!apps/web/dist/
 .env
-.DS_Store
+storage/
 *.log
+.DS_Store

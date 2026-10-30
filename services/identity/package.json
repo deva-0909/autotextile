@@ -1,0 +1,8 @@
+{
+  "name": "@erp/identity",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": { "start": "node src/main.ts" },
+  "dependencies": { "@erp/platform": "*", "express": "^5.1.0", "jose": "^6.1.0", "zod": "^4.1.0" }
+}

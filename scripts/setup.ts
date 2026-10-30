@@ -1,0 +1,109 @@
+/**
+ * One-time (and repeatable) local setup:
+ *   1. creates the database if it does not exist
+ *   2. runs every service's migrations
+ *   3. loads demo data when the database is empty
+ * Usage: npm run setup            (keep existing data)
+ *        npm run setup -- --reset (drop and recreate the database)
+ */
+import pg from 'pg';
+import { bootService, config, publish, tx } from '@erp/platform';
+import { identityService, syncRoles } from '../services/identity/src/service.ts';
+import { organisationService } from '../services/organisation/src/service.ts';
+import { mastersService } from '../services/masters/src/service.ts';
+import { governanceService } from '../services/governance/src/service.ts';
+import { hashPassword } from '../services/identity/src/security.ts';
+import { DEMO_PASSWORD, DEMO_USERS, seedMasters, seedOrganisation } from './seed-data.ts';
+
+const url = new URL(config.databaseUrl());
+const dbName = url.pathname.slice(1);
+const reset = process.argv.includes('--reset');
+
+async function ensureDatabase() {
+  const admin = new URL(url);
+  admin.pathname = '/postgres';
+  const client = new pg.Client({ connectionString: admin.toString() });
+  try {
+    await client.connect();
+  } catch (err) {
+    const e = err as { code?: string; message: string };
+    console.error(`\n✖ Cannot connect to PostgreSQL at ${url.host} as "${url.username}".`);
+    if (e.code === 'ECONNREFUSED') console.error('  PostgreSQL is not running, or is on a different port. Start it from Services (Windows) and try again.');
+    else if (e.code === '28P01') console.error('  Wrong password. Update DATABASE_URL in the .env file with your PostgreSQL password.');
+    else console.error(`  ${e.message}`);
+    process.exit(1);
+  }
+  if (reset) {
+    console.log(`• Dropping database ${dbName}`);
+    await client.query(`DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE)`);
+  }
+  const exists = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName]);
+  if (!exists.rowCount) {
+    console.log(`• Creating database ${dbName}`);
+    await client.query(`CREATE DATABASE "${dbName}"`);
+  }
+  await client.end();
+}
+
+await ensureDatabase();
+
+console.log('• Running migrations');
+const services = [];
+for (const def of [governanceService, identityService, organisationService, mastersService]) {
+  services.push(await bootService(def, { pollMs: 200 }));
+  console.log(`  ✓ ${def.name}`);
+}
+const [governance, identity, , masters] = services;
+await syncRoles(identity.ctx.pool);
+
+const { rows: [{ n }] } = await identity.ctx.pool.query('SELECT count(*)::int AS n FROM users');
+if (n > 0) {
+  console.log('• Data already present — skipped demo data (use --reset to start fresh)');
+} else {
+  console.log('• Loading demo data');
+  const pool = identity.ctx.pool;
+  await tx(pool, async (c) => {
+    const org = await seedOrganisation(c);
+    const hash = await hashPassword(DEMO_PASSWORD);
+    const userIds: Record<string, string> = {};
+    for (const u of DEMO_USERS) {
+      const { rows: [row] } = await c.query(
+        `INSERT INTO identity.users (email, name, designation, password_hash) VALUES ($1, $2, $3, $4) RETURNING id`, [u.email, u.name, u.designation, hash]);
+      userIds[u.email] = row.id;
+      await c.query(`INSERT INTO identity.user_roles (user_id, role_id) SELECT $1, id FROM identity.roles WHERE code = $2`, [row.id, u.role]);
+      if (u.scope === 'all') {
+        for (const k of ['entity', 'gstin', 'branch', 'warehouse']) await c.query(`INSERT INTO identity.user_scopes (user_id, kind, ref_id) VALUES ($1, $2, NULL)`, [row.id, k]);
+      } else {
+        await c.query(`INSERT INTO identity.user_scopes (user_id, kind, ref_id) VALUES ($1, 'entity', $2), ($1, 'gstin', $3), ($1, 'warehouse', $4)`,
+          [row.id, org.entityId, org.regs['24'], org.warehouses.SRT]);
+        await c.query(`INSERT INTO identity.user_scopes (user_id, kind, ref_id) SELECT $1, 'branch', id FROM organisation.branches WHERE code = 'SRT-HO'`, [row.id]);
+      }
+    }
+    const parties = await seedMasters(c, userIds['sales@textile.local']);
+
+    // One open maker-checker request so the approvals inbox has something to show.
+    const purchase = userIds['purchase@textile.local'];
+    const party = parties['Velavan Knit Fab'];
+    const { rows: [bank] } = await c.query(`
+      INSERT INTO masters.party_bank_accounts (party_id, account_name, account_number, ifsc, bank_name, created_by)
+      VALUES ($1, 'Velavan Knit Fab', '918020045566771', 'ICIC0006023', 'ICICI Bank', $2) RETURNING id`, [party, purchase]);
+    await publish(c, 'masters', 'approval.requested', {
+      source_service: 'masters', approval_type: 'party_bank_account', ref_id: bank.id,
+      title: 'SUP-00002 Velavan Knit Fab: new bank account', summary: 'Supplier moved collections to ICICI; letter on file',
+      payload: { party_id: party, party_code: 'SUP-00002', account_name: 'Velavan Knit Fab', account_number: '•••• 6771', ifsc: 'ICIC0006023', bank_name: 'ICICI Bank' },
+      requested_by: purchase, requested_by_name: 'Priya Shah', required_permission: 'governance.approval.decide',
+    });
+  });
+  await governance.consumer?.drain();
+  await masters.consumer?.drain();
+  console.log('  ✓ 1 legal entity, 3 GST registrations, 5 warehouses with locations, 15 parties, 8 fabric SKUs, 7 users');
+}
+
+for (const s of services) await s.close();
+console.log(`
+✔ Setup complete. Start everything with:  npm start
+  Then open http://localhost:${config.port('gateway')}
+
+  Demo sign-in (all users share the password ${DEMO_PASSWORD}):
+${DEMO_USERS.map((u) => `    ${u.email.padEnd(30)} ${u.designation}`).join('\n')}
+`);

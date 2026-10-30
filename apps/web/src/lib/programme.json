@@ -1,0 +1,1356 @@
+{
+ "phases": [
+  {
+   "id": "P0",
+   "name": "Discovery, process validation & solution foundation",
+   "timing": "Before UI design / development",
+   "scope": "Validate legal entities, GST registrations, warehouse mapping, accounting policy, textile attributes, approval matrix, opening balances, integrations and exception scenarios. Freeze requirements and data dictionary.",
+   "exit": "Signed process maps; solution architecture; role-permission matrix; data model; integration inventory; Figma design system; phase acceptance plan."
+  },
+  {
+   "id": "P1",
+   "name": "Core masters, security, organisation & platform foundation",
+   "timing": "Foundation release",
+   "scope": "Legal entities, GST registrations, branches, warehouses, locations, users, roles, permissions, audit logs, master data, document storage, notification framework, configuration and admin controls.",
+   "exit": "Users can securely operate the system with correct entity/GSTIN/warehouse scope; master data and audit trails work; no hard-coded warehouse or GST assumptions."
+  },
+  {
+   "id": "P2",
+   "name": "Purchase, supplier management & AI invoice capture",
+   "timing": "Procurement release",
+   "scope": "Supplier lifecycle, RFQ, purchase requisition/PO, supplier confirmations, direct-to-mill purchase flow, invoice capture, three-way matching, missing invoice control, AP postings and supplier intelligence.",
+   "exit": "PO-to-receipt-to-invoice reconciliation demonstrated, including missing/late invoice, duplicate invoice and discrepancy exception paths."
+  },
+  {
+   "id": "P3",
+   "name": "Mill processing / job-work management",
+   "timing": "Processing release",
+   "scope": "Mill master, job-work orders/challans, outward material, mill portal, stage tracking, rate engine, return receipt, yield/loss, quality disputes, due-date and statutory tracking.",
+   "exit": "Complete job-work cycle reconciles sent, received, processed, rejected, balance and cost; stock at mill remains visible and owned by trader."
+  },
+  {
+   "id": "P4",
+   "name": "Inventory, barcode, warehouse management & transfers",
+   "timing": "Inventory release",
+   "scope": "Lot and roll barcodes, receiving/QC, pricing tags, WMS locations, stock ledger, reservations, stocktaking, ageing, warehouse transfers, separate-GSTIN transfer documentation and stock intelligence.",
+   "exit": "Every KG/roll is traceable; stock derives from immutable movements; barcode scans prevent duplicate picks; transfers reconcile source and destination."
+  },
+  {
+   "id": "P5",
+   "name": "CRM, sales team, quotation & commercial controls",
+   "timing": "Sales release",
+   "scope": "Dynamic lead sources, lead allocation, attendance-aware round robin, CRM 360, follow-ups, quotations, negotiation, customer credit approval, pricing approvals, staff activity and sales analytics.",
+   "exit": "Lead-to-order traceability and commercial approval controls demonstrated; absent employees are skipped in allocation."
+  },
+  {
+   "id": "P6",
+   "name": "B2B customer website, booking, payment & customer portal",
+   "timing": "Commerce release",
+   "scope": "Catalogue, fabric search, customer registration, cart, token booking, ICICI gateway, customer-specific rules, credit/advance, order tracking, invoices, wallet/advance ledger and customer-side approvals.",
+   "exit": "Token is calculated on configured taxable value excluding GST; payment is server-verified; stock reservation is atomic and duplicate booking is prevented."
+  },
+  {
+   "id": "P7",
+   "name": "Order orchestration, allocation, dispatch & transport",
+   "timing": "Fulfilment release",
+   "scope": "Warehouse priority engine, Surat-first default, allocation scoring, manual override, management-approved split fulfilment, payment/invoice dispatch gates, pick/pack, transport, tracking and POD.",
+   "exit": "One-warehouse and approved multi-warehouse fulfilment pass end-to-end; GST registration-wise documentation is correct; all overrides are audited."
+  },
+  {
+   "id": "P8",
+   "name": "Accounting, GST, TDS & financial control",
+   "timing": "Finance release",
+   "scope": "Full double-entry accounting, chart of accounts, GL, AP/AR, receipts/payments, bank reconciliation, inventory valuation, GST, TDS, statutory reports, financial statements, period close and anomaly alerts.",
+   "exit": "Trial balance balances; source transactions post correctly; entity/GSTIN books and consolidated management reports reconcile; CA signs off tax configurations."
+  },
+  {
+   "id": "P9",
+   "name": "Communications, workflow automation, DMS & HRMS",
+   "timing": "Business automation release",
+   "scope": "WhatsApp/SMS/email templates, trigger engine, approvals, tasks, escalations, document management, contracts, HR, attendance, leave, payroll and employee handover.",
+   "exit": "Key events generate correct communications/tasks; failed notifications retry; HR/payroll postings reconcile to accounting."
+  },
+  {
+   "id": "P10",
+   "name": "BI, AI intelligence, advanced optimisation & continuity",
+   "timing": "Intelligence release",
+   "scope": "Dynamic reports, dashboards, AI copilot, document reconciliation, procurement/stock/customer/commercial/financial intelligence, predictive alerts, offline mobile support, DR and advanced optimisation.",
+   "exit": "AI suggestions are explainable and approval-controlled; reports respect permissions; backup restoration and continuity tests pass."
+  },
+  {
+   "id": "P11",
+   "name": "UAT, migration, training, go-live & stabilisation",
+   "timing": "Production launch",
+   "scope": "Master/opening balance migration, data cleansing, UAT, performance/security testing, training, cutover, hypercare, monitoring and release sign-off.",
+   "exit": "Business owners sign UAT; opening balances reconcile; go-live checklist complete; rollback and support plan approved."
+  }
+ ],
+ "requirements": [
+  {
+   "id": "REQ-0001",
+   "phase": "P0",
+   "module": "Business validation",
+   "feature": "Map actual purchase-to-cash and exceptions",
+   "detail": "Document current and target processes including direct-to-mill purchase, late supplier invoices, mill returns, stock transfers, split dispatch, credit sales, returns and GSTIN-specific flows.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0002",
+   "phase": "P0",
+   "module": "Legal/GST structure",
+   "feature": "Entity and GSTIN confirmation",
+   "detail": "Capture legal entity, PAN, GSTIN, state, registration type, place-of-business and mapping of each warehouse; do not assume one legal entity or one GSTIN.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0003",
+   "phase": "P0",
+   "module": "Policy decisions",
+   "feature": "Accounting and valuation policies",
+   "detail": "Obtain CA-approved inventory valuation (FIFO/weighted average), revenue/advance treatment, job-work compliance, inter-GSTIN transfers, TDS sections and period-close rules.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0004",
+   "phase": "P0",
+   "module": "Textile data",
+   "feature": "Fabric attribute dictionary",
+   "detail": "Agree configurable attributes by fabric type: knit type, composition, GSM, width, open/tubular, colour, design, finish, shade/dye lot, shrinkage, fastness, pilling, quality grade and tolerances.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0005",
+   "phase": "P0",
+   "module": "Approvals",
+   "feature": "Approval and delegation matrix",
+   "detail": "Define who approves price/discount, below-margin sales, credit, customer bank changes, supplier bank changes, stock adjustments, split dispatch, dispatch override, journals, refunds and write-offs.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0006",
+   "phase": "P0",
+   "module": "Migration",
+   "feature": "Opening data and cutover",
+   "detail": "Define source files, opening stock by warehouse/GSTIN/lot/roll, open PO/job-work/order, AR/AP, advances, bank, GST and ledger opening balances.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0007",
+   "phase": "P1",
+   "module": "Organisation",
+   "feature": "Legal entity / GST registration / branch / warehouse",
+   "detail": "Maintain separate records and relationships. One legal entity may have multiple GST registrations; multiple warehouses may map to a registration. Support future additions without code changes.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0008",
+   "phase": "P1",
+   "module": "Security",
+   "feature": "Granular RBAC and data scope",
+   "detail": "Permissions by module, screen, action, field, entity, GSTIN, branch, warehouse, value threshold and record ownership; include maker-checker.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0009",
+   "phase": "P1",
+   "module": "Audit",
+   "feature": "Immutable audit trail",
+   "detail": "Record actor, timestamp, before/after values, reason, source, approver and device/session for sensitive changes; posted vouchers and stock movements cannot be silently deleted.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0010",
+   "phase": "P1",
+   "module": "Masters",
+   "feature": "Core master data",
+   "detail": "Customer, supplier, manufacturer, mill, transporter, employee, product, fabric specification, UOM, HSN/tax, price lists, payment terms, bank, reason codes and document types.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0011",
+   "phase": "P1",
+   "module": "Platform",
+   "feature": "Configuration and workflow framework",
+   "detail": "Configurable numbering, fiscal year, tax rules, approval workflows, notification templates, warehouse priority, token policy, credit policy and feature toggles.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0012",
+   "phase": "P1",
+   "module": "Documents",
+   "feature": "Document management foundation",
+   "detail": "Secure uploads, versioning, metadata, entity linking, access rules, retention and preview for PDF/images/spreadsheets.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0013",
+   "phase": "P2",
+   "module": "Supplier management",
+   "feature": "Supplier onboarding and performance",
+   "detail": "GSTIN/PAN, bank verification, contacts, categories, terms, historical prices, delivery, quality, documentation, disputes, ratings and risk score.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0014",
+   "phase": "P2",
+   "module": "RFQ",
+   "feature": "RFQ and tender management",
+   "detail": "Create RFQ, invite multiple suppliers, receive quotes through portal/upload, compare landed cost, terms, lead time and quality; convert selected quote to PO.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0015",
+   "phase": "P2",
+   "module": "Purchase",
+   "feature": "Purchase requisition and PO",
+   "detail": "Create, approve, revise and send PO; supplier acceptance, quantity/date confirmation, dispatch details and document upload.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0016",
+   "phase": "P2",
+   "module": "Direct-to-mill",
+   "feature": "Purchase material sent directly to mill",
+   "detail": "Link PO and supplier dispatch to mill receipt/job-work; material ownership and source documents remain traceable even when trader warehouse never physically receives grey fabric.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0017",
+   "phase": "P2",
+   "module": "Invoice AI",
+   "feature": "Bulk invoice OCR and extraction",
+   "detail": "Support PDFs, images, scans, multipage files and batch upload; extract GSTIN, invoice no/date, PO, items, HSN, quantity, rate, taxable value, tax and total; target 100–150 invoices/hour to be performance-tested, not guaranteed.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0018",
+   "phase": "P2",
+   "module": "Invoice control",
+   "feature": "Duplicate and missing invoice detection",
+   "detail": "Match supplier invoice against PO and mill receipt; detect duplicate invoice number/GSTIN/value, late/missing invoice, quantity/rate mismatch and unresolved documents; alerts and escalations.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0019",
+   "phase": "P2",
+   "module": "Human review",
+   "feature": "AI exception workbench",
+   "detail": "Show source document beside extracted fields, field confidence, corrections, exception reason and reviewer approval; never auto-post an invoice without human approval.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0020",
+   "phase": "P2",
+   "module": "Accounts payable",
+   "feature": "Supplier invoice and payment readiness",
+   "detail": "Approved invoice posts to supplier ledger/AP; retain links to PO, goods receipt, job-work and supporting docs; payment approval and due-date tracking.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0021",
+   "phase": "P3",
+   "module": "Mill master",
+   "feature": "Mill capability and commercial profile",
+   "detail": "GSTIN, location, processes, capacity, rates, TAT, credit terms, contacts, performance and documents.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0022",
+   "phase": "P3",
+   "module": "Job work",
+   "feature": "Job-work order and challan",
+   "detail": "Record source PO, SKU, lot/roll, KG, mill, process, rate basis, dispatch/receipt dates, expected return, transport and documents.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0023",
+   "phase": "P3",
+   "module": "Mill portal",
+   "feature": "Mill receipt and process updates",
+   "detail": "Mill confirms receipt quantity, discrepancies, stage, completion, ready-for-collection, invoice and dispute; portal confirmation is authoritative, not an unverified chat.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0024",
+   "phase": "P3",
+   "module": "Process stages",
+   "feature": "Configurable stage tracking",
+   "detail": "Inspection, pretreatment, dyeing, washing, finishing, compacting, final QC and packing; stages configurable by process.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0025",
+   "phase": "P3",
+   "module": "Rate engine",
+   "feature": "Combination processing rate model",
+   "detail": "Support per-KG, fixed, per-process, mill/product-specific, slabs, negotiated rates, effective dates and rate history.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0026",
+   "phase": "P3",
+   "module": "Return and yield",
+   "feature": "Material return, yield and loss",
+   "detail": "Track KG sent, received, processed, good output, rejected/damaged, balance, wastage, yield %, cost and reason.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0027",
+   "phase": "P3",
+   "module": "Due dates",
+   "feature": "Commercial, operational and statutory clocks",
+   "detail": "Maintain separate expected return date, internal overdue date and statutory job-work deadline; alerts before due date and escalations after; CA validates statutory rules.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0028",
+   "phase": "P3",
+   "module": "Quality claims",
+   "feature": "Mill QC and disputes",
+   "detail": "Record defects, samples, photos, quantity affected, root cause, debit/credit claim, responsibility and closure.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0029",
+   "phase": "P4",
+   "module": "Inventory identity",
+   "feature": "Lot and roll barcode hierarchy",
+   "detail": "Each SKU has lots/batches; each lot contains individual rolls. Lot barcode and roll barcode supported; partial dispatch selects rolls without double deduction.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0030",
+   "phase": "P4",
+   "module": "Receiving",
+   "feature": "Warehouse inward and QC",
+   "detail": "Receive from mill/supplier/transfer, weigh, scan, inspect, grade A/B/C/reject, record shade/GSM/width/weight and putaway.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0031",
+   "phase": "P4",
+   "module": "Pricing",
+   "feature": "Selling price tagging",
+   "detail": "At processed return/inward, assign selling price per KG at lot/roll level as configured; price changes require approval and history.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0032",
+   "phase": "P4",
+   "module": "Stock ledger",
+   "feature": "Immutable movement-based inventory",
+   "detail": "Derive balances from stock movements; never rely on manual global stock overwrite. Track physical, available, reserved, allocated, in-transit, at-mill, hold, damaged and returned.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0033",
+   "phase": "P4",
+   "module": "WMS",
+   "feature": "Warehouse locations and operations",
+   "detail": "Zones, aisles, racks, bins, receiving, QC, staging and damaged areas; putaway, directed picking, batch/zone picking and cycle counts.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0034",
+   "phase": "P4",
+   "module": "Transfers",
+   "feature": "Inter-warehouse transfer",
+   "detail": "Request, approve, issue correct GST documents, scan dispatch, record LR/transporter, in-transit, destination receipt, discrepancy and closure.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0035",
+   "phase": "P4",
+   "module": "GST transfer",
+   "feature": "Distinct GST registration transfer",
+   "detail": "Treat transfer between distinct GST registrations as a tax-sensitive transaction; generate appropriate invoice/document and accounting per CA-approved configuration; do not treat as a simple stock adjustment.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0036",
+   "phase": "P4",
+   "module": "Stocktake",
+   "feature": "Physical verification and adjustment",
+   "detail": "Barcode/rack/roll stock count, variance report, reason, maker-checker approval and stock ledger adjustment.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0037",
+   "phase": "P4",
+   "module": "Quality",
+   "feature": "Shade and fabric compatibility",
+   "detail": "Maintain shade/dye lot grouping; warn/block unintended shade mixing, apply customer shade acceptance and track shade-related claims.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0038",
+   "phase": "P4",
+   "module": "Ageing",
+   "feature": "Inventory ageing and slow stock",
+   "detail": "Ageing buckets 0–30, 31–60, 61–90, 91–180, 181–365 and >365 days; dead/slow stock and clearance recommendation.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0039",
+   "phase": "P5",
+   "module": "Lead capture",
+   "feature": "Dynamic source integration",
+   "detail": "Capture Meta, IndiaMART, Justdial, website, WhatsApp, phone, email, referral, exhibition, trade platform and manual leads; future sources addable by admin using API/webhook/CSV mapping.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0040",
+   "phase": "P5",
+   "module": "Lead quality",
+   "feature": "Duplicate detection and merge",
+   "detail": "Detect by mobile, email and GSTIN; allow merge, link, keep separate or escalate with audit; no silent deletion.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0041",
+   "phase": "P5",
+   "module": "Lead assignment",
+   "feature": "Round robin and rule-based allocation",
+   "detail": "Allocate by city, state, product, source, value, language, specialization and workload; allow specific assignment and reassignment history.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0042",
+   "phase": "P5",
+   "module": "Attendance-aware allocation",
+   "feature": "Availability engine",
+   "detail": "Skip absent, on leave, weekly off, break, inactive or unavailable employees; enforce configurable max active leads.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0043",
+   "phase": "P5",
+   "module": "CRM lifecycle",
+   "feature": "Lead pipeline and next action",
+   "detail": "New, assigned, contact pending, contacted, qualified, quotation, negotiation, order confirmed, won/lost/nurture; no open lead without next follow-up or reason.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0044",
+   "phase": "P5",
+   "module": "Customer 360",
+   "feature": "Unified customer timeline",
+   "detail": "Enquiries, quotes, orders, purchases, fabric preferences, prices, payment/outstanding, complaints, communications, dispatch, salesperson and customer value.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0045",
+   "phase": "P5",
+   "module": "Quotation",
+   "feature": "Quotation versioning and follow-up",
+   "detail": "Versioned quotations, validity, fabric/lot, KG, price, taxes, freight, terms, negotiation history, competitor price and lost reason.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0046",
+   "phase": "P5",
+   "module": "Commercial controls",
+   "feature": "Negotiated pricing and margin approval",
+   "detail": "Price can vary by customer, quantity, lot/roll and salesperson authority; preserve list price, requested price, discount, cost, margin, approver and reason; block below-minimum margin without approval.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0047",
+   "phase": "P5",
+   "module": "Customer credit",
+   "feature": "Advance and credit by approval",
+   "detail": "Support advance and approved credit; credit limit, outstanding, ageing, exposure, block/override, terms and approval.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0048",
+   "phase": "P5",
+   "module": "Sales performance",
+   "feature": "Targets and incentives",
+   "detail": "Leads, response time, qualified leads, quotes, KG, revenue, margin, new/repeat customers and collections; incentive eligibility based on verified outcomes.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0049",
+   "phase": "P6",
+   "module": "B2B catalogue",
+   "feature": "Customer-facing fabric catalogue",
+   "detail": "Approved stock only; images, specifications, filters, available KG, MOQ, price/KG where permitted, shade/lot details and availability status.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0050",
+   "phase": "P6",
+   "module": "Customer onboarding",
+   "feature": "Company and buyer accounts",
+   "detail": "GSTIN, company profile, addresses, multiple contacts and roles: company admin, purchase manager, buyer, accounts and management.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0051",
+   "phase": "P6",
+   "module": "Ordering",
+   "feature": "Cart and repeat orders",
+   "detail": "KG-based ordering, stock validation, customer-specific terms, saved/repeat orders, order approval where configured.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0052",
+   "phase": "P6",
+   "module": "Token policy",
+   "feature": "Configurable token booking",
+   "detail": "Token % or fixed amount as permitted, configurable at global/category/product/customer/campaign level with min/max, validity, refund/cancellation and approval. User policy: % of taxable bill value excluding GST; CA to validate advance GST treatment.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0053",
+   "phase": "P6",
+   "module": "Payments",
+   "feature": "ICICI payment gateway",
+   "detail": "Server-side verification, signed webhook, idempotency, UTR/reference, payment status, refund/partial refund where supported, reconciliation and secure expiring payment links.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0054",
+   "phase": "P6",
+   "module": "Reservation",
+   "feature": "Atomic stock reservation",
+   "detail": "On confirmed booking/payment, reserve stock atomically; prevent race conditions/double booking; expiry, extension approval, release and partial cancellation.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0055",
+   "phase": "P6",
+   "module": "Customer portal",
+   "feature": "Order and account self-service",
+   "detail": "Track orders, token/balance, invoices, receipts, dispatch, LR, tracking, POD, payment history, support and complaints.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0056",
+   "phase": "P6",
+   "module": "Wallet/advance",
+   "feature": "Customer advance ledger",
+   "detail": "Track customer advance and adjustments with correct accounting/tax treatment; distinguish wallet balance from revenue.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0057",
+   "phase": "P7",
+   "module": "Allocation engine",
+   "feature": "Warehouse priority and fulfilment scoring",
+   "detail": "Default Surat-first; if insufficient, recommend configured next warehouse based on stock, quality, customer location, freight/ETA, GSTIN and workload; configurable priority.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0058",
+   "phase": "P7",
+   "module": "Manual override",
+   "feature": "Controlled warehouse selection",
+   "detail": "Authorized users can override recommendation with mandatory reason; retain recommended option, selected option, user, approver and timestamp.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0059",
+   "phase": "P7",
+   "module": "Split fulfilment",
+   "feature": "Management approval for multi-warehouse",
+   "detail": "If one warehouse cannot fulfil, show shortage and alternatives; do not auto-split. Multiple warehouses require management approval and separate fulfilment records.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0060",
+   "phase": "P7",
+   "module": "Dispatch gates",
+   "feature": "Invoice and payment controls",
+   "detail": "Default dispatch hold until GST invoice generated and payment receipt verified; approved customer credit terms count as authorized terms. Authorized override requires reason, approver and audit.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0061",
+   "phase": "P7",
+   "module": "Picking",
+   "feature": "Roll-level pick and pack",
+   "detail": "Generate pick list, scan selected roll barcodes, prevent reserved/dispatched duplicates, verify KG/weight, packing, loading and dispatch.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0062",
+   "phase": "P7",
+   "module": "Transport",
+   "feature": "Transporter and freight management",
+   "detail": "Transporter master, FTL/PTL, routes, vehicle/driver, freight comparison, LR/docket, e-way bill where applicable, manual milestones and live GPS if API available.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0063",
+   "phase": "P7",
+   "module": "Delivery",
+   "feature": "Tracking, POD and claims",
+   "detail": "Customer notices, tracking link, ePOD, delivery confirmation, short delivery, transit damage, transport claims and closure.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0064",
+   "phase": "P7",
+   "module": "Returns",
+   "feature": "RMA and credit/replacement",
+   "detail": "Return request, authorization, inward, QC disposition, restock/hold/reject, replacement, refund or credit note with source traceability.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0065",
+   "phase": "P8",
+   "module": "Accounting core",
+   "feature": "Double-entry general ledger",
+   "detail": "Build the application as primary accounting system: chart of accounts, GL, journals, vouchers, trial balance, period locks and audit.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0066",
+   "phase": "P8",
+   "module": "Subledgers",
+   "feature": "AP, AR, customer and supplier ledgers",
+   "detail": "Automatic posting from approved purchase, sales, receipts, payments, credit/debit notes, expenses, payroll and stock transactions.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0067",
+   "phase": "P8",
+   "module": "Entity books",
+   "feature": "GSTIN/entity-wise accounting",
+   "detail": "Separate books, invoice series, ledgers and tax balances by legal entity/GST registration; consolidated management reporting and intercompany elimination where relevant.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0068",
+   "phase": "P8",
+   "module": "Inventory valuation",
+   "feature": "Landed cost and valuation",
+   "detail": "CA-approved FIFO or weighted average; include purchase, processing, freight and other landed costs; support lot/roll profitability.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0069",
+   "phase": "P8",
+   "module": "GST",
+   "feature": "GST tax engine and returns",
+   "detail": "CGST/SGST/IGST, HSN, place of supply, RCM where applicable, ITC, output tax, e-invoice/IRN, e-way bill, GSTR-1/3B preparation, GSTR-2B/IMS reconciliation.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0070",
+   "phase": "P8",
+   "module": "TDS",
+   "feature": "TDS engine",
+   "detail": "Configurable sections, rates, thresholds, PAN, effective dates, deductions, challans, returns and reconciliation.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0071",
+   "phase": "P8",
+   "module": "Banking",
+   "feature": "Bank statement import and reconciliation",
+   "detail": "Import statements, match receipts/payments, handle unmatched and duplicate lines, track UTR and approval.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0072",
+   "phase": "P8",
+   "module": "Financial statements",
+   "feature": "Management and statutory reports",
+   "detail": "P&L, balance sheet, cash flow, trial balance, customer/supplier ageing, cash/bank, working capital, inventory days, DSO/DPO and financial year close.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0073",
+   "phase": "P8",
+   "module": "Controls",
+   "feature": "Financial anomaly detection",
+   "detail": "Flag duplicate supplier payments, bank detail changes, unusual discounts, credit notes, refunds, journals and unexpected ledger movements.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0074",
+   "phase": "P9",
+   "module": "Messaging",
+   "feature": "WhatsApp/SMS/email integration",
+   "detail": "Templates and triggers for enquiry, quote, booking, invoice, payment reminder/link, receipt, dispatch, LR, tracking, POD, feedback and complaint.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0075",
+   "phase": "P9",
+   "module": "Template governance",
+   "feature": "Template manager and consent",
+   "detail": "Language, variables, approval, active status, consent, WhatsApp template compliance, delivery/read/failure status and retry.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0076",
+   "phase": "P9",
+   "module": "Workflow",
+   "feature": "Event-driven task engine",
+   "detail": "Trigger, conditions, actions, approval, delay, reminder, escalation and completion; task has source transaction, owner, priority, due date and resolution.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0077",
+   "phase": "P9",
+   "module": "My Work",
+   "feature": "Employee work queue",
+   "detail": "Unified tasks, follow-ups, approvals, due/overdue, handover and reassignment.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0078",
+   "phase": "P9",
+   "module": "DMS/contracts",
+   "feature": "Agreement and document lifecycle",
+   "detail": "Supplier/mill/customer contracts, rates, validity, payment/quality/delivery terms, penalties, renewal alerts 30/15/7 days, correspondence and AI search.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0079",
+   "phase": "P9",
+   "module": "HRMS",
+   "feature": "Employee lifecycle and attendance",
+   "detail": "Recruitment, onboarding, probation, confirmation, transfer, resignation, exit, documents, shifts, GPS/biometric optional, leave, weekly off, overtime and comp-off.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0080",
+   "phase": "P9",
+   "module": "Payroll",
+   "feature": "Payroll and statutory components",
+   "detail": "Salary components, PF, ESIC, PT, salary TDS, payslips, disbursement and accounting posting; validate rules with payroll/CA experts.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0081",
+   "phase": "P9",
+   "module": "Handover",
+   "feature": "Employee handover",
+   "detail": "Transfer open leads, tasks, approvals, customer commitments and documents on leave/exit; audit ownership transfer.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0082",
+   "phase": "P10",
+   "module": "Reporting",
+   "feature": "Dynamic report builder",
+   "detail": "Choose module/entity/fields, filters, AND/OR, group, sort, aggregate, date, warehouse, employee, customer, supplier and product; save, schedule, email and export Excel/CSV/PDF.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0083",
+   "phase": "P10",
+   "module": "Dashboards",
+   "feature": "Role-specific dashboards",
+   "detail": "Owner control tower, supplier performance, purchase planning, fabric quality, mill processing, inventory ageing, customer retention, negotiation, transport/freight, credit risk, GST, AI exceptions and employee productivity.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0084",
+   "phase": "P10",
+   "module": "AI procurement",
+   "feature": "Supplier price and reliability intelligence",
+   "detail": "Recommend supplier based on price, quality, lead time, capacity, reliability and risk; draft RFQs; approval before PO.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0085",
+   "phase": "P10",
+   "module": "Fabric intelligence",
+   "feature": "Fabric comparison and substitution",
+   "detail": "Compare GSM/width/composition/finish/quality and shade; tolerance checks, compatible substitute suggestions and customer acceptance.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0086",
+   "phase": "P10",
+   "module": "Stock intelligence",
+   "feature": "Stock optimisation",
+   "detail": "Stock health score, transfer recommendation, reservation priority, ageing action, discrepancy anomaly and demand-based replenishment.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0087",
+   "phase": "P10",
+   "module": "Customer intelligence",
+   "feature": "Buying and retention prediction",
+   "detail": "Buying cycle, repeat purchase alerts, customer profitability/score, churn risk and credit exposure; explain source factors.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0088",
+   "phase": "P10",
+   "module": "Commercial intelligence",
+   "feature": "Quotation and negotiation insights",
+   "detail": "Quote conversion, price elasticity, negotiation simulator, competitor price register and follow-up prioritisation.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0089",
+   "phase": "P10",
+   "module": "Financial intelligence",
+   "feature": "Working capital and order profitability",
+   "detail": "Show funds blocked in stock, mills, unbilled receipts, AR and advances; calculate order margin after freight, processing, discount, commission and returns.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0090",
+   "phase": "P10",
+   "module": "AI workspace",
+   "feature": "Textile business copilot",
+   "detail": "Natural-language questions, daily management brief, multi-document reconciliation, anomaly explanations and voice interface; all consequential actions require user confirmation/approval.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0091",
+   "phase": "P10",
+   "module": "Continuity",
+   "feature": "Offline mobile and disaster recovery",
+   "detail": "Allow safe offline capture where appropriate; server validates financial/dispatch release. Backups, restore tests, RTO/RPO, monitoring and continuity runbook.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0092",
+   "phase": "P11",
+   "module": "Migration",
+   "feature": "Opening balances and master migration",
+   "detail": "Import, validate, reconcile and sign off masters, stock, AR/AP, advances, bank, GST, open POs, job-work, orders and ledgers.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0093",
+   "phase": "P11",
+   "module": "Testing",
+   "feature": "End-to-end UAT and regression",
+   "detail": "Test normal, exception, permission, concurrency, tax, barcode, integration, performance, security, backup and restore scenarios.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0094",
+   "phase": "P11",
+   "module": "Training",
+   "feature": "Role-based training",
+   "detail": "Admin, purchase, stores, mill operations, sales, accounts, dispatch, management, customer and partner portals.",
+   "priority": "Must"
+  },
+  {
+   "id": "REQ-0095",
+   "phase": "P11",
+   "module": "Go-live",
+   "feature": "Cutover and hypercare",
+   "detail": "Freeze legacy data, final migration, reconciliation, go/no-go, rollback, support ownership, incident severity and stabilisation.",
+   "priority": "Must"
+  }
+ ],
+ "screens": [
+  {
+   "id": "FIG-001",
+   "phase": "P1",
+   "portal": "ERP Admin",
+   "module": "Platform",
+   "name": "Login, MFA, password reset"
+  },
+  {
+   "id": "FIG-002",
+   "phase": "P1",
+   "portal": "ERP Admin",
+   "module": "Dashboard",
+   "name": "Role-based home dashboard"
+  },
+  {
+   "id": "FIG-003",
+   "phase": "P1",
+   "portal": "ERP Admin",
+   "module": "Organisation",
+   "name": "Legal entity and GST registration setup"
+  },
+  {
+   "id": "FIG-004",
+   "phase": "P1",
+   "portal": "ERP Admin",
+   "module": "Organisation",
+   "name": "Warehouse and location setup"
+  },
+  {
+   "id": "FIG-005",
+   "phase": "P1",
+   "portal": "ERP Admin",
+   "module": "Security",
+   "name": "Users, roles and permission matrix"
+  },
+  {
+   "id": "FIG-006",
+   "phase": "P1",
+   "portal": "ERP Admin",
+   "module": "Audit",
+   "name": "Audit log viewer"
+  },
+  {
+   "id": "FIG-007",
+   "phase": "P1",
+   "portal": "ERP Admin",
+   "module": "Masters",
+   "name": "Customer/supplier/mill/product masters"
+  },
+  {
+   "id": "FIG-008",
+   "phase": "P2",
+   "portal": "ERP Admin",
+   "module": "Purchase",
+   "name": "Supplier onboarding and profile"
+  },
+  {
+   "id": "FIG-009",
+   "phase": "P2",
+   "portal": "ERP Admin",
+   "module": "Purchase",
+   "name": "RFQ creation and supplier invitation"
+  },
+  {
+   "id": "FIG-010",
+   "phase": "P2",
+   "portal": "ERP Admin",
+   "module": "Purchase",
+   "name": "Quote comparison"
+  },
+  {
+   "id": "FIG-011",
+   "phase": "P2",
+   "portal": "ERP Admin",
+   "module": "Purchase",
+   "name": "Purchase requisition and PO"
+  },
+  {
+   "id": "FIG-012",
+   "phase": "P2",
+   "portal": "Supplier Portal",
+   "module": "Purchase",
+   "name": "Supplier PO response and dispatch update"
+  },
+  {
+   "id": "FIG-013",
+   "phase": "P2",
+   "portal": "ERP Admin",
+   "module": "AI Workbench",
+   "name": "Invoice batch upload and queue"
+  },
+  {
+   "id": "FIG-014",
+   "phase": "P2",
+   "portal": "ERP Admin",
+   "module": "AI Workbench",
+   "name": "Invoice split-screen review"
+  },
+  {
+   "id": "FIG-015",
+   "phase": "P2",
+   "portal": "ERP Admin",
+   "module": "Purchase",
+   "name": "Missing invoice and three-way match dashboard"
+  },
+  {
+   "id": "FIG-016",
+   "phase": "P3",
+   "portal": "ERP Admin",
+   "module": "Job Work",
+   "name": "Mill master and capability profile"
+  },
+  {
+   "id": "FIG-017",
+   "phase": "P3",
+   "portal": "ERP Admin",
+   "module": "Job Work",
+   "name": "Job-work order and challan"
+  },
+  {
+   "id": "FIG-018",
+   "phase": "P3",
+   "portal": "Mill Portal",
+   "module": "Job Work",
+   "name": "Mill receipt confirmation"
+  },
+  {
+   "id": "FIG-019",
+   "phase": "P3",
+   "portal": "Mill Portal",
+   "module": "Job Work",
+   "name": "Process stage update"
+  },
+  {
+   "id": "FIG-020",
+   "phase": "P3",
+   "portal": "ERP Admin",
+   "module": "Job Work",
+   "name": "Return inward and yield reconciliation"
+  },
+  {
+   "id": "FIG-021",
+   "phase": "P3",
+   "portal": "ERP Admin",
+   "module": "Job Work",
+   "name": "Overdue and statutory deadline cockpit"
+  },
+  {
+   "id": "FIG-022",
+   "phase": "P4",
+   "portal": "Warehouse App",
+   "module": "Inventory",
+   "name": "Barcode scan and inward"
+  },
+  {
+   "id": "FIG-023",
+   "phase": "P4",
+   "portal": "ERP Admin",
+   "module": "Inventory",
+   "name": "Lot and roll genealogy"
+  },
+  {
+   "id": "FIG-024",
+   "phase": "P4",
+   "portal": "ERP Admin",
+   "module": "Inventory",
+   "name": "Quality inspection and grade"
+  },
+  {
+   "id": "FIG-025",
+   "phase": "P4",
+   "portal": "ERP Admin",
+   "module": "Inventory",
+   "name": "Price tagging and approval"
+  },
+  {
+   "id": "FIG-026",
+   "phase": "P4",
+   "portal": "ERP Admin",
+   "module": "WMS",
+   "name": "Warehouse map and putaway"
+  },
+  {
+   "id": "FIG-027",
+   "phase": "P4",
+   "portal": "ERP Admin",
+   "module": "Inventory",
+   "name": "Stock ledger and availability"
+  },
+  {
+   "id": "FIG-028",
+   "phase": "P4",
+   "portal": "ERP Admin",
+   "module": "Transfers",
+   "name": "Transfer request and approval"
+  },
+  {
+   "id": "FIG-029",
+   "phase": "P4",
+   "portal": "Warehouse App",
+   "module": "Transfers",
+   "name": "Transfer dispatch and destination receipt"
+  },
+  {
+   "id": "FIG-030",
+   "phase": "P4",
+   "portal": "ERP Admin",
+   "module": "Inventory",
+   "name": "Stocktake and variance approval"
+  },
+  {
+   "id": "FIG-031",
+   "phase": "P5",
+   "portal": "Sales CRM",
+   "module": "CRM",
+   "name": "Lead inbox and source integration"
+  },
+  {
+   "id": "FIG-032",
+   "phase": "P5",
+   "portal": "Sales CRM",
+   "module": "CRM",
+   "name": "Lead profile and activity timeline"
+  },
+  {
+   "id": "FIG-033",
+   "phase": "P5",
+   "portal": "ERP Admin",
+   "module": "CRM",
+   "name": "Lead allocation rules and attendance view"
+  },
+  {
+   "id": "FIG-034",
+   "phase": "P5",
+   "portal": "Sales CRM",
+   "module": "CRM",
+   "name": "Customer 360 profile"
+  },
+  {
+   "id": "FIG-035",
+   "phase": "P5",
+   "portal": "Sales CRM",
+   "module": "Sales",
+   "name": "Quotation builder and version history"
+  },
+  {
+   "id": "FIG-036",
+   "phase": "P5",
+   "portal": "ERP Admin",
+   "module": "Commercial",
+   "name": "Price negotiation and approval"
+  },
+  {
+   "id": "FIG-037",
+   "phase": "P5",
+   "portal": "ERP Admin",
+   "module": "Credit",
+   "name": "Customer credit application and limit"
+  },
+  {
+   "id": "FIG-038",
+   "phase": "P6",
+   "portal": "B2B Website",
+   "module": "Commerce",
+   "name": "Catalogue and fabric detail"
+  },
+  {
+   "id": "FIG-039",
+   "phase": "P6",
+   "portal": "B2B Website",
+   "module": "Commerce",
+   "name": "Customer registration and company users"
+  },
+  {
+   "id": "FIG-040",
+   "phase": "P6",
+   "portal": "B2B Website",
+   "module": "Commerce",
+   "name": "Cart and checkout"
+  },
+  {
+   "id": "FIG-041",
+   "phase": "P6",
+   "portal": "B2B Website",
+   "module": "Payments",
+   "name": "ICICI payment and status"
+  },
+  {
+   "id": "FIG-042",
+   "phase": "P6",
+   "portal": "B2B Website",
+   "module": "Orders",
+   "name": "Customer order tracking"
+  },
+  {
+   "id": "FIG-043",
+   "phase": "P6",
+   "portal": "ERP Admin",
+   "module": "Commerce",
+   "name": "Token policy configuration"
+  },
+  {
+   "id": "FIG-044",
+   "phase": "P6",
+   "portal": "ERP Admin",
+   "module": "Customer Accounts",
+   "name": "Customer advance/wallet ledger"
+  },
+  {
+   "id": "FIG-045",
+   "phase": "P7",
+   "portal": "ERP Admin",
+   "module": "Allocation",
+   "name": "Warehouse recommendation and comparison"
+  },
+  {
+   "id": "FIG-046",
+   "phase": "P7",
+   "portal": "ERP Admin",
+   "module": "Allocation",
+   "name": "Split fulfilment approval"
+  },
+  {
+   "id": "FIG-047",
+   "phase": "P7",
+   "portal": "ERP Admin",
+   "module": "Dispatch",
+   "name": "Dispatch readiness cockpit"
+  },
+  {
+   "id": "FIG-048",
+   "phase": "P7",
+   "portal": "Warehouse App",
+   "module": "Dispatch",
+   "name": "Pick list and barcode scan"
+  },
+  {
+   "id": "FIG-049",
+   "phase": "P7",
+   "portal": "ERP Admin",
+   "module": "Transport",
+   "name": "Transporter, LR and tracking"
+  },
+  {
+   "id": "FIG-050",
+   "phase": "P7",
+   "portal": "Customer Portal",
+   "module": "Delivery",
+   "name": "Delivery tracking and POD"
+  },
+  {
+   "id": "FIG-051",
+   "phase": "P7",
+   "portal": "ERP Admin",
+   "module": "Returns",
+   "name": "Return/RMA and claims"
+  },
+  {
+   "id": "FIG-052",
+   "phase": "P8",
+   "portal": "ERP Admin",
+   "module": "Finance",
+   "name": "Chart of accounts and ledger"
+  },
+  {
+   "id": "FIG-053",
+   "phase": "P8",
+   "portal": "ERP Admin",
+   "module": "Finance",
+   "name": "Voucher and journal entry"
+  },
+  {
+   "id": "FIG-054",
+   "phase": "P8",
+   "portal": "ERP Admin",
+   "module": "Finance",
+   "name": "Customer and supplier ledgers"
+  },
+  {
+   "id": "FIG-055",
+   "phase": "P8",
+   "portal": "ERP Admin",
+   "module": "Finance",
+   "name": "Bank reconciliation"
+  },
+  {
+   "id": "FIG-056",
+   "phase": "P8",
+   "portal": "ERP Admin",
+   "module": "GST",
+   "name": "GST compliance cockpit"
+  },
+  {
+   "id": "FIG-057",
+   "phase": "P8",
+   "portal": "ERP Admin",
+   "module": "TDS",
+   "name": "TDS configuration and returns"
+  },
+  {
+   "id": "FIG-058",
+   "phase": "P8",
+   "portal": "ERP Admin",
+   "module": "Finance",
+   "name": "Financial statements and period close"
+  },
+  {
+   "id": "FIG-059",
+   "phase": "P9",
+   "portal": "ERP Admin",
+   "module": "Communications",
+   "name": "Template manager and delivery log"
+  },
+  {
+   "id": "FIG-060",
+   "phase": "P9",
+   "portal": "ERP Admin",
+   "module": "Workflow",
+   "name": "Workflow builder"
+  },
+  {
+   "id": "FIG-061",
+   "phase": "P9",
+   "portal": "All Portals",
+   "module": "Tasks",
+   "name": "My Work and approvals"
+  },
+  {
+   "id": "FIG-062",
+   "phase": "P9",
+   "portal": "ERP Admin",
+   "module": "DMS",
+   "name": "Document and contract register"
+  },
+  {
+   "id": "FIG-063",
+   "phase": "P9",
+   "portal": "ERP Admin",
+   "module": "HRMS",
+   "name": "Employee profile and attendance"
+  },
+  {
+   "id": "FIG-064",
+   "phase": "P9",
+   "portal": "ERP Admin",
+   "module": "Payroll",
+   "name": "Payroll run and payslip"
+  },
+  {
+   "id": "FIG-065",
+   "phase": "P10",
+   "portal": "ERP Admin",
+   "module": "Reports",
+   "name": "Dynamic report builder"
+  },
+  {
+   "id": "FIG-066",
+   "phase": "P10",
+   "portal": "ERP Admin",
+   "module": "BI",
+   "name": "Executive control tower"
+  },
+  {
+   "id": "FIG-067",
+   "phase": "P10",
+   "portal": "ERP Admin",
+   "module": "AI",
+   "name": "Textile Intelligence workspace"
+  },
+  {
+   "id": "FIG-068",
+   "phase": "P10",
+   "portal": "ERP Admin",
+   "module": "AI",
+   "name": "AI exception and anomaly centre"
+  },
+  {
+   "id": "FIG-069",
+   "phase": "P10",
+   "portal": "ERP Admin",
+   "module": "Intelligence",
+   "name": "Supplier / stock / customer intelligence"
+  },
+  {
+   "id": "FIG-070",
+   "phase": "P10",
+   "portal": "ERP Admin",
+   "module": "Continuity",
+   "name": "Backup and system health"
+  },
+  {
+   "id": "FIG-071",
+   "phase": "P11",
+   "portal": "ERP Admin",
+   "module": "Go-live",
+   "name": "Migration reconciliation dashboard"
+  },
+  {
+   "id": "FIG-072",
+   "phase": "P11",
+   "portal": "ERP Admin",
+   "module": "UAT",
+   "name": "UAT defect and sign-off tracker"
+  }
+ ]
+}
