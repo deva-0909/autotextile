@@ -143,6 +143,57 @@ Shree Ambica Knitters,SO/2526/1141,SJ-160-NVY,,10,300,`;
     assert.equal(so.status, 'booked');
     assert.equal(Number(so.taxable), 6240);
   });
+
+  test('open job work: balance at the mill becomes an acknowledged job order with the original statutory clock', async () => {
+    const csv = `mill,legacy_challan_no,challan_date,process,expected_return_date,sku,kg_at_mill,cost_per_kg,rolls,lot_ref
+Surat Process House,JWC/0388,2026-03-05,REACTIVE_DYE,2026-04-08,SJ-160-NVY,850,246,34,GR-0412
+Surat Process House,JWC/0388,2026-03-05,REACTIVE_DYE,2026-04-08,FLC-320-CHR,150.5,300,,
+Surat Process House,JWC/0390,2026-03-09,SCREEN_PRINT,2026-04-08,SJ-160-NVY,10,246,,
+Shree Ambica Knitters,JWC/0391,2026-03-09,RFD,2026-04-08,SJ-160-NVY,10,246,,`;
+    const b = await load(t.admin!, 'open_job_work', csv);
+    assert.equal(b.valid, 2);
+    const rows = (await h.ok(t.admin!, 'GET', `/golive/migration/batches/${b.id}`)).rows;
+    assert.match(rows.find((r: { row_no: number }) => r.row_no === 4).errors[0], /not an active process/);
+    assert.match(rows.find((r: { row_no: number }) => r.row_no === 5).errors[0], /not a mill/);
+    const imp = await h.ok(t.admin!, 'POST', `/golive/migration/batches/${b.id}/import`);
+    assert.equal(imp.erp_total, 1000.5, JSON.stringify((await h.ok(t.admin!, 'GET', `/golive/migration/batches/${b.id}`)).rows.map((r: { status: string; error: string }) => [r.status, r.error])));
+    assert.equal(imp.difference, 0);
+    const ref = (await h.ok(t.admin!, 'GET', `/golive/migration/batches/${b.id}`)).rows[0].result_ref;
+    const jo = (await h.ok(t.admin!, 'GET', `/jobwork/orders?q=${ref}`)).items[0];
+    assert.equal(jo.status, 'acknowledged', 'the mill already has the fabric');
+    assert.equal(jo.issue_date.slice(0, 10), '2026-03-05');
+    assert.equal(jo.statutory_due_date.slice(0, 10), '2027-03-05', '365 days from the original challan');
+    const det = await h.ok(t.admin!, 'GET', `/jobwork/orders/${jo.id}`);
+    assert.equal(det.lines.length, 2);
+    assert.equal(det.reconciliation.kg_balance_at_mill, 1000.5);
+    const srt = (await h.ok(t.admin!, 'GET', '/organisation/warehouses')).find((w: { code: string }) => w.code === 'SRT');
+    await h.ok(t.admin!, 'POST', `/jobwork/orders/${jo.id}/returns`, { return_date: new Date().toISOString().slice(0, 10), warehouse_id: srt.id, kg_good: 400, kg_process_loss: 20, loss_reason: 'Normal dyeing loss' });
+    const after1 = await h.ok(t.admin!, 'GET', `/jobwork/orders/${jo.id}`);
+    assert.equal(after1.status, 'partially_returned');
+    assert.equal(after1.reconciliation.kg_balance_at_mill, 580.5);
+    const again = await h.ok(t.admin!, 'POST', `/golive/migration/batches/${(await load(t.admin!, 'open_job_work', csv)).id}/import`);
+    assert.equal(again.difference, 0);
+    assert.equal((await h.ok(t.admin!, 'GET', '/jobwork/orders?q=Surat&pageSize=100')).items.filter((o: { instructions: string | null }) => o.instructions?.includes('JWC/0388')).length, 1, 'no duplicate');
+  });
+
+  test('GST credit carried forward: posts to input GST and feeds GSTR-3B from its month on', async () => {
+    const book = (await h.ok(t.accounts!, 'GET', '/finance/books')).find((x: { is_primary: boolean }) => x.is_primary);
+    const month = new Date().toISOString().slice(0, 7);
+    const tbRow = await load(t.accounts!, 'opening_gl', `account_code,debit,credit,date\n1502,100,0,2026-04-01\n3100,0,100,2026-04-01`);
+    assert.equal(tbRow.invalid, 1, 'input credit cannot also come through the trial balance');
+    const b = await load(t.accounts!, 'gst_credit', `gstin,as_of_month,igst,cgst,sgst\n${book.gstin},${month},182500,41250,41250\n27AAAAA0000A1Z5,${month},1,0,0\n${book.gstin},${month},5,1,2`);
+    assert.equal(b.valid, 1);
+    const imp = await h.ok(t.accounts!, 'POST', `/golive/migration/batches/${b.id}/import`);
+    assert.equal(imp.source_total, 265000);
+    assert.equal(imp.erp_total, 265000, JSON.stringify((await h.ok(t.accounts!, 'GET', `/golive/migration/batches/${b.id}`)).rows.map((r: { status: string; error: string }) => [r.status, r.error])));
+    const g = await h.ok(t.accounts!, 'GET', `/finance/gst/returns?month=${month}&book=${book.id}`);
+    assert.deepEqual(g.gstr3b.credit_brought_forward, { igst: 182500, cgst: 41250, sgst: 41250 });
+    const prev = new Date(); prev.setUTCDate(1); prev.setUTCMonth(prev.getUTCMonth() - 1);
+    const before = await h.ok(t.accounts!, 'GET', `/finance/gst/returns?month=${prev.toISOString().slice(0, 7)}&book=${book.id}`);
+    assert.equal(before.gstr3b.credit_brought_forward.igst, 0, 'no credit before the carry-forward month');
+    assert.equal((await h.call(t.accounts!, 'POST', '/finance/gst/opening-credit', { gstin: book.gstin, as_of: month, igst: 1, cgst: 0, sgst: 0 })).status, 409, 'different figures are refused');
+    assert.ok((await h.ok(t.accounts!, 'GET', '/finance/reports/trial-balance?from=2020-04-01')).balanced);
+  });
 });
 
 describe('P11 UAT, training, cutover and hypercare', () => {

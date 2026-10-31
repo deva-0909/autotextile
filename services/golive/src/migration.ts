@@ -15,8 +15,10 @@ export const TEMPLATES: Record<string, { label: string; columns: string[]; examp
   parties: { label: 'Customers, suppliers and mills', columns: ['party_type', 'legal_name', 'gstin', 'pan', 'state_code', 'email', 'phone', 'credit_limit', 'segment'], example: ['customer', 'Shakti Knitwear Pvt Ltd', '33AAJCS1234F1Z5', 'AAJCS1234F', '33', 'accounts@shakti.example', '9443000111', '500000', 'Exporter'], control: 'Number of parties', help: 'party_type is customer, supplier, manufacturer, mill or transporter. Existing names are skipped, not duplicated.' },
   opening_balances: { label: 'Opening receivables and payables (bill-wise)', columns: ['kind', 'party', 'doc_no', 'doc_date', 'due_date', 'amount'], example: ['receivable', 'Sri Murugan Garments', 'OLD/2526/0451', '2026-03-12', '2026-04-11', '125000'], control: 'Total amount (₹)', help: 'kind is receivable or payable; party is the legal name or code as in Business partners. Use one row per unpaid bill; for an advance, use a payable for a customer or a receivable for a supplier.' },
   opening_gl: { label: 'Opening trial balance', columns: ['account_code', 'debit', 'credit', 'date'], example: ['1200', '2500000', '0', '2026-04-01'], control: 'Total debits (₹)', help: 'One line per ledger account from the CA-certified trial balance. Leave out receivables, payables and stock: those come from their own batches and the difference account absorbs them. Debits must equal credits.' },
+  gst_credit: { label: 'GST credit carried forward', columns: ['gstin', 'as_of_month', 'igst', 'cgst', 'sgst'], example: ['24AABCD1234E1Z5', '2026-04', '182500', '41250', '41250'], control: 'Total credit (₹)', help: 'One row per GSTIN: the electronic credit ledger closing balance from the last GSTR-3B filed in the old system. as_of_month is the first month run in the ERP; GSTR-3B brings the credit forward from then. Leave the input GST accounts out of the opening trial balance.' },
   opening_stock: { label: 'Opening stock by lot and roll', columns: ['warehouse', 'sku', 'lot_ref', 'roll_kg', 'cost_per_kg', 'grade', 'received_date'], example: ['SRT', 'SJ-160-NVY', 'OLD-L-4411', '24.8', '238', 'A', '2026-02-20'], control: 'Total kg', help: 'One row per roll from the physical count. Rolls get new barcodes; print labels from the inward afterwards. received_date keeps ageing true.' },
   open_pos: { label: 'Open purchase orders', columns: ['supplier', 'legacy_po_no', 'order_date', 'deliver_to', 'expected_date', 'sku', 'pending_kg', 'rate_per_kg'], example: ['Shree Ambica Knitters', 'PO/2526/0912', '2026-03-18', 'SRT', '2026-04-10', 'SJ-160-GRY', '1200', '246'], control: 'Total pending kg', help: 'One row per PO line, with only the quantity still to be received. Rows with the same supplier and legacy_po_no become one PO, loaded as already approved and accepted. deliver_to is a warehouse code or a mill’s name or code.' },
+  open_job_work: { label: 'Open job work at mills', columns: ['mill', 'legacy_challan_no', 'challan_date', 'process', 'expected_return_date', 'sku', 'kg_at_mill', 'cost_per_kg', 'rolls', 'lot_ref'], example: ['Surat Process House', 'JWC/2526/0388', '2026-03-05', 'REACTIVE_DYE', '2026-04-08', 'SJ-160-GRY', '850', '246', '34', 'GR-0412'], control: 'Total kg at mills', help: 'One row per challan line, with only the kg still at the mill. Rows with the same mill and legacy_challan_no become one job order the mill has already acknowledged. challan_date keeps the 365-day GST return clock true; cost_per_kg values the fabric when it comes back.' },
   open_orders: { label: 'Open sales orders', columns: ['customer', 'legacy_order_no', 'sku', 'lot_no', 'pending_kg', 'price_per_kg', 'ship_to'], example: ['Sri Murugan Garments', 'SO/2526/1140', 'SJ-160-NVY', '', '300', '312', 'Tiruppur factory'], control: 'Total pending kg', help: 'One row per order line, with only the quantity still to be delivered, at the agreed price. Load opening stock first: each order reserves stock like a new order. Advances already received belong in the opening balances, so no new token is asked for.' },
 };
 
@@ -32,9 +34,11 @@ const PAN = /^[A-Z]{5}\d{4}[A-Z]$/;
 
 type Party = { id: string; code: string; legal_name: string; party_type: string };
 async function lookups(req: Request, type: string, rows: Record<string, string>[] = []) {
-  const out: { parties?: Party[]; products?: { id: string; sku: string }[]; warehouses?: { id: string; code: string }[]; lots?: { id: string; lot_no: string; product_id: string }[]; accounts?: { id: string; code: string; control: string | null; status: string }[]; books?: { id: string; gstin: string; is_primary: boolean }[] } = {};
-  if (['parties', 'opening_balances', 'open_pos', 'open_orders'].includes(type)) out.parties = (await as<{ items: Party[] }>(req, 'masters', 'GET', '/parties?pageSize=5000')).items;
-  if (['open_pos', 'open_orders'].includes(type)) out.products = (await as<{ items: { id: string; sku: string }[] }>(req, 'masters', 'GET', '/products?pageSize=2000')).items;
+  const out: { parties?: Party[]; products?: { id: string; sku: string }[]; warehouses?: { id: string; code: string }[]; lots?: { id: string; lot_no: string; product_id: string }[]; processes?: { code: string; name: string; status: string }[]; accounts?: { id: string; code: string; control: string | null; status: string; system_key: string | null }[]; books?: { id: string; gstin: string; is_primary: boolean }[] } = {};
+  if (['parties', 'opening_balances', 'open_pos', 'open_orders', 'open_job_work'].includes(type)) out.parties = (await as<{ items: Party[] }>(req, 'masters', 'GET', '/parties?pageSize=5000')).items;
+  if (type === 'open_job_work') out.processes = await as(req, 'jobwork', 'GET', '/process-templates');
+  if (type === 'gst_credit') out.books = await as(req, 'finance', 'GET', '/books');
+  if (['open_pos', 'open_orders', 'open_job_work'].includes(type)) out.products = (await as<{ items: { id: string; sku: string }[] }>(req, 'masters', 'GET', '/products?pageSize=2000')).items;
   if (type === 'open_pos') out.warehouses = await as(req, 'organisation', 'GET', '/warehouses');
   if (type === 'open_orders') {
     out.lots = [];
@@ -82,6 +86,7 @@ function validate(type: string, rows: Record<string, string>[], L: Awaited<Retur
       const a = L.accounts!.find((x) => x.code === d.account_code);
       if (!a) e.push(`account ${d.account_code ?? ''} is not in the chart of accounts`);
       else if (a.control) e.push(`${d.account_code} is a ${a.control} control account — load it with the bill-wise batch`);
+      else if (a.system_key?.startsWith('input_')) e.push(`${d.account_code} is GST input credit — load it with the GST credit carried forward batch`);
       const dr = Number(d.debit || 0), cr = Number(d.credit || 0);
       if (!(dr > 0) === !(cr > 0)) e.push('give either a debit or a credit');
       if (d.date && !isDate(d.date)) e.push('date must be YYYY-MM-DD');
@@ -99,6 +104,29 @@ function validate(type: string, rows: Record<string, string>[], L: Awaited<Retur
       if (first && (first.deliver_to !== d.deliver_to || first.expected_date !== d.expected_date || (first.order_date ?? '') !== (d.order_date ?? ''))) e.push(`deliver_to, expected_date and order_date must be the same on every line of ${d.legacy_po_no}`);
       if (!first) heads.set(g, d);
       const k = `${g}|${d.sku}`; if (seen.has(k)) e.push('the same SKU appears twice on this PO — combine the lines'); seen.add(k);
+    } else if (type === 'open_job_work') {
+      const mill = d.mill ? findParty(d.mill) : undefined;
+      if (!mill || mill.party_type !== 'mill') e.push(`mill "${d.mill ?? ''}" is not a mill in Business partners`);
+      if (!d.legacy_challan_no) e.push('legacy_challan_no is required');
+      if (!isDate(d.challan_date ?? '')) e.push('challan_date must be YYYY-MM-DD');
+      else if (d.challan_date! > new Date().toISOString().slice(0, 10)) e.push('challan_date is in the future');
+      if (!isDate(d.expected_return_date ?? '')) e.push('expected_return_date must be YYYY-MM-DD');
+      const proc = L.processes!.find((p) => p.code === d.process || p.name.toLowerCase() === (d.process ?? '').toLowerCase());
+      if (!proc || proc.status !== 'active') e.push(`process "${d.process ?? ''}" is not an active process (${L.processes!.filter((p) => p.status === 'active').map((p) => p.code).join(', ')})`);
+      if (!L.products!.find((p) => p.sku === d.sku)) e.push(`sku ${d.sku ?? ''} is not in the fabric catalogue`);
+      num('kg_at_mill', 0.01); num('cost_per_kg', 0.01);
+      if (d.rolls && !/^\d+$/.test(d.rolls)) e.push('rolls must be a whole number');
+      const g = `${(d.mill ?? '').toLowerCase()}|${d.legacy_challan_no}`;
+      const first = heads.get(g);
+      if (first && (first.challan_date !== d.challan_date || first.process !== d.process || first.expected_return_date !== d.expected_return_date)) e.push(`challan_date, process and expected_return_date must be the same on every line of ${d.legacy_challan_no}`);
+      if (!first) heads.set(g, d);
+    } else if (type === 'gst_credit') {
+      const gstin = (d.gstin ?? '').toUpperCase();
+      if (!L.books!.find((b) => b.gstin === gstin)) e.push(`gstin ${d.gstin ?? ''} is not one of your GST registrations`);
+      if (!/^\d{4}-\d{2}(-01)?$/.test(d.as_of_month ?? '')) e.push('as_of_month must be YYYY-MM');
+      for (const k of ['igst', 'cgst', 'sgst']) num(k);
+      if (Number(d.cgst || 0) !== Number(d.sgst || 0)) e.push('cgst and sgst credit are normally equal — check the electronic credit ledger');
+      if (seen.has(gstin)) e.push('one row per GSTIN'); seen.add(gstin);
     } else if (type === 'open_orders') {
       const cust = d.customer ? findParty(d.customer) : undefined;
       if (!cust || cust.party_type !== 'customer') e.push(`customer "${d.customer ?? ''}" is not a customer in Business partners`);
@@ -130,6 +158,8 @@ function controlTotal(type: string, rows: Record<string, string>[]) {
   if (type === 'parties') return rows.length;
   if (type === 'opening_balances') return r2(rows.reduce((s, d) => s + Number(String(d.amount).replace(/,/g, '')), 0));
   if (type === 'opening_gl') return r2(rows.reduce((s, d) => s + Number(d.debit || 0), 0));
+  if (type === 'open_job_work') return r2(rows.reduce((s, d) => s + Number(d.kg_at_mill), 0));
+  if (type === 'gst_credit') return r2(rows.reduce((s, d) => s + Number(d.igst || 0) + Number(d.cgst || 0) + Number(d.sgst || 0), 0));
   if (type === 'open_pos' || type === 'open_orders') return r2(rows.reduce((s, d) => s + Number(d.pending_kg), 0));
   return r2(rows.reduce((s, d) => s + Number(d.roll_kg), 0));
 }
@@ -147,10 +177,10 @@ export function migrationRoutes(r: Router, { pool }: ServiceContext) {
 
   /** Upload: parse and validate every row. Invalid rows are listed with their reasons; nothing is loaded yet. */
   r.post('/migration/batches', requirePermission('golive.migration.manage'), async (req, res) => {
-    const b = parse(z.object({ object_type: z.enum(['parties', 'opening_balances', 'opening_gl', 'opening_stock', 'open_pos', 'open_orders']), csv: z.string().min(5).max(5_000_000), file_name: optText(200) }), req.body);
+    const b = parse(z.object({ object_type: z.enum(['parties', 'opening_balances', 'opening_gl', 'opening_stock', 'open_pos', 'open_orders', 'open_job_work', 'gst_credit']), csv: z.string().min(5).max(5_000_000), file_name: optText(200) }), req.body);
     const t = TEMPLATES[b.object_type]!;
     const { head, rows } = parseCsv(b.csv);
-    const missing = t.columns.filter((c) => !head.includes(c) && !['gstin', 'pan', 'email', 'phone', 'credit_limit', 'segment', 'state_code', 'date', 'grade', 'received_date', 'order_date', 'lot_no', 'ship_to'].includes(c));
+    const missing = t.columns.filter((c) => !head.includes(c) && !['gstin', 'pan', 'email', 'phone', 'credit_limit', 'segment', 'state_code', 'date', 'grade', 'received_date', 'order_date', 'lot_no', 'ship_to', 'rolls', 'lot_ref', 'igst', 'cgst', 'sgst'].includes(c));
     if (missing.length) throw badRequest(`Missing columns: ${missing.join(', ')}`);
     if (!rows.length) throw badRequest('The file has no rows');
     if (rows.length > 5000) throw badRequest('Load at most 5,000 rows per batch');
@@ -227,6 +257,26 @@ export function migrationRoutes(r: Router, { pool }: ServiceContext) {
                   lines: rs.map((x) => ({ product_id: product(x.data.sku!), lot_id: x.data.lot_no ? L.lots!.find((l) => l.lot_no === x.data.lot_no && l.product_id === product(x.data.sku!))!.id : null, kg: Number(x.data.pending_kg), price_per_kg: Number(x.data.price_per_kg) })) });
             for (const r1 of rs) await mark(r1.id, out.existing ? 'skipped' : 'imported', out.number, out.existing ? 'Already loaded' : null);
           } catch (e) { for (const r1 of rs) await mark(r1.id, 'failed', null, (e as Error).message); }
+        }
+      } else if (b.object_type === 'open_job_work') {
+        const groups = new Map<string, typeof rows>();
+        for (const r1 of rows) { const g = `${r1.data.mill!.toLowerCase()}|${r1.data.legacy_challan_no}`; groups.set(g, [...(groups.get(g) ?? []), r1]); }
+        for (const rs of groups.values()) {
+          const d = rs[0]!.data;
+          try {
+            const out = await as<{ number: string; existing: boolean }>(req, 'jobwork', 'POST', '/orders/opening', { mill_id: party(d.mill!).id, legacy_challan_no: d.legacy_challan_no, challan_date: d.challan_date, expected_return_date: d.expected_return_date, migration_ref: b.number,
+              process_code: L.processes!.find((p) => p.code === d.process || p.name.toLowerCase() === d.process!.toLowerCase())!.code,
+              lines: rs.map((x) => ({ product_id: L.products!.find((p) => p.sku === x.data.sku)!.id, kg_at_mill: Number(x.data.kg_at_mill), cost_per_kg: Number(x.data.cost_per_kg), rolls: x.data.rolls ? Number(x.data.rolls) : null, lot_ref: x.data.lot_ref || null })) });
+            for (const r1 of rs) await mark(r1.id, out.existing ? 'skipped' : 'imported', out.number, out.existing ? 'Already loaded' : null);
+          } catch (e) { for (const r1 of rs) await mark(r1.id, 'failed', null, (e as Error).message); }
+        }
+      } else if (b.object_type === 'gst_credit') {
+        for (const r1 of rows) {
+          const d = r1.data;
+          try {
+            const out = await as<{ number: string | null; existing: boolean }>(req, 'finance', 'POST', '/gst/opening-credit', { gstin: d.gstin!.toUpperCase(), as_of: d.as_of_month, igst: Number(d.igst || 0), cgst: Number(d.cgst || 0), sgst: Number(d.sgst || 0), reference: b.number });
+            await mark(r1.id, out.existing ? 'skipped' : 'imported', d.gstin!.toUpperCase(), out.existing ? 'Already loaded' : null);
+          } catch (e) { await mark(r1.id, 'failed', null, (e as Error).message); }
         }
       } else if (b.object_type === 'opening_stock') {
         const byWh = new Map<string, typeof rows>();
@@ -327,6 +377,17 @@ async function reconcile(req: Request, pool: ServiceContext['pool'], id: string)
     detail.sales_orders = orders.length;
     detail.by_status = Object.fromEntries([...new Set(live.map((x) => x.status))].map((st) => [st, live.filter((x) => x.status === st).length]));
     if (live.some((x) => x.status === 'awaiting_allocation')) detail.note = 'Some orders wait for a warehouse decision in Fulfilment → Allocation (no single warehouse holds the stock).';
+  } else if (b.object_type === 'open_job_work') {
+    const nums = [...new Set(rows.map((r) => r.result_ref).filter(Boolean))] as string[];
+    const jobs: { number: string; status: string; kg_sent: number }[] = [];
+    for (let i = 0; i < nums.length; i += 150) jobs.push(...(await as<{ items: typeof jobs }>(req, 'jobwork', 'GET', `/orders?pageSize=200&f_numbers=${encodeURIComponent(nums.slice(i, i + 150).join(','))}`)).items);
+    erp = r2(jobs.filter((x) => x.status !== 'cancelled').reduce((s, x) => s + Number(x.kg_sent), 0));
+    detail.job_orders = jobs.length;
+  } else if (b.object_type === 'gst_credit') {
+    const gstins = new Set(rows.map((r) => r.result_ref));
+    const cr = (await as<{ gstin: string; igst: number; cgst: number; sgst: number; voucher_number: string | null; voucher_status: string | null }[]>(req, 'finance', 'GET', '/gst/opening-credit')).filter((x) => gstins.has(x.gstin));
+    erp = r2(cr.filter((x) => !x.voucher_number || x.voucher_status === 'posted').reduce((s, x) => s + x.igst + x.cgst + x.sgst, 0));
+    detail.gstins = cr.map((x) => `${x.gstin}: ${x.voucher_number ?? 'nil credit'}`);
   } else if (b.object_type === 'opening_stock') {
     const list = await as<{ id: string; source_ref: string; weighed_kg: number }[]>(req, 'inventory', 'GET', '/inwards');
     const mine = list.filter((x) => x.source_ref.includes(b.number));

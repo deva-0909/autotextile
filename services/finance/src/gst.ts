@@ -1,6 +1,7 @@
 import type { Router } from 'express';
 import { z } from 'zod';
-import { type ServiceContext, badRequest, many, notFound, one, parse, requirePermission, tx } from '@erp/platform';
+import { type ServiceContext, badRequest, conflict, many, notFound, one, optText, parse, requirePermission, tx } from '@erp/platform';
+import { post } from './ledger.ts';
 import { auditReq, books, monthEnd, round2 } from './common.ts';
 
 const month = z.string().regex(/^\d{4}-\d{2}(-01)?$/).transform((m) => `${m.slice(0, 7)}-01`);
@@ -35,7 +36,8 @@ function gstr1(out: TL[]) {
 }
 
 /** GSTR-3B: outward tax (3.1), ITC (4) and the cash/credit set-off in the order the GST law prescribes. */
-function gstr3b(out: TL[], inw: TL[]) {
+type Credit = { igst: number; cgst: number; sgst: number };
+function gstr3b(out: TL[], inw: TL[], broughtForward: Credit = { igst: 0, cgst: 0, sgst: 0 }) {
   const inv = totals(out.filter((t) => t.doc_type !== 'credit_note'));
   const cn = totals(out.filter((t) => t.doc_type === 'credit_note'));
   const outward = { taxable: round2(inv.taxable - cn.taxable), igst: round2(inv.igst - cn.igst), cgst: round2(inv.cgst - cn.cgst), sgst: round2(inv.sgst - cn.sgst) };
@@ -44,13 +46,27 @@ function gstr3b(out: TL[], inw: TL[]) {
   const itc = totals(itcRows);
   // Liability includes reverse-charge tax; RCM is paid in cash but also becomes credit.
   const liab = { igst: round2(outward.igst + rcm.igst), cgst: round2(outward.cgst + rcm.cgst), sgst: round2(outward.sgst + rcm.sgst) };
-  const credit = { igst: round2(itc.igst + rcm.igst), cgst: round2(itc.cgst + rcm.cgst), sgst: round2(itc.sgst + rcm.sgst) };
+  const credit = { igst: round2(broughtForward.igst + itc.igst + rcm.igst), cgst: round2(broughtForward.cgst + itc.cgst + rcm.cgst), sgst: round2(broughtForward.sgst + itc.sgst + rcm.sgst) };
   const pay = { ...liab };
   const use = (from: 'igst' | 'cgst' | 'sgst', to: 'igst' | 'cgst' | 'sgst') => { const x = Math.min(credit[from], pay[to]); credit[from] = round2(credit[from] - x); pay[to] = round2(pay[to] - x); };
   // IGST credit: IGST, then CGST, then SGST. CGST credit: CGST then IGST. SGST credit: SGST then IGST.
   use('igst', 'igst'); use('igst', 'cgst'); use('igst', 'sgst'); use('cgst', 'cgst'); use('cgst', 'igst'); use('sgst', 'sgst'); use('sgst', 'igst');
-  return { outward_3_1_a: outward, reverse_charge_3_1_d: rcm, itc_4a: itc, liability: liab, cash_payable: pay, credit_carried_forward: credit };
+  return { outward_3_1_a: outward, reverse_charge_3_1_d: rcm, itc_4a: itc, credit_brought_forward: broughtForward, liability: liab, cash_payable: pay, credit_carried_forward: credit };
 }
+
+/** Credit available at the start of a month: the legacy carry-forward, rolled through every month since it was loaded. */
+async function creditBroughtForward(pool: ServiceContext['pool'], bookId: string, m: string): Promise<Credit> {
+  const o = await one<{ as_of: string; igst: number; cgst: number; sgst: number }>(pool, 'SELECT as_of::text, igst::float, cgst::float, sgst::float FROM gst_opening_credit WHERE book_id = $1', [bookId]);
+  let bf: Credit = { igst: 0, cgst: 0, sgst: 0 };
+  if (!o || m < o.as_of) return bf;
+  bf = { igst: o.igst, cgst: o.cgst, sgst: o.sgst };
+  for (let cur = o.as_of; cur < m; cur = nextMonth(cur)) {
+    const all = await lines(pool, bookId, cur);
+    bf = gstr3b(all.filter((t) => t.direction === 'outward'), all.filter((t) => t.direction === 'inward'), bf).credit_carried_forward;
+  }
+  return bf;
+}
+const nextMonth = (m: string) => { const d = new Date(`${m}T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + 1); return d.toISOString().slice(0, 10); };
 
 export function gstRoutes(r: Router, { pool }: ServiceContext) {
   r.get('/gst/returns', requirePermission('finance.read'), async (req, res) => {
@@ -60,7 +76,41 @@ export function gstRoutes(r: Router, { pool }: ServiceContext) {
     const all = await lines(pool, b.id, m);
     const out = all.filter((t) => t.direction === 'outward'), inw = all.filter((t) => t.direction === 'inward');
     const recon = await one(pool, `SELECT count(*)::int AS lines, count(*) FILTER (WHERE status = 'matched')::int AS matched, count(*) FILTER (WHERE status <> 'matched')::int AS issues FROM gstr2b_lines WHERE book_id = $1 AND period = $2`, [b.id, m]);
-    res.json({ book: b, month: m, gstr1: gstr1(out), gstr3b: gstr3b(out, inw), inward: inw, itc_reconciliation: recon });
+    res.json({ book: b, month: m, gstr1: gstr1(out), gstr3b: gstr3b(out, inw, await creditBroughtForward(pool, b.id, m)), inward: inw, itc_reconciliation: recon });
+  });
+
+  /**
+   * Go-live: the electronic credit ledger balance (IGST/CGST/SGST) carried over from the legacy system for one GSTIN,
+   * as at the start of the first month run in the ERP. Posts Dr Input GST / Cr Opening difference and feeds GSTR-3B.
+   */
+  r.get('/gst/opening-credit', requirePermission('finance.read'), async (_req, res) => {
+    res.json(await many(pool, `SELECT o.book_id, b.gstin, o.as_of::text, o.igst::float, o.cgst::float, o.sgst::float, o.reference, v.number AS voucher_number, v.status AS voucher_status, o.created_by_name, o.created_at
+      FROM gst_opening_credit o JOIN books b ON b.id = o.book_id LEFT JOIN vouchers v ON v.id = o.voucher_id ORDER BY b.gstin`));
+  });
+  r.post('/gst/opening-credit', requirePermission('finance.gst.manage'), async (req, res) => {
+    const amt = z.number().min(0).max(1e10);
+    const b = parse(z.object({ gstin: z.string().length(15), as_of: month, igst: amt, cgst: amt, sgst: amt, reference: optText(80) }), req.body);
+    if (round2(b.cgst) !== round2(b.sgst)) throw badRequest('CGST and SGST credit are normally equal; check the electronic credit ledger');
+    const book = (await books(pool)).find((x) => x.gstin === b.gstin.toUpperCase());
+    if (!book) throw badRequest(`${b.gstin} is not one of your GST registrations`);
+    const out = await tx(pool, async (c) => {
+      const ex = await one<{ as_of: string; igst: number; cgst: number; sgst: number; number: string | null }>(c, `SELECT o.as_of::text, o.igst::float, o.cgst::float, o.sgst::float, v.number FROM gst_opening_credit o LEFT JOIN vouchers v ON v.id = o.voucher_id WHERE o.book_id = $1 FOR UPDATE OF o`, [book.id]);
+      if (ex) {
+        if (ex.as_of === b.as_of && ex.igst === round2(b.igst) && ex.cgst === round2(b.cgst) && ex.sgst === round2(b.sgst)) return { number: ex.number, existing: true };
+        throw conflict(`Opening credit for ${book.gstin} is already loaded (${ex.number}) with different figures; reverse that voucher and remove it before loading again`);
+      }
+      const total = round2(b.igst + b.cgst + b.sgst);
+      let v: { id: string; number: string } | null = null;
+      if (total > 0) {
+        v = await post(c, { type: 'opening', book_id: book.id, date: b.as_of, narration: `GST credit carried forward from the legacy system${b.reference ? ` (${b.reference})` : ''}`, by: req.user!.name, approved_by: 'migration sign-off',
+          source: { service: 'finance', type: 'gst_opening_credit', id: book.id, ref: b.reference ?? null },
+          lines: [{ account: 'input_igst', debit: b.igst }, { account: 'input_cgst', debit: b.cgst }, { account: 'input_sgst', debit: b.sgst }, { account: 'opening_difference', credit: total }] });
+      }
+      await c.query(`INSERT INTO gst_opening_credit (book_id, as_of, igst, cgst, sgst, voucher_id, reference, created_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [book.id, b.as_of, round2(b.igst), round2(b.cgst), round2(b.sgst), v?.id ?? null, b.reference ?? null, req.user!.name]);
+      await auditReq(c, req, 'gst_opening_credit', book.id, 'imported', { after: b });
+      return { number: v?.number ?? null, existing: false };
+    });
+    res.status(201).json(out);
   });
 
   /** GSTR-1 data in the GST portal's offline JSON layout, for upload through the GST offline tool or a GSP. */

@@ -127,6 +127,10 @@ Make synchronous calls first, then audit and publish.
   `POST /purchase-orders/opening`) and open sales orders skip the token (commerce `POST /orders/opening`): both were
   approved and paid for in the old system, and the batch's reconciliation and owner sign-off are the control. Each
   keeps its legacy number, so loading the same file twice returns the first document.
+- **Open job work** becomes grey stock at the mill (source `opening`, valued at the legacy cost) on a job order the
+  mill has already acknowledged (jobwork `POST /orders/opening`); the statutory due date counts from the original
+  challan date. **GST credit carried forward** is one row per GSTIN (finance `POST /gst/opening-credit`): it posts
+  Dr Input IGST/CGST/SGST, Cr Opening difference, and GSTR-3B rolls it forward through every month from its month on.
 - **Reconciliation reads back.** After loading, golive reads the created records (parties, opening vouchers by
   number, inwards by source reference and weighed kg) and compares them with the file’s control totals. Sign-off must
   come from a different user from the one who loaded the batch.

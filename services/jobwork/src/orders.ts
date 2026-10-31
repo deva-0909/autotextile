@@ -105,6 +105,7 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
     const where: string[] = [];
     if (lq.filters.status) { params.push(lq.filters.status.split(',')); where.push(`status = ANY($${params.length})`); }
     if (lq.filters.mill) { params.push(lq.filters.mill); where.push(`mill_id = $${params.length}`); }
+    if (lq.filters.numbers) { params.push(lq.filters.numbers.split(',')); where.push(`number = ANY($${params.length})`); }
     if (lq.q) { params.push(`%${lq.q}%`); where.push(`(number ILIKE $${params.length} OR mill_name ILIKE $${params.length} OR process_name ILIKE $${params.length})`); }
     const rows = await many<{ total_count: number }>(pool, `
       SELECT *, round(kg_sent - kg_good - kg_rejected - kg_damaged - kg_process_loss, 3) AS kg_balance, count(*) OVER ()::int AS total_count
@@ -161,6 +162,55 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
           [o!.id, l.line_no, l.source, l.millStockId, l.warehouseId, l.warehouseName, l.product.id, l.product.sku, l.product.name, l.product.category_id, l.lot_ref ?? null, l.rolls ?? null, l.kg_sent, l.card?.id ?? null, l.charge]);
       await auditReq(c, req, 'job_order', o!.id, 'created', { after: { number, mill: mill.code, process: proc.code, kg_sent: kgSent } });
       return o;
+    });
+    res.status(201).json(out);
+  });
+
+  /**
+   * Go-live: fabric already at a mill on a legacy challan. Only the balance still at the mill is loaded, as grey stock
+   * at the mill (valued at the legacy cost) on a job order that the mill has already acknowledged. The statutory
+   * return clock runs from the original challan date. Loading the same challan twice returns the first order.
+   */
+  r.post('/orders/opening', requirePermission('jobwork.order.manage'), async (req, res) => {
+    const b = parse(z.object({ mill_id: z.uuid(), process_code: z.string(), legacy_challan_no: z.string().trim().min(1).max(60), challan_date: isoDate, expected_return_date: isoDate,
+      migration_ref: optText(40), instructions: optText(2000),
+      lines: z.array(z.object({ product_id: z.uuid(), kg_at_mill: z.number().positive(), cost_per_kg: z.number().positive(), rolls: z.number().int().positive().nullable().optional(), lot_ref: optText(40) })).min(1).max(40) }), req.body);
+    if (b.challan_date > today()) throw badRequest('The challan date is in the future');
+    const mill = await getParty(b.mill_id).catch(() => null);
+    if (!mill || mill.party_type !== 'mill' || mill.status !== 'active') throw badRequest('Choose an active mill', { fields: { mill_id: 'Required' } });
+    const buffer = Number(await setting('jobwork.internal_buffer_days', 1));
+    const statutoryDays = Number(await setting('jobwork.statutory_return_days', 365));
+    const out = await tx(pool, async (c) => {
+      const ex = await one<{ id: string; number: string }>(c, 'SELECT id, number FROM job_orders WHERE mill_id = $1 AND legacy_ref = $2', [b.mill_id, b.legacy_challan_no]);
+      if (ex) return { ...ex, existing: true };
+      const proc = await one<{ code: string; name: string; stages: unknown; status: string }>(c, 'SELECT * FROM process_templates WHERE code = $1', [b.process_code]);
+      if (!proc || proc.status !== 'active') throw badRequest('Choose an active process', { fields: { process_code: 'Required' } });
+      const lines = [];
+      for (const [i, l] of b.lines.entries()) {
+        const p = await getProduct(l.product_id);
+        const ms = await one<{ id: string }>(c, `INSERT INTO mill_stock (mill_id, mill_name, source_type, source_ref, product_id, sku, product_name, kg_in, kg_allocated, rolls, received_date, cost_per_kg)
+          VALUES ($1,$2,'opening',$3,$4,$5,$6,$7,$7,$8,$9,$10) RETURNING id`, [mill.id, mill.legal_name, `Legacy challan ${b.legacy_challan_no}`, p.id, p.sku, p.name, l.kg_at_mill, l.rolls ?? null, b.challan_date, l.cost_per_kg]);
+        const card = await pickRateCard(c, b.mill_id, b.process_code, p.id, p.category_id, today());
+        lines.push({ ...l, line_no: i + 1, product: p, millStockId: ms!.id, card, charge: card ? chargeFor(card, l.kg_at_mill) : 0 });
+      }
+      const kg = round2(lines.reduce((s, l) => s + l.kg_at_mill, 0));
+      const missingRate = lines.filter((l) => !l.card);
+      const number = await nextNumber(c, 'job_work_challan', 'JW-');
+      const o = await one<{ id: string; number: string }>(c, `
+        INSERT INTO job_orders (number, mill_id, mill_code, mill_name, mill_gstin, process_code, process_name, stages, expected_return_date, instructions, estimated_charge, rate_summary, kg_sent, created_by, created_by_name,
+          status, issue_date, internal_due_date, statutory_due_date, ack_at, ack_kg, ack_discrepancy_kg, ack_remarks, ack_by_name, ack_source, legacy_ref, migration_ref)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'acknowledged',$16,$17,$18,now(),$13,0,$19,$15,'internal',$20,$21) RETURNING id, number`,
+        [number, mill.id, mill.code, mill.legal_name, mill.gstin, proc.code, proc.name, JSON.stringify(proc.stages), b.expected_return_date, [`Legacy challan ${b.legacy_challan_no}`, b.instructions].filter(Boolean).join(' · '),
+          round2(lines.reduce((s, l) => s + l.charge, 0)), missingRate.length ? `No rate card for ${missingRate.map((l) => l.product.sku).join(', ')}` : [...new Set(lines.map((l) => describeCard(l.card!)))].join('; '), kg, req.user!.id, req.user!.name,
+          b.challan_date, addDays(b.expected_return_date, -buffer), addDays(b.challan_date, statutoryDays), `Balance at mill carried over from the legacy system${b.migration_ref ? ` (${b.migration_ref})` : ''}`, b.legacy_challan_no, b.migration_ref ?? null]);
+      for (const l of lines)
+        await c.query(`INSERT INTO job_order_lines (job_order_id, line_no, source, mill_stock_id, product_id, sku, product_name, category_id, lot_ref, rolls, kg_sent, rate_card_id, estimated_charge)
+          VALUES ($1,$2,'mill_stock',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          [o!.id, l.line_no, l.millStockId, l.product.id, l.product.sku, l.product.name, l.product.category_id, l.lot_ref ?? null, l.rolls ?? null, l.kg_at_mill, l.card?.id ?? null, l.charge]);
+      await c.query(`INSERT INTO stage_updates (job_order_id, stage_code, stage_name, status, kg, note, source, by_name) VALUES ($1, 'ISSUED', 'Challan issued (legacy)', 'completed', NULL, $2, 'internal', $3), ($1, 'RECEIPT', 'Material at mill (carried over)', 'completed', $4, NULL, 'internal', $3)`,
+        [o!.id, `Legacy challan ${b.legacy_challan_no} dated ${b.challan_date}`, req.user!.name, kg]);
+      await auditReq(c, req, 'job_order', o!.id, 'migrated', { after: { number, legacy_challan: b.legacy_challan_no, mill: mill.code, kg } });
+      return { ...o!, existing: false };
     });
     res.status(201).json(out);
   });

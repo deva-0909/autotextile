@@ -170,7 +170,7 @@ function AddBankModal({ open, onClose, onDone }: { open: boolean; onClose: () =>
 interface Tot { taxable: number; cgst: number; sgst: number; igst: number }
 interface GstRet { book: { id: string; gstin: string; code: string }; month: string;
   gstr1: { b2b: (Tot & { doc_no: string; doc_date: string; party_name: string; party_gstin: string; place_of_supply: string; transfer: boolean; value: number })[]; b2cs: (Tot & { place_of_supply: string; rate: number })[]; cdnr: (Tot & { doc_no: string; doc_date: string; party_name: string; party_gstin: string | null })[]; hsn: (Tot & { hsn: string; rate: number; qty: number })[] };
-  gstr3b: { outward_3_1_a: Tot; reverse_charge_3_1_d: Tot; itc_4a: Tot; liability: Omit<Tot, 'taxable'>; cash_payable: Omit<Tot, 'taxable'>; credit_carried_forward: Omit<Tot, 'taxable'> };
+  gstr3b: { outward_3_1_a: Tot; reverse_charge_3_1_d: Tot; itc_4a: Tot; liability: Omit<Tot, 'taxable'>; cash_payable: Omit<Tot, 'taxable'>; credit_brought_forward: Omit<Tot, 'taxable'>; credit_carried_forward: Omit<Tot, 'taxable'> };
   inward: (Tot & { id: number; doc_no: string; doc_date: string; party_name: string; party_gstin: string | null; doc_type: string })[]; itc_reconciliation: { lines: number; matched: number; issues: number } }
 const taxCols = <T extends Tot>() => [
   { key: 't', header: 'Taxable', align: 'right' as const, render: (r: T) => fmtAmt(r.taxable) },
@@ -203,8 +203,9 @@ export function GstPage() {
             {g.itc_reconciliation.lines > 0 ? <p className="mt-3 text-[12.5px] text-slate-600">GSTR-2B: {g.itc_reconciliation.matched} of {g.itc_reconciliation.lines} lines match; {g.itc_reconciliation.issues} need attention.</p> : <p className="mt-3 text-[12.5px] text-amber-700">GSTR-2B for this month is not imported yet — claim only credit that appears in 2B.</p>}
           </Card>
           <Card className="lg:col-span-2" title="Payment of tax" description="Credit is used in the order the law prescribes: IGST credit against IGST, then CGST, then SGST; CGST and SGST credit against their own head, then IGST.">
-            <SimpleTable rows={(['igst', 'cgst', 'sgst'] as const).map((h) => ({ h, liab: g.gstr3b.liability[h], cash: g.gstr3b.cash_payable[h], cf: g.gstr3b.credit_carried_forward[h] }))} rowKey={(r) => r.h} columns={[
+            <SimpleTable rows={(['igst', 'cgst', 'sgst'] as const).map((h) => ({ h, liab: g.gstr3b.liability[h], cash: g.gstr3b.cash_payable[h], bf: g.gstr3b.credit_brought_forward[h], cf: g.gstr3b.credit_carried_forward[h] }))} rowKey={(r) => r.h} columns={[
               { key: 'h', header: 'Tax', render: (r) => r.h.toUpperCase() },
+              { key: 'b', header: 'Credit brought forward', align: 'right', render: (r) => fmtAmt(r.bf, false) },
               { key: 'l', header: 'Liability', align: 'right', render: (r) => fmtAmt(r.liab, false) },
               { key: 'u', header: 'Paid through credit', align: 'right', render: (r) => fmtAmt(r.liab - r.cash, false) },
               { key: 'c', header: 'Payable in cash', align: 'right', render: (r) => <span className="font-semibold">{fmtAmt(r.cash, false)}</span> },
