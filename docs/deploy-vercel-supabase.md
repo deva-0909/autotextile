@@ -12,8 +12,9 @@ only the PostgreSQL database. Locally nothing changes: `npm run setup` and `npm 
 - **No background processes.** The event bus is drained after every change and before reads; the services' periodic
   checks and the message dispatcher run in the background after requests (at most every 10 minutes) and from a daily
   Vercel Cron call to `/api/_cron`.
-- **Setup** runs once from the deployed function: `POST /api/_setup?reset=1` with `Authorization: Bearer <SETUP_SECRET>`
-  migrates every schema and loads the demo data (about 10 seconds). Without `SETUP_SECRET` the endpoint does not exist.
+- **Setup is automatic**: the first request on an empty database migrates every schema and loads the demo data
+  (about 10 seconds, once; concurrent cold starts wait for it). To reset the demo later, set `SETUP_SECRET` and call
+  `POST /api/_setup?reset=1` with `Authorization: Bearer <SETUP_SECRET>`; without it that endpoint does not exist.
 - **Not available on Vercel:** backups and restore tests (`pg_dump` is not installed; use Supabase's own backups) and
   durable file storage (uploaded documents live in `/tmp` and disappear when the instance is recycled).
 
@@ -30,15 +31,15 @@ only the PostgreSQL database. Locally nothing changes: `npm run setup` and `npm 
    | `SUPABASE_REGION` | `ap-south-1` |
    | `DB_PASSWORD` | the password used in step 1 |
    | `JWT_SECRET` | a long random string |
-   | `SETUP_SECRET` | a long random string (only needed for step 3) |
+   | `SETUP_SECRET` | optional: a long random string, to allow resetting the demo |
    | `CRON_SECRET` | a long random string |
    | `PAYMENT_WEBHOOK_SECRET` | a long random string |
    | `DEMO_MODE` | `1` (role switcher and password-free demo sign-in) |
 
    The function finds the right pooler host from the project reference and region. Alternatively set `DATABASE_URL`
    to `postgres://erp_owner.<ref>:<password>@<pooler-host>:6543/postgres`.
-3. **Load the data**: `curl -X POST "https://<your-app>.vercel.app/api/_setup?reset=1" -H "Authorization: Bearer <SETUP_SECRET>"`.
-   Repeat any time to reset the demo to its starting state.
+3. **Open the app.** The first visit loads the demo data. To reset it later:
+   `curl -X POST "https://<your-app>.vercel.app/api/_setup?reset=1" -H "Authorization: Bearer <SETUP_SECRET>"`.
 
 Every push to `main` redeploys automatically.
 

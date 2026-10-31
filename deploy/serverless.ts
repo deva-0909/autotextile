@@ -66,8 +66,35 @@ const database = () => (resolved ??= resolveDatabase().catch((e) => { resolved =
 type Booted = { gateway: ReturnType<typeof createGateway>; services: RunningService[] };
 let booted: Promise<Booted> | null = null;
 
+/**
+ * First start on an empty database: migrate and load the demo data before serving (about 10 seconds, once).
+ * A session-level advisory lock makes concurrent cold starts wait for the first one instead of seeding twice.
+ */
+async function ensureSetUp(session: string) {
+  const c = new pg.Client({ connectionString: session.replace('erp_owner', 'erp_identity'), ssl: /localhost|127\.0\.0\.1/.test(session) ? undefined : { rejectUnauthorized: false } });
+  await c.connect();
+  try {
+    const ready = async () => (await c.query(`SELECT to_regclass('identity.users') IS NOT NULL AND EXISTS (SELECT 1 FROM identity.users) AS ok`).catch(() => ({ rows: [{ ok: false }] }))).rows[0].ok;
+    if (await ready()) return;
+    await c.query(`SELECT pg_advisory_lock(hashtext('erp:setup'))`);
+    try {
+      if (await ready()) return;
+      console.log('[setup] empty database: migrating and loading demo data');
+      const transaction = process.env.DATABASE_URL;
+      process.env.DATABASE_URL = session;
+      try { await setupDatabase({ log: (l) => console.log(`[setup] ${l}`) }); } finally { process.env.DATABASE_URL = transaction; }
+    } finally {
+      await c.query(`SELECT pg_advisory_unlock(hashtext('erp:setup'))`).catch(() => {});
+    }
+  } finally {
+    await c.end().catch(() => {});
+  }
+}
+
 async function boot(): Promise<Booted> {
-  process.env.DATABASE_URL = (await database()).transaction;
+  const db = await database();
+  process.env.DATABASE_URL = db.transaction;
+  await ensureSetUp(db.session);
   const services = await Promise.all(SERVICE_DEFS.map((def) => bootService(def, { serverless: true })));
   const ports: Partial<Record<ServiceName, number>> = {};
   await Promise.all(services.map((s) => new Promise<void>((resolve) => {
