@@ -157,7 +157,7 @@ Statuses:
 
 | ID | Requirement | Status | Implementation | Remaining (phase) |
 |---|---|---|---|---|
-| REQ-0092 | Opening balances and master migration | **Built / partial** | Templates, row validation, load through service APIs, read-back reconciliation and owner sign-off for parties, bill-wise AR/AP (advances as opposite-side bills), opening trial balance and opening stock by lot/roll | Open POs, open job-work, open sales orders and GST carry-forward have no template yet; they are entered on the normal screens at cutover |
+| REQ-0092 | Opening balances and master migration | **Built / partial** | Templates, row validation, load through service APIs, read-back reconciliation and owner sign-off for parties, bill-wise AR/AP (advances as opposite-side bills), opening trial balance, opening stock by lot/roll, open purchase orders and open sales orders | Open job-work and GST carry-forward have no template yet; they are entered on the normal screens at cutover |
 | REQ-0093 | End-to-end UAT and regression | **Built** | Scenario per requirement plus 14 cross-cutting scenarios; results with evidence; defects with severity and retest; phase sign-off rules; 102 automated integration tests and `npm run load-test` | Executing the scenarios is the business team’s work (**Business**) |
 | REQ-0094 | Role-based training | **Built** | 15 modules by role with covered screens; assignment, completion and score; completion feeds readiness | Training material and sessions (**Business**) |
 | REQ-0095 | Cutover and hypercare | **Built** | 19-step cutover checklist with owners; live readiness criteria; go/no-go with rollback plan; incidents with P1–P4 response/resolution deadlines and breach flags | The go/no-go decision and support ownership (**Business**) |

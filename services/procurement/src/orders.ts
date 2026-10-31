@@ -95,6 +95,7 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
     if (f.status) { params.push(f.status.split(',')); where.push(`p.status = ANY($${params.length})`); }
     if (f.supplier) { params.push(f.supplier); where.push(`p.supplier_id = $${params.length}`); }
     if (f.deliverTo) { params.push(f.deliverTo); where.push(`p.deliver_to_type = $${params.length}`); }
+    if (f.numbers) { params.push(f.numbers.split(',')); where.push(`p.number = ANY($${params.length})`); }
     if (lq.q) { params.push(`%${lq.q}%`); where.push(`(p.number ILIKE $${params.length} OR p.supplier_name ILIKE $${params.length} OR p.deliver_to_name ILIKE $${params.length})`); }
     const rows = await many<{ total_count: number }>(pool, `
       SELECT p.*, (SELECT sum(qty_kg) FROM po_lines l WHERE l.po_id = p.id) AS ordered_kg,
@@ -114,6 +115,24 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
     res.status(201).json(await tx(pool, (c) => createPurchaseOrder(c, req, body)));
   });
 
+  /**
+   * Go-live: an open PO from the legacy system, already approved and accepted by the supplier there. Only the quantity
+   * still to be received is loaded; the control is the migration batch's reconciliation and owner sign-off.
+   * Loading the same legacy PO twice returns the first one.
+   */
+  r.post('/purchase-orders/opening', requirePermission('procurement.po.manage'), async (req, res) => {
+    const body = parse(poBody.extend({ legacy_ref: z.string().trim().min(1).max(60), order_date: isoDate.optional(), migration_ref: optText(40) }), req.body);
+    const out = await tx(pool, async (c) => {
+      const existing = await one<{ id: string; number: string }>(c, 'SELECT id, number FROM purchase_orders WHERE supplier_id = $1 AND legacy_ref = $2', [body.supplier_id, body.legacy_ref]);
+      if (existing) return { ...existing, existing: true };
+      const po = await createPurchaseOrder(c, req, { ...body, notes: [`Legacy PO ${body.legacy_ref}`, body.notes].filter(Boolean).join(' · ') });
+      await c.query(`UPDATE purchase_orders SET status = 'accepted', legacy_ref = $2, migration_ref = $3, order_date = coalesce($4::date, order_date), approved_by_name = 'Legacy PO (migration sign-off)', approved_at = now(), sent_at = now(), updated_at = now() WHERE id = $1`,
+        [po.id, body.legacy_ref, body.migration_ref ?? null, body.order_date ?? null]);
+      await poEvent(c, po.id, 'migrated', `Open balance of legacy PO ${body.legacy_ref}${body.migration_ref ? ` (${body.migration_ref})` : ''}`, { name: req.user!.name });
+      return { ...po, existing: false };
+    });
+    res.status(201).json(out);
+  });
   r.patch('/purchase-orders/:id', requirePermission('procurement.po.manage'), async (req, res) => {
     const body = parse(poBody, req.body);
     const b = await buildPo(body);

@@ -44,7 +44,7 @@ export function GoLivePage() {
 }
 
 // ---------------------------------------------------------------- migration
-const OBJ_LABEL: Record<string, string> = { parties: 'Customers & suppliers', opening_balances: 'Opening receivables & payables', opening_gl: 'Opening trial balance', opening_stock: 'Opening stock' };
+const OBJ_LABEL: Record<string, string> = { parties: 'Customers & suppliers', opening_balances: 'Opening receivables & payables', opening_gl: 'Opening trial balance', opening_stock: 'Opening stock', open_pos: 'Open purchase orders', open_orders: 'Open sales orders' };
 export function MigrationPage() {
   const { can } = useAuth();
   const qc = useQueryClient();
@@ -63,7 +63,7 @@ export function MigrationPage() {
   return (
     <>
       <PageHeader title="Data migration" description="Load masters and opening balances from the old system: upload a CSV, see every row that fails validation, load the rest through the same checks as daily work, reconcile against the file’s control total, and have a business owner sign each batch off." breadcrumbs={crumbs('Migration')} />
-      <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {Object.entries(tpl.data ?? {}).map(([k, x]) => { const b = latest(k); return (
           <Card key={k} title={x.label} description={b ? `${b.number} · ${humanize(b.status)}` : 'Not loaded yet'}>
             {b && b.source_total != null && <p className="mb-2 text-[13px]">{x.control}: <b>{fmtNum(b.source_total)}</b> in file · <b>{b.erp_total == null ? '—' : fmtNum(b.erp_total)}</b> in ERP {b.difference != null && <Badge tone={Math.abs(b.difference) < 0.01 ? 'success' : 'danger'}>{Math.abs(b.difference) < 0.01 ? 'ties up' : `diff ${fmtNum(b.difference)}`}</Badge>}</p>}

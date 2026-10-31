@@ -123,6 +123,10 @@ Make synchronous calls first, then audit and publish.
 - **Migration goes through the front door.** Golive never writes another service’s tables. Each validated row is
   loaded by calling the owning service’s API as the uploading user (`callAsUser`), so the same validation, numbering,
   audit and events apply as in daily work, and a user cannot load what they could not enter by hand.
+- **Legacy documents carry their history.** Open POs load as approved and accepted (procurement
+  `POST /purchase-orders/opening`) and open sales orders skip the token (commerce `POST /orders/opening`): both were
+  approved and paid for in the old system, and the batch's reconciliation and owner sign-off are the control. Each
+  keeps its legacy number, so loading the same file twice returns the first document.
 - **Reconciliation reads back.** After loading, golive reads the created records (parties, opening vouchers by
   number, inwards by source reference and weighed kg) and compares them with the file’s control totals. Sign-off must
   come from a different user from the one who loaded the batch.

@@ -74,7 +74,7 @@ async function priceLines(lines: LineIn[]) {
   return out;
 }
 
-export async function createOrder(c: Client, req: Request, o: { customer_id: string; lines: LineIn[]; channel: 'portal' | 'crm_quotation' | 'internal'; source_id?: string | null; source_ref?: string | null; ship_to?: string | null; notes?: string | null; existing_reservation?: { reservation_id: string; warehouse_id: string } | null; skip_company_approval?: boolean }) {
+export async function createOrder(c: Client, req: Request, o: { customer_id: string; lines: LineIn[]; channel: 'portal' | 'crm_quotation' | 'internal'; source_id?: string | null; source_ref?: string | null; ship_to?: string | null; notes?: string | null; existing_reservation?: { reservation_id: string; warehouse_id: string } | null; skip_company_approval?: boolean; opening?: boolean }) {
   const cust = await getParty(o.customer_id);
   if (cust.party_type !== 'customer' || cust.status !== 'active') throw badRequest('Customer is not active');
   const lines = await priceLines(o.lines);
@@ -83,7 +83,8 @@ export async function createOrder(c: Client, req: Request, o: { customer_id: str
   const credit = await callService<{ ok: boolean; mode: string; status: string; reason: string | null }>(S, 'crm', 'GET', `/credit-check/${o.customer_id}?amount=${taxable + tax}`).catch(() => ({ ok: true, mode: 'advance', status: 'active', reason: null }));
   if (credit.status === 'blocked') throw conflict(credit.reason ?? 'Credit is blocked for this customer');
   const terms: 'credit' | 'advance' = credit.mode === 'credit' && credit.ok ? 'credit' : 'advance';
-  const token = terms === 'credit' ? null : await resolveToken(c, o.customer_id, lines.map((l) => ({ product_id: l.product.id, category_id: l.product.category_id, taxable: l.taxable })));
+  // A legacy order's advance is already in the opening balances, so no new token is asked for.
+  const token = terms === 'credit' || o.opening ? null : await resolveToken(c, o.customer_id, lines.map((l) => ({ product_id: l.product.id, category_id: l.product.category_id, taxable: l.taxable })));
   // Company-side approval: buyers above the company's limit need their own approver first.
   const cs = await one<{ order_approval_limit: number | null }>(c, 'SELECT order_approval_limit FROM customer_settings WHERE customer_id = $1', [o.customer_id]);
   const needsCompany = o.channel === 'portal' && !o.skip_company_approval && cs?.order_approval_limit != null && taxable + tax > Number(cs.order_approval_limit) && !hasPermission(req.user, 'portal.customer.approve');
@@ -93,7 +94,7 @@ export async function createOrder(c: Client, req: Request, o: { customer_id: str
       token_amount, token_policy_text, token_refundable, token_cancellation_fee_pct, ship_to, notes)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING id`,
     [number, cust.id, cust.legal_name, cust.gstin, cust.state_code, o.channel, o.source_ref ?? null, o.source_id ?? null, userId(req), req.user!.name, needsCompany ? 'pending_company_approval' : 'awaiting_allocation', terms,
-      round3(lines.reduce((s, l) => s + l.kg, 0)), taxable, tax, round2(taxable + tax), token?.amount ?? 0, terms === 'credit' ? `Approved credit (${credit.mode})` : token!.text, token?.refundable ?? true, token?.cancellation_fee_pct ?? 0, o.ship_to ?? null, o.notes ?? null]);
+      round3(lines.reduce((s, l) => s + l.kg, 0)), taxable, tax, round2(taxable + tax), token?.amount ?? 0, terms === 'credit' ? `Approved credit (${credit.mode})` : token?.text ?? 'Legacy order: advance carried in the opening balances', token?.refundable ?? true, token?.cancellation_fee_pct ?? 0, o.ship_to ?? null, o.notes ?? null]);
   for (const l of lines)
     await c.query(`INSERT INTO order_lines (order_id, line_no, product_id, sku, product_name, category, hsn_code, gst_rate, lot_id, lot_no, kg, price_per_kg, taxable) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       [ord!.id, l.line_no, l.product.id, l.product.sku, l.product.name, l.product.category_name, l.product.hsn_code, l.product.gst_rate, l.lot_id, l.lot_no, l.kg, l.price, l.taxable]);
@@ -329,9 +330,10 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
     if (req.query.status) { params.push(String(req.query.status).split(',')); where.push(`o.status = ANY($${params.length})`); }
     if (req.query.customer) { params.push(req.query.customer); where.push(`o.customer_id = $${params.length}`); }
     if (req.query.q) { params.push(`%${req.query.q}%`); where.push(`(o.number ILIKE $${params.length} OR o.customer_name ILIKE $${params.length})`); }
+    if (req.query.numbers) { params.push(String(req.query.numbers).split(',')); where.push(`o.number = ANY($${params.length})`); }
     res.json(await many(pool, `SELECT o.*, (SELECT string_agg(sku, ', ' ORDER BY line_no) FROM order_lines WHERE order_id = o.id) AS skus,
       (SELECT coalesce(sum(amount), 0)::float FROM payments WHERE order_id = o.id AND status IN ('success','partially_refunded','refunded')) AS paid
-      FROM orders o ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY o.created_at DESC LIMIT 300`, params));
+      FROM orders o ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY o.created_at DESC LIMIT ${req.query.numbers ? 5000 : 300}`, params));
   });
   r.get('/orders/:id', requirePermission('commerce.read', 'fulfilment.read'), async (req, res) => {
     res.json(await orderDetail(pool, String(req.params.id)));
@@ -340,6 +342,21 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
   r.post('/orders', requirePermission('commerce.order.manage'), async (req, res) => {
     const b = parse(z.object({ customer_id: z.uuid(), lines: z.array(internalLine).min(1).max(40), ship_to: optText(500), notes: optText(1000) }), req.body);
     res.status(201).json(await tx(pool, (c) => createOrder(c, req, { customer_id: b.customer_id, lines: b.lines.map((l) => ({ ...l, lot_id: l.lot_id ?? null })), channel: 'internal', ship_to: b.ship_to, notes: b.notes })));
+  });
+  /**
+   * Go-live: the undelivered balance of an order taken in the legacy system, at its agreed price. Stock is reserved
+   * as for any order (load opening stock first); credit blocks still apply. Loading it twice returns the first order.
+   */
+  r.post('/orders/opening', requirePermission('commerce.order.manage'), async (req, res) => {
+    const b = parse(z.object({ customer_id: z.uuid(), legacy_ref: z.string().trim().min(1).max(60), migration_ref: optText(40), ship_to: optText(500), notes: optText(1000),
+      lines: z.array(internalLine.extend({ price_per_kg: z.number().positive() })).min(1).max(40) }), req.body);
+    const ref = `Legacy ${b.legacy_ref}${b.migration_ref ? ` · ${b.migration_ref}` : ''}`;
+    const out = await tx(pool, async (c) => {
+      const existing = await one<{ id: string; number: string; status: string }>(c, `SELECT id, number, status FROM orders WHERE customer_id = $1 AND channel = 'internal' AND (source_ref = $2 OR source_ref LIKE $3)`, [b.customer_id, `Legacy ${b.legacy_ref}`, `Legacy ${b.legacy_ref} · %`]);
+      if (existing) return { ...existing, existing: true };
+      return { ...(await createOrder(c, req, { customer_id: b.customer_id, channel: 'internal', source_ref: ref, ship_to: b.ship_to, notes: b.notes, opening: true, lines: b.lines.map((l) => ({ ...l, lot_id: l.lot_id ?? null })) })), existing: false };
+    });
+    res.status(201).json(out);
   });
   r.post('/orders/:id/cancel', requirePermission('commerce.order.manage'), async (req, res) => {
     const { reason } = parse(z.object({ reason: reqText(300) }), req.body);

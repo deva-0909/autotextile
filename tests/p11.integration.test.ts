@@ -99,6 +99,50 @@ SRT,NOPE,OLD-L-3,10,100,A,2026-01-05`;
     const old = lots.find((l: { sku: string }) => l.sku === 'FLC-320-CHR');
     assert.equal(old.received_date.slice(0, 10), '2026-01-05', 'ageing keeps the original receipt date');
   });
+
+  test('open purchase orders: lines group into one accepted PO per legacy number; reload does not duplicate', async () => {
+    const csv = `supplier,legacy_po_no,order_date,deliver_to,expected_date,sku,pending_kg,rate_per_kg
+Shree Ambica Knitters,PO/2526/0912,2026-03-18,SRT,2026-04-10,SJ-160-NVY,1200,246
+Shree Ambica Knitters,PO/2526/0912,2026-03-18,SRT,2026-04-10,FLC-320-CHR,300,310
+Surat Process House,PO/2526/0913,,SRT,2026-04-10,SJ-160-NVY,50,246
+Shree Ambica Knitters,PO/2526/0914,,Surat Process House,2026-04-12,SJ-160-NVY,400,240`;
+    const b = await load(t.admin!, 'open_pos', csv);
+    assert.equal(b.valid, 3);
+    const d = await h.ok(t.admin!, 'GET', `/golive/migration/batches/${b.id}`);
+    assert.match(d.rows.find((r: { row_no: number }) => r.row_no === 4).errors[0], /not a supplier/);
+    const imp = await h.ok(t.admin!, 'POST', `/golive/migration/batches/${b.id}/import`);
+    assert.equal(imp.source_total, 1900);
+    assert.equal(imp.erp_total, 1900, JSON.stringify((await h.ok(t.admin!, 'GET', `/golive/migration/batches/${b.id}`)).rows.map((r: { status: string; error: string }) => [r.status, r.error])));
+    assert.equal(imp.reconciliation.purchase_orders, 2);
+    const pos = (await h.ok(t.admin!, 'GET', '/procurement/purchase-orders?q=Ambica&pageSize=50')).items.filter((p: { notes: string | null }) => p.notes?.includes('Legacy PO'));
+    assert.equal(pos.length, 2);
+    assert.ok(pos.every((p: { status: string }) => p.status === 'accepted'), 'ready to receive against');
+    assert.equal(pos.find((p: { deliver_to_type: string }) => p.deliver_to_type === 'mill').ordered_kg, 400);
+    const again = await h.ok(t.admin!, 'POST', `/golive/migration/batches/${(await load(t.admin!, 'open_pos', csv)).id}/import`);
+    assert.equal(again.difference, 0, 'a reload points at the POs created the first time');
+    assert.equal((await h.ok(t.admin!, 'GET', '/procurement/purchase-orders?q=Ambica&pageSize=50')).items.filter((p: { notes: string | null }) => p.notes?.includes('Legacy PO')).length, 2);
+    await h.ok(t.owner!, 'POST', `/golive/migration/batches/${b.id}/signoff`, {});
+  });
+
+  test('open sales orders: the undelivered balance at the agreed price reserves stock without asking for a new token', async () => {
+    const lot = (await h.ok(t.admin!, 'GET', '/inventory/lots?q=SJ-160-NVY&pageSize=20')).items.find((l: { lot_no: string; received_date: string }) => l.received_date.startsWith('2026-02-20'));
+    const csv = `customer,legacy_order_no,sku,lot_no,pending_kg,price_per_kg,ship_to
+Kolkata Hosiery Works,SO/2526/1140,SJ-160-NVY,${lot.lot_no},20,312,Howrah unit
+Kolkata Hosiery Works,SO/2526/1140,SJ-160-NVY,NO-SUCH-LOT,5,312,Howrah unit
+Shree Ambica Knitters,SO/2526/1141,SJ-160-NVY,,10,300,`;
+    const b = await load(t.admin!, 'open_orders', csv);
+    assert.equal(b.valid, 1);
+    const rows = (await h.ok(t.admin!, 'GET', `/golive/migration/batches/${b.id}`)).rows;
+    assert.match(rows.find((r: { row_no: number }) => r.row_no === 3).errors[0], /not in stock/);
+    assert.match(rows.find((r: { row_no: number }) => r.row_no === 4).errors[0], /not a customer/);
+    const imp = await h.ok(t.admin!, 'POST', `/golive/migration/batches/${b.id}/import`);
+    assert.equal(imp.erp_total, 20, JSON.stringify((await h.ok(t.admin!, 'GET', `/golive/migration/batches/${b.id}`)).rows.map((r: { status: string; error: string }) => [r.status, r.error])));
+    assert.equal(imp.difference, 0);
+    const so = (await h.ok(t.admin!, 'GET', '/commerce/orders?q=Kolkata')).find((o: { source_ref: string | null }) => o.source_ref?.startsWith('Legacy SO/2526/1140'));
+    assert.equal(Number(so.token_amount), 0, 'advance is already in the opening balances');
+    assert.equal(so.status, 'booked');
+    assert.equal(Number(so.taxable), 6240);
+  });
 });
 
 describe('P11 UAT, training, cutover and hypercare', () => {

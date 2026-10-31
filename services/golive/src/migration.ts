@@ -16,6 +16,8 @@ export const TEMPLATES: Record<string, { label: string; columns: string[]; examp
   opening_balances: { label: 'Opening receivables and payables (bill-wise)', columns: ['kind', 'party', 'doc_no', 'doc_date', 'due_date', 'amount'], example: ['receivable', 'Sri Murugan Garments', 'OLD/2526/0451', '2026-03-12', '2026-04-11', '125000'], control: 'Total amount (₹)', help: 'kind is receivable or payable; party is the legal name or code as in Business partners. Use one row per unpaid bill; for an advance, use a payable for a customer or a receivable for a supplier.' },
   opening_gl: { label: 'Opening trial balance', columns: ['account_code', 'debit', 'credit', 'date'], example: ['1200', '2500000', '0', '2026-04-01'], control: 'Total debits (₹)', help: 'One line per ledger account from the CA-certified trial balance. Leave out receivables, payables and stock: those come from their own batches and the difference account absorbs them. Debits must equal credits.' },
   opening_stock: { label: 'Opening stock by lot and roll', columns: ['warehouse', 'sku', 'lot_ref', 'roll_kg', 'cost_per_kg', 'grade', 'received_date'], example: ['SRT', 'SJ-160-NVY', 'OLD-L-4411', '24.8', '238', 'A', '2026-02-20'], control: 'Total kg', help: 'One row per roll from the physical count. Rolls get new barcodes; print labels from the inward afterwards. received_date keeps ageing true.' },
+  open_pos: { label: 'Open purchase orders', columns: ['supplier', 'legacy_po_no', 'order_date', 'deliver_to', 'expected_date', 'sku', 'pending_kg', 'rate_per_kg'], example: ['Shree Ambica Knitters', 'PO/2526/0912', '2026-03-18', 'SRT', '2026-04-10', 'SJ-160-GRY', '1200', '246'], control: 'Total pending kg', help: 'One row per PO line, with only the quantity still to be received. Rows with the same supplier and legacy_po_no become one PO, loaded as already approved and accepted. deliver_to is a warehouse code or a mill’s name or code.' },
+  open_orders: { label: 'Open sales orders', columns: ['customer', 'legacy_order_no', 'sku', 'lot_no', 'pending_kg', 'price_per_kg', 'ship_to'], example: ['Sri Murugan Garments', 'SO/2526/1140', 'SJ-160-NVY', '', '300', '312', 'Tiruppur factory'], control: 'Total pending kg', help: 'One row per order line, with only the quantity still to be delivered, at the agreed price. Load opening stock first: each order reserves stock like a new order. Advances already received belong in the opening balances, so no new token is asked for.' },
 };
 
 function parseCsv(text: string) {
@@ -29,17 +31,33 @@ const GSTIN = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const PAN = /^[A-Z]{5}\d{4}[A-Z]$/;
 
 type Party = { id: string; code: string; legal_name: string; party_type: string };
-async function lookups(req: Request, type: string) {
-  const out: { parties?: Party[]; products?: { id: string; sku: string }[]; warehouses?: { id: string; code: string }[]; accounts?: { id: string; code: string; control: string | null; status: string }[]; books?: { id: string; gstin: string; is_primary: boolean }[] } = {};
-  if (type === 'parties' || type === 'opening_balances') out.parties = (await as<{ items: Party[] }>(req, 'masters', 'GET', '/parties?pageSize=5000')).items;
+async function lookups(req: Request, type: string, rows: Record<string, string>[] = []) {
+  const out: { parties?: Party[]; products?: { id: string; sku: string }[]; warehouses?: { id: string; code: string }[]; lots?: { id: string; lot_no: string; product_id: string }[]; accounts?: { id: string; code: string; control: string | null; status: string }[]; books?: { id: string; gstin: string; is_primary: boolean }[] } = {};
+  if (['parties', 'opening_balances', 'open_pos', 'open_orders'].includes(type)) out.parties = (await as<{ items: Party[] }>(req, 'masters', 'GET', '/parties?pageSize=5000')).items;
+  if (['open_pos', 'open_orders'].includes(type)) out.products = (await as<{ items: { id: string; sku: string }[] }>(req, 'masters', 'GET', '/products?pageSize=2000')).items;
+  if (type === 'open_pos') out.warehouses = await as(req, 'organisation', 'GET', '/warehouses');
+  if (type === 'open_orders') {
+    out.lots = [];
+    for (const no of [...new Set(rows.map((d) => d.lot_no).filter(Boolean))])
+      out.lots.push(...(await as<{ items: { id: string; lot_no: string; product_id: string }[] }>(req, 'inventory', 'GET', `/lots?q=${encodeURIComponent(no!)}&pageSize=20`)).items.filter((l) => l.lot_no === no));
+  }
   if (type === 'opening_stock') { out.products = (await as<{ items: { id: string; sku: string }[] }>(req, 'masters', 'GET', '/products?pageSize=2000')).items; out.warehouses = await as(req, 'organisation', 'GET', '/warehouses'); }
   if (type === 'opening_gl') { out.accounts = await as(req, 'finance', 'GET', '/accounts'); out.books = await as(req, 'finance', 'GET', '/books'); }
   return out;
 }
 
+/** A PO destination: a warehouse code, or a mill by legal name or code. */
+function deliverTo(v: string, L: Awaited<ReturnType<typeof lookups>>): { type: 'warehouse' | 'mill'; id: string } | null {
+  const w = L.warehouses?.find((x) => x.code.toLowerCase() === v.toLowerCase());
+  if (w) return { type: 'warehouse', id: w.id };
+  const m = L.parties?.find((x) => x.party_type === 'mill' && (x.legal_name.toLowerCase() === v.toLowerCase() || x.code.toLowerCase() === v.toLowerCase()));
+  return m ? { type: 'mill', id: m.id } : null;
+}
+
 /** Row-level validation; nothing is written to the ERP at this stage. */
 function validate(type: string, rows: Record<string, string>[], L: Awaited<ReturnType<typeof lookups>>) {
   const seen = new Set<string>();
+  const heads = new Map<string, Record<string, string>>();
   const findParty = (p: string) => L.parties!.find((x) => x.legal_name.toLowerCase() === p.toLowerCase() || x.code.toLowerCase() === p.toLowerCase());
   return rows.map((d) => {
     const e: string[] = [];
@@ -67,6 +85,34 @@ function validate(type: string, rows: Record<string, string>[], L: Awaited<Retur
       const dr = Number(d.debit || 0), cr = Number(d.credit || 0);
       if (!(dr > 0) === !(cr > 0)) e.push('give either a debit or a credit');
       if (d.date && !isDate(d.date)) e.push('date must be YYYY-MM-DD');
+    } else if (type === 'open_pos') {
+      const sup = d.supplier ? findParty(d.supplier) : undefined;
+      if (!sup || !['supplier', 'manufacturer'].includes(sup.party_type)) e.push(`supplier "${d.supplier ?? ''}" is not a supplier or manufacturer in Business partners`);
+      if (!d.legacy_po_no) e.push('legacy_po_no is required');
+      if (!deliverTo(d.deliver_to ?? '', L)) e.push(`deliver_to "${d.deliver_to ?? ''}" is not a warehouse code or a mill`);
+      if (d.order_date && !isDate(d.order_date)) e.push('order_date must be YYYY-MM-DD');
+      if (!isDate(d.expected_date ?? '')) e.push('expected_date must be YYYY-MM-DD');
+      if (!L.products!.find((p) => p.sku === d.sku)) e.push(`sku ${d.sku ?? ''} is not in the fabric catalogue`);
+      num('pending_kg', 0.01); num('rate_per_kg', 0.01);
+      const g = `${(d.supplier ?? '').toLowerCase()}|${d.legacy_po_no}`;
+      const first = heads.get(g);
+      if (first && (first.deliver_to !== d.deliver_to || first.expected_date !== d.expected_date || (first.order_date ?? '') !== (d.order_date ?? ''))) e.push(`deliver_to, expected_date and order_date must be the same on every line of ${d.legacy_po_no}`);
+      if (!first) heads.set(g, d);
+      const k = `${g}|${d.sku}`; if (seen.has(k)) e.push('the same SKU appears twice on this PO — combine the lines'); seen.add(k);
+    } else if (type === 'open_orders') {
+      const cust = d.customer ? findParty(d.customer) : undefined;
+      if (!cust || cust.party_type !== 'customer') e.push(`customer "${d.customer ?? ''}" is not a customer in Business partners`);
+      if (!d.legacy_order_no) e.push('legacy_order_no is required');
+      const prod = L.products!.find((p) => p.sku === d.sku);
+      if (!prod) e.push(`sku ${d.sku ?? ''} is not in the fabric catalogue`);
+      if (d.lot_no && !L.lots!.find((l) => l.lot_no === d.lot_no && (!prod || l.product_id === prod.id))) e.push(`lot ${d.lot_no} of ${d.sku ?? ''} is not in stock — load opening stock first, or leave lot_no empty`);
+      num('pending_kg', 0.01); num('price_per_kg', 0.01);
+      const g = `${(d.customer ?? '').toLowerCase()}|${d.legacy_order_no}`;
+      const first = heads.get(g);
+      if (first && (first.ship_to ?? '') !== (d.ship_to ?? '')) e.push(`ship_to must be the same on every line of ${d.legacy_order_no}`);
+      if (!first) heads.set(g, d);
+      const k = `${g}|${d.sku}|${d.lot_no ?? ''}`; if (seen.has(k)) e.push('the same SKU and lot appear twice on this order — combine the lines'); seen.add(k);
+      if (rows.filter((x) => `${(x.customer ?? '').toLowerCase()}|${x.legacy_order_no}` === g).length > 40 && first === undefined) e.push(`${d.legacy_order_no} has more than 40 lines — split it`);
     } else if (type === 'opening_stock') {
       if (!L.warehouses!.find((w) => w.code === d.warehouse)) e.push(`warehouse ${d.warehouse ?? ''} is unknown`);
       if (!L.products!.find((p) => p.sku === d.sku)) e.push(`sku ${d.sku ?? ''} is not in the fabric catalogue`);
@@ -84,6 +130,7 @@ function controlTotal(type: string, rows: Record<string, string>[]) {
   if (type === 'parties') return rows.length;
   if (type === 'opening_balances') return r2(rows.reduce((s, d) => s + Number(String(d.amount).replace(/,/g, '')), 0));
   if (type === 'opening_gl') return r2(rows.reduce((s, d) => s + Number(d.debit || 0), 0));
+  if (type === 'open_pos' || type === 'open_orders') return r2(rows.reduce((s, d) => s + Number(d.pending_kg), 0));
   return r2(rows.reduce((s, d) => s + Number(d.roll_kg), 0));
 }
 
@@ -100,14 +147,14 @@ export function migrationRoutes(r: Router, { pool }: ServiceContext) {
 
   /** Upload: parse and validate every row. Invalid rows are listed with their reasons; nothing is loaded yet. */
   r.post('/migration/batches', requirePermission('golive.migration.manage'), async (req, res) => {
-    const b = parse(z.object({ object_type: z.enum(['parties', 'opening_balances', 'opening_gl', 'opening_stock']), csv: z.string().min(5).max(5_000_000), file_name: optText(200) }), req.body);
+    const b = parse(z.object({ object_type: z.enum(['parties', 'opening_balances', 'opening_gl', 'opening_stock', 'open_pos', 'open_orders']), csv: z.string().min(5).max(5_000_000), file_name: optText(200) }), req.body);
     const t = TEMPLATES[b.object_type]!;
     const { head, rows } = parseCsv(b.csv);
-    const missing = t.columns.filter((c) => !head.includes(c) && !['gstin', 'pan', 'email', 'phone', 'credit_limit', 'segment', 'state_code', 'date', 'grade', 'received_date'].includes(c));
+    const missing = t.columns.filter((c) => !head.includes(c) && !['gstin', 'pan', 'email', 'phone', 'credit_limit', 'segment', 'state_code', 'date', 'grade', 'received_date', 'order_date', 'lot_no', 'ship_to'].includes(c));
     if (missing.length) throw badRequest(`Missing columns: ${missing.join(', ')}`);
     if (!rows.length) throw badRequest('The file has no rows');
     if (rows.length > 5000) throw badRequest('Load at most 5,000 rows per batch');
-    const L = await lookups(req, b.object_type);
+    const L = await lookups(req, b.object_type, rows);
     const checked = validate(b.object_type, rows, L);
     const batchErrors: string[] = [];
     if (b.object_type === 'opening_gl') {
@@ -135,7 +182,7 @@ export function migrationRoutes(r: Router, { pool }: ServiceContext) {
     const upd = await pool.query(`UPDATE migration_batches SET status = 'importing', updated_at = now() WHERE id = $1 AND status = 'validated'`, [b.id]);
     if (!upd.rowCount) throw conflict('Already importing');
     const rows = await many<{ id: number; row_no: number; data: Record<string, string> }>(pool, `SELECT id, row_no, data FROM migration_rows WHERE batch_id = $1 AND status = 'valid' ORDER BY row_no`, [b.id]);
-    const L = await lookups(req, b.object_type);
+    const L = await lookups(req, b.object_type, rows.map((x) => x.data));
     const mark = (id: number, status: string, ref: string | null, error: string | null = null) => pool.query('UPDATE migration_rows SET status = $2, result_ref = $3, error = $4 WHERE id = $1', [id, status, ref, error]);
     const party = (p: string) => L.parties!.find((x) => x.legal_name.toLowerCase() === p.toLowerCase() || x.code.toLowerCase() === p.toLowerCase())!;
     try {
@@ -163,6 +210,24 @@ export function migrationRoutes(r: Router, { pool }: ServiceContext) {
             lines: rows.map((x) => ({ account_id: L.accounts!.find((a) => a.code === x.data.account_code)!.id, debit: Number(x.data.debit || 0), credit: Number(x.data.credit || 0) })) });
           for (const r1 of rows) await mark(r1.id, 'imported', v.number);
         } catch (e) { for (const r1 of rows) await mark(r1.id, 'failed', null, (e as Error).message); }
+      } else if (b.object_type === 'open_pos' || b.object_type === 'open_orders') {
+        // One document per legacy number; every line of it shares the result.
+        const po = b.object_type === 'open_pos';
+        const groups = new Map<string, typeof rows>();
+        for (const r1 of rows) { const g = `${(po ? r1.data.supplier : r1.data.customer)!.toLowerCase()}|${po ? r1.data.legacy_po_no : r1.data.legacy_order_no}`; groups.set(g, [...(groups.get(g) ?? []), r1]); }
+        for (const rs of groups.values()) {
+          const d = rs[0]!.data;
+          const product = (sku: string) => L.products!.find((p) => p.sku === sku)!.id;
+          try {
+            const out = po
+              ? await as<{ number: string; existing: boolean }>(req, 'procurement', 'POST', '/purchase-orders/opening', { supplier_id: party(d.supplier!).id, legacy_ref: d.legacy_po_no, order_date: d.order_date || undefined, migration_ref: b.number,
+                  deliver_to_type: deliverTo(d.deliver_to!, L)!.type, deliver_to_id: deliverTo(d.deliver_to!, L)!.id, expected_date: d.expected_date,
+                  lines: rs.map((x) => ({ product_id: product(x.data.sku!), qty_kg: Number(x.data.pending_kg), rate_per_kg: Number(x.data.rate_per_kg) })) })
+              : await as<{ number: string; existing: boolean }>(req, 'commerce', 'POST', '/orders/opening', { customer_id: party(d.customer!).id, legacy_ref: d.legacy_order_no, migration_ref: b.number, ship_to: d.ship_to || null,
+                  lines: rs.map((x) => ({ product_id: product(x.data.sku!), lot_id: x.data.lot_no ? L.lots!.find((l) => l.lot_no === x.data.lot_no && l.product_id === product(x.data.sku!))!.id : null, kg: Number(x.data.pending_kg), price_per_kg: Number(x.data.price_per_kg) })) });
+            for (const r1 of rs) await mark(r1.id, out.existing ? 'skipped' : 'imported', out.number, out.existing ? 'Already loaded' : null);
+          } catch (e) { for (const r1 of rs) await mark(r1.id, 'failed', null, (e as Error).message); }
+        }
       } else if (b.object_type === 'opening_stock') {
         const byWh = new Map<string, typeof rows>();
         for (const r1 of rows) byWh.set(r1.data.warehouse!, [...(byWh.get(r1.data.warehouse!) ?? []), r1]);
@@ -246,6 +311,22 @@ async function reconcile(req: Request, pool: ServiceContext['pool'], id: string)
     erp = r2(v.filter((x) => x.status === 'posted').reduce((s, x) => s + Number(x.amount), 0));
     detail.voucher_status = v.map((x) => `${x.number}: ${x.status.replace('_', ' ')}`);
     if (v.some((x) => x.status === 'pending_approval')) detail.note = 'The opening voucher is waiting for a checker in Approvals; reconcile again after approval.';
+  } else if (b.object_type === 'open_pos') {
+    // Read back the POs this batch produced; a PO loaded by an earlier batch is matched by its number too.
+    const nums = [...new Set(rows.map((r) => r.result_ref).filter(Boolean))] as string[];
+    const pos: { number: string; status: string; ordered_kg: number }[] = [];
+    for (let i = 0; i < nums.length; i += 150) pos.push(...(await as<{ items: typeof pos }>(req, 'procurement', 'GET', `/purchase-orders?pageSize=200&f_numbers=${encodeURIComponent(nums.slice(i, i + 150).join(','))}`)).items);
+    erp = r2(pos.filter((x) => x.status !== 'cancelled').reduce((s, x) => s + Number(x.ordered_kg), 0));
+    detail.purchase_orders = pos.length;
+  } else if (b.object_type === 'open_orders') {
+    const nums = [...new Set(rows.map((r) => r.result_ref).filter(Boolean))] as string[];
+    const orders: { number: string; status: string; kg: number }[] = [];
+    for (let i = 0; i < nums.length; i += 150) orders.push(...(await as<typeof orders>(req, 'commerce', 'GET', `/orders?numbers=${encodeURIComponent(nums.slice(i, i + 150).join(','))}`)));
+    const live = orders.filter((x) => x.status !== 'cancelled');
+    erp = r2(live.reduce((s, x) => s + Number(x.kg), 0));
+    detail.sales_orders = orders.length;
+    detail.by_status = Object.fromEntries([...new Set(live.map((x) => x.status))].map((st) => [st, live.filter((x) => x.status === st).length]));
+    if (live.some((x) => x.status === 'awaiting_allocation')) detail.note = 'Some orders wait for a warehouse decision in Fulfilment → Allocation (no single warehouse holds the stock).';
   } else if (b.object_type === 'opening_stock') {
     const list = await as<{ id: string; source_ref: string; weighed_kg: number }[]>(req, 'inventory', 'GET', '/inwards');
     const mine = list.filter((x) => x.source_ref.includes(b.number));
