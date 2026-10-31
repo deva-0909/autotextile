@@ -9,7 +9,7 @@ import { useAuth } from '../../lib/auth';
 import { fmtDate, fmtDateTime, fmtINR, fmtNum, humanize } from '../../lib/format';
 import { SimpleTable } from '../../components/DataTable';
 import { Modal, useToast } from '../../components/overlay';
-import { Avatar, Badge, Button, Card, EmptyState, ErrorState, Input, KeyValue, Notice, Select, Skeleton, Stat, StatusBadge, Textarea } from '../../components/ui';
+import { Avatar, Badge, Button, Card, EmptyState, ErrorState, Input, KeyValue, Notice, Select, Skeleton, Stat, StatusBadge, Textarea, BackButton } from '../../components/ui';
 
 // ---------- layout ----------
 export function CustomerPortalLayout({ children }: { children: ReactNode }) {
@@ -269,7 +269,7 @@ export function CustomerOrderPage() {
     <>
       <Link to="/portal/orders" className="link mb-3 inline-block text-[13px]">← Orders</Link>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
-        <div><h1 className="text-[24px] font-semibold tracking-tight">Order {o.number}</h1><p className="text-[13px] text-slate-600">Placed {fmtDateTime(o.created_at)} by {o.placed_by_name} · {o.payment_terms === 'credit' ? 'on credit' : 'advance terms'}</p></div>
+        <div className="flex items-start gap-3"><BackButton to="/portal/orders" /><div><h1 className="text-[24px] font-semibold tracking-tight">Order {o.number}</h1><p className="text-[13px] text-slate-600">Placed {fmtDateTime(o.created_at)} by {o.placed_by_name} · {o.payment_terms === 'credit' ? 'on credit' : 'advance terms'}</p></div></div>
         <div className="flex flex-wrap gap-2">
           {o.status === 'pending_company_approval' && can('portal.customer.approve') && o.placed_by !== user?.id && <Button variant="primary" onClick={async () => { try { await api.post(`/commerce/portal/orders/${id}/approve`); q.refetch(); } catch (e) { toast({ tone: 'error', title: (e as Error).message }); } }}>Approve order</Button>}
           {o.status === 'pending_payment' && <Button variant="primary" icon={<CreditCard className="size-4" />} onClick={() => void payToken()}>Pay token {fmtINR(Number(o.token_amount))}</Button>}

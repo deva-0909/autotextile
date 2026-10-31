@@ -218,7 +218,7 @@ export function Card({ title, description, actions, children, className, padded 
  * Back from a detail page (any page that is not itself in the menu): to the previous screen in this session, or else
  * to the page's parent in the breadcrumb. A page can pass back={false} to hide it, or a path to override the target.
  */
-function BackButton({ to }: { to: string }) {
+export function BackButton({ to }: { to: string }) {
   const nav = useNavigate();
   const inApp = ((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0;
   return (

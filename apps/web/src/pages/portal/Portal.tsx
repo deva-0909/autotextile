@@ -9,7 +9,7 @@ import { useAuth } from '../../lib/auth';
 import { fmtDate, fmtDateTime, fmtINR, fmtNum, humanize } from '../../lib/format';
 import { SimpleTable } from '../../components/DataTable';
 import { Modal, useToast } from '../../components/overlay';
-import { Avatar, Badge, Button, Card, EmptyState, ErrorState, Input, Notice, Skeleton, Stat, StatusBadge, Textarea, Timeline } from '../../components/ui';
+import { Avatar, Badge, Button, Card, EmptyState, ErrorState, Input, Notice, Skeleton, Stat, StatusBadge, Textarea, Timeline, BackButton } from '../../components/ui';
 import { DispatchModal, ReceiptModal } from '../procurement/PurchaseOrders';
 import { AckModal, Reconciliation, StageModal, StageTrack, type JobDetail } from '../jobwork/Orders';
 
@@ -109,6 +109,7 @@ export function SupplierOrder() {
     <>
       <p className="mb-1 text-[12.5px] text-slate-500"><Link to="/portal" className="hover:text-slate-800">Purchase orders</Link> / {po.number}</p>
       <div className="mb-6 flex flex-wrap items-center gap-3">
+        <BackButton to="/portal/orders" />
         <h1 className="flex-1 text-[22px] font-semibold">{po.number} <StatusBadge status={po.status} /></h1>
         {po.status === 'sent' && <><Button variant="danger" icon={<XCircle className="size-4" />} onClick={() => setModal('reject')}>Reject</Button><Button variant="primary" icon={<CheckCircle2 className="size-4" />} onClick={() => { setPromise(po.expected_date); setModal('accept'); }}>Accept order</Button></>}
         {['sent', 'accepted', 'partially_received'].includes(po.status) && <Button icon={<Truck className="size-4" />} onClick={() => setModal('dispatch')}>Record dispatch</Button>}
@@ -236,6 +237,7 @@ export function MillJob() {
     <>
       <p className="mb-1 text-[12.5px] text-slate-500"><Link to="/portal/jobs" className="hover:text-slate-800">Job-work orders</Link> / {o.number}</p>
       <div className="mb-6 flex flex-wrap items-center gap-3">
+        <BackButton to="/portal/jobs" />
         <h1 className="flex-1 text-[22px] font-semibold">{o.number} · {o.process_name} <StatusBadge status={o.status} /></h1>
         {o.status === 'issued' && <Button variant="primary" icon={<ClipboardCheck className="size-4" />} onClick={() => setModal('ack')}>Acknowledge receipt</Button>}
         {['acknowledged', 'in_process'].includes(o.status) && <><Button icon={<Factory className="size-4" />} onClick={() => setModal('stage')}>Update stage</Button><Button variant="primary" icon={<PackageCheck className="size-4" />} onClick={() => setModal('ready')}>Ready for collection</Button></>}
