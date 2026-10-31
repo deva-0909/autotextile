@@ -12,6 +12,7 @@ import { paySupplierBill } from './vouchers.ts';
  * payments released. Payments waiting for a checker stay out of the file until approved.
  */
 interface Bank { account_name: string; account_number: string; ifsc: string; bank_name: string | null; status: string }
+interface RunItem { party?: string; party_id?: string; invoice: string; amount?: number; voucher?: string; status: string; error?: string; bank?: { name: string; account_number: string; ifsc: string } }
 const csvCell = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 
 async function bankOf(partyId: string): Promise<Bank | null> {
@@ -42,13 +43,35 @@ export function paymentRunRoutes(r: Router, { pool }: ServiceContext) {
   });
 
   r.get('/payment-runs', requirePermission('finance.read'), async (_req, res) => {
-    res.json(await many(pool, `SELECT id, number, run_date::text, mode, total::float, released::float, jsonb_array_length(items) AS count, created_by_name, created_at FROM payment_runs ORDER BY created_at DESC LIMIT 50`));
+    const runs = await many<{ id: string; items: RunItem[] }>(pool, `SELECT id, number, run_date::text, mode, total::float, items, jsonb_array_length(items) AS count, created_by_name, created_at FROM payment_runs ORDER BY created_at DESC LIMIT 50`);
+    const posted = await postedNumbers(runs.flatMap((x) => x.items));
+    res.json(runs.map(({ items, ...x }) => ({ ...x, released: round2(items.filter((i) => i.voucher && posted.has(i.voucher)).reduce((t, i) => t + (i.amount ?? 0), 0)),
+      waiting: items.filter((i) => i.voucher && !posted.has(i.voucher) && i.status !== 'failed').length })));
   });
-  r.get('/payment-runs/:id', requirePermission('finance.read'), async (req, res) => {
-    const run = await one(pool, `SELECT *, run_date::text, total::float, released::float FROM payment_runs WHERE id = $1`, [req.params.id]);
+  // The bank file carries full account numbers: only people who can release payments may open it.
+  r.get('/payment-runs/:id', requirePermission('finance.voucher.post'), async (req, res) => {
+    const run = await one<{ id: string; number: string; run_date: string; mode: string; items: RunItem[] }>(pool, `SELECT *, run_date::text, total::float FROM payment_runs WHERE id = $1`, [req.params.id]);
     if (!run) throw notFound('Payment run');
-    res.json(run);
+    res.json({ ...run, ...(await bankFile(run)) });
   });
+
+  /** Vouchers among these that are posted (approved payments included; ones still waiting for a checker are not). */
+  async function postedNumbers(items: RunItem[]) {
+    const nums = [...new Set(items.map((i) => i.voucher).filter(Boolean))] as string[];
+    if (!nums.length) return new Set<string>();
+    return new Set((await many<{ number: string }>(pool, `SELECT number FROM vouchers WHERE number = ANY($1) AND status = 'posted'`, [nums])).map((x) => x.number));
+  }
+  /** The bank's bulk-upload file for the run's payments that are posted now, with each item's current state. */
+  async function bankFile(run: { number: string; run_date: string; mode: string; items: RunItem[] }) {
+    const posted = await postedNumbers(run.items);
+    const debit = await one<{ account_no: string }>(pool, `SELECT account_no FROM bank_accounts ORDER BY created_at LIMIT 1`).catch(() => null);
+    const rows = [['Payment Mode', 'Debit Account No', 'Beneficiary Name', 'Beneficiary Account No', 'IFSC', 'Amount', 'Value Date', 'Remarks'].join(',')];
+    const items = run.items.map((i) => ({ ...i, status: i.voucher ? (posted.has(i.voucher) ? 'posted' : 'pending_approval') : i.status }));
+    for (const [n, i] of items.entries()) if (i.status === 'posted' && i.bank)
+      rows.push([run.mode.toUpperCase(), debit?.account_no ?? '', i.bank.name, i.bank.account_number, i.bank.ifsc, Number(i.amount).toFixed(2), run.run_date.split('-').reverse().join('/'), `${i.invoice} ${run.number}/${n + 1}`].map(csvCell).join(','));
+    const released = round2(items.filter((i) => i.status === 'posted').reduce((t, i) => t + (i.amount ?? 0), 0));
+    return { items, released, bank_file: rows.length > 1 ? rows.join('\n') : null };
+  }
 
   r.post('/payment-runs', requirePermission('finance.voucher.post'), async (req, res) => {
     const b = parse(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), mode: z.enum(['neft', 'rtgs']).default('neft'),
@@ -59,10 +82,8 @@ export function paymentRunRoutes(r: Router, { pool }: ServiceContext) {
       const n = (await one<{ n: number }>(c, 'SELECT count(*)::int + 1 AS n FROM payment_runs'))!.n;
       return `PR/${b.date.slice(2, 4)}${String(Number(b.date.slice(2, 4)) + 1).padStart(2, '0')}/${String(n).padStart(4, '0')}`;
     });
-    const debit = await one<{ account_no: string }>(pool, `SELECT account_no FROM bank_accounts ORDER BY created_at LIMIT 1`).catch(() => null);
-    const items: Record<string, unknown>[] = [];
-    const rows: string[] = [['Payment Mode', 'Debit Account No', 'Beneficiary Name', 'Beneficiary Account No', 'IFSC', 'Amount', 'Value Date', 'Remarks'].join(',')];
-    let released = 0, total = 0;
+    const items: RunItem[] = [];
+    let total = 0;
     for (const [i, it] of b.items.entries()) {
       const reference = `${number}/${i + 1}`;
       try {
@@ -71,21 +92,18 @@ export function paymentRunRoutes(r: Router, { pool }: ServiceContext) {
         if (!bank) throw badRequest(`${party.legal_name} has no approved bank account`);
         const out = await tx(pool, (c) => paySupplierBill(c, req, party, { invoice_number: it.invoice_number, amount: it.amount, date: b.date, mode: b.mode, reference }));
         total = round2(total + out.amount);
-        items.push({ party: party.legal_name, invoice: it.invoice_number, amount: out.amount, voucher: out.number, status: out.status });
-        if (out.status === 'posted') {
-          released = round2(released + out.amount);
-          rows.push([b.mode.toUpperCase(), debit?.account_no ?? '', bank.account_name, bank.account_number, bank.ifsc, out.amount.toFixed(2), b.date.split('-').reverse().join('/'), `${it.invoice_number} ${reference}`].map(csvCell).join(','));
-        }
+        items.push({ party: party.legal_name, party_id: party.id, invoice: it.invoice_number, amount: out.amount, voucher: out.number, status: out.status, bank: { name: bank.account_name, account_number: bank.account_number, ifsc: bank.ifsc } });
       } catch (e) {
         items.push({ party_id: it.party_id, invoice: it.invoice_number, status: 'failed', error: (e as Error).message });
       }
     }
+    const file = await bankFile({ number, run_date: b.date, mode: b.mode, items });
     const run = await tx(pool, async (c) => {
-      const x = await one<{ id: string }>(c, `INSERT INTO payment_runs (number, run_date, mode, total, released, items, bank_file, created_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-        [number, b.date, b.mode, total, released, JSON.stringify(items), rows.length > 1 ? rows.join('\n') : null, req.user!.name]);
-      await auditReq(c, req, 'payment_run', x!.id, 'created', { after: { number, total, released, items: items.length } });
+      const x = await one<{ id: string }>(c, `INSERT INTO payment_runs (number, run_date, mode, total, released, items, created_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+        [number, b.date, b.mode, total, file.released, JSON.stringify(items), req.user!.name]);
+      await auditReq(c, req, 'payment_run', x!.id, 'created', { after: { number, total, released: file.released, items: items.length } });
       return x!;
     });
-    res.status(201).json({ id: run.id, number, total, released, items, bank_file: rows.length > 1 ? rows.join('\n') : null });
+    res.status(201).json({ id: run.id, number, total, ...file });
   });
 }

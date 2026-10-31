@@ -506,7 +506,7 @@ export async function seedOperations(services: RunningService[]) {
     const plusDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
     const salesRows = ['customer,invoice_no,invoice_date,sku,kg,rate_per_kg,gst_rate,paid_on'];
     const buyRows = ['supplier,bill_no,bill_date,sku,kg,rate_per_kg,gst_rate,paid_on'];
-    const openSales: { customer: string; doc: string; date: string; total: number }[] = [];
+    const openSales: { customer: string; doc: string; date: string; due: string; total: number }[] = [];
     const openBuys: { supplier: string; doc: string; date: string }[] = [];
     let inv = 0, bill = 0;
     for (const [mi, m] of legacyMonths.entries()) {
@@ -530,7 +530,7 @@ export async function seedOperations(services: RunningService[]) {
           bought.set(sku, (bought.get(sku) ?? 0) + kg);
           total += kg * rate * 1.05;
         }
-        if (!settled) openSales.push({ customer: cust, doc: no, date, total: Math.round(total * 100) / 100 });
+        if (!settled) openSales.push({ customer: cust, doc: no, date, due: paid, total: Math.round(total * 100) / 100 });
       }
       // Bought what was sold, from each fabric's usual supplier, in two lots a month.
       const bySupplier = new Map<string, [string, number][]>();
@@ -544,6 +544,8 @@ export async function seedOperations(services: RunningService[]) {
         if (!settled) openBuys.push({ supplier: sup, doc: no, date });
       }
     }
+    // One recent Delhi invoice stays open: the bank statement below carries their transfer for it, to match on screen.
+    const heldOpen = openSales.filter((o) => o.customer === 'Delhi Fashion Hub').pop();
     const migrate = async (object_type: string, csv: string) => {
       const b = await call<{ id: string; invalid: number }>('golive', admin, 'POST', '/migration/batches', { object_type, csv, file_name: `${object_type}-previous-system.csv` });
       if (b.invalid) console.error(`[seed] ${object_type}: ${b.invalid} rows did not validate`);
@@ -564,10 +566,11 @@ export async function seedOperations(services: RunningService[]) {
         await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: day(m, 12), narration: `DGVCL power and freight outward — ${m} (previous system)`, reference: `EXP-${m}`,
           lines: [{ account_id: a('5510'), debit: 19800 }, { account_id: a('5310'), debit: 64000 }, { account_id: a('1200'), credit: 83800 }] });
       }
-      // After go-live: collections on the older open invoices, and payments of the older open bills.
-      for (const [i, o] of openSales.entries()) {
-        if (o.customer === 'Ludhiana Knit Exports' || o.date >= plusDays(goLive, -20)) continue;
-        await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'receipt', book_id: surat.id, date: [plusDays(goLive, 3 + (i * 7) % 50), daysAgo(2)].sort()[0], narration: `Received from ${o.customer} against ${o.doc}`, reference: `NEFT-IN-${o.doc.slice(-4)}`,
+      // After go-live: customers pay the invoices open at cutover when due (Ludhiana's bounced cheques stay unpaid),
+      // and the older open bills are paid.
+      for (const o of openSales) {
+        if (o.customer === 'Ludhiana Knit Exports' || o === heldOpen) continue;
+        await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'receipt', book_id: surat.id, date: [o.due, daysAgo(2)].sort()[0], narration: `Received from ${o.customer} against ${o.doc}`, reference: `NEFT-IN-${o.doc.slice(-4)}`,
           lines: [{ account_id: a('1200'), debit: o.total }, { account_id: a('1300'), credit: o.total, party_id: party(o.customer), bill_ref: o.doc }] });
       }
       for (const [i, o] of openBuys.entries())
@@ -579,10 +582,6 @@ export async function seedOperations(services: RunningService[]) {
         if (paidOn > daysAgo(0)) continue;
         await call('finance', accounts, 'POST', '/gst/payments', { book_id: surat.id, period: `${m}-01`, paid_on: paidOn, arn: `AA24${m.replace('-', '')}0${String(m.slice(5)).padStart(2, '0')}1`, challan_ref: `CPIN-${m.replace('-', '')}` }).catch((e) => console.error(`[seed] GSTR-3B ${m}: ${(e as Error).message}`));
       }
-      // A supplier payment run for the bills now due: one bank file for everything released.
-      const due = (await call<{ party_id: string; doc_no: string; days_overdue: number; bank: unknown; awaiting_approval: boolean }[]>('finance', accounts, 'GET', '/payment-run/candidates'))
-        .filter((x) => x.bank && !x.awaiting_approval && x.days_overdue >= 0).slice(0, 4);
-      if (due.length) await call('finance', accounts, 'POST', '/payment-runs', { date: daysAgo(1), mode: 'neft', items: due.map((x) => ({ party_id: x.party_id, invoice_number: x.doc_no })) });
     } catch (e) { console.error(`[seed] history before go-live skipped: ${(e as Error).message}`); }
     await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(6), narration: 'Godown rent, Surat — October', reference: 'NEFT 2610-778', lines: [{ account_id: a('5500'), debit: 85000 }, { account_id: a('1200'), credit: 85000 }] });
     await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(4), narration: 'DGVCL power bill — September', lines: [{ account_id: a('5510'), debit: 18450 }, { account_id: a('1200'), credit: 18450 }] });
@@ -593,6 +592,12 @@ export async function seedOperations(services: RunningService[]) {
     if (payee) {
       paid = Math.min(payee.balance, 95000);
       await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(3), narration: `Part payment to ${payee.party_name}`, reference: 'NEFT ICICN52026103', lines: [{ account_id: a('2100'), debit: paid, party_id: payee.party_id }, { account_id: a('1200'), credit: paid }] });
+    }
+    // A supplier payment run for the bills now due: one bank file for everything released (approved payments join it).
+    {
+      const due = (await call<{ party_id: string; doc_no: string; days_overdue: number; bank: unknown; awaiting_approval: boolean }[]>('finance', accounts, 'GET', '/payment-run/candidates'))
+        .filter((x) => x.bank && !x.awaiting_approval && x.days_overdue >= 0).slice(0, 4);
+      if (due.length) await call('finance', accounts, 'POST', '/payment-runs', { date: daysAgo(1), mode: 'neft', items: due.map((x) => ({ party_id: x.party_id, invoice_number: x.doc_no })) }).catch((e) => console.error(`[seed] payment run: ${(e as Error).message}`));
     }
     // A small write-off typed by hand against a customer: allowed, but flagged for review.
     await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'journal', book_id: surat.id, date: daysAgo(2), narration: 'Short payment written off on SO/2627/00001 freight', lines: [{ account_id: a('5900'), debit: 1180 }, { account_id: a('1300'), credit: 1180, party_id: party('Sri Murugan Garments') }] });
@@ -608,8 +613,7 @@ export async function seedOperations(services: RunningService[]) {
     if (paid) line(daysAgo(3), `NEFT-DR-${payee!.party_name.toUpperCase()}`, 'NEFT ICICN52026103', paid, 0);
     for (const g of gw) line(daysAgo(1), 'ICICI PG SETTLEMENT', g.utr ?? 'PGSETTLE', 0, Number(g.amount));
     line(daysAgo(1), 'NEFT-CR-RUPA APPAREL HOUSE-ADV', 'SBIN426101155', 0, 50000);
-    const delhiOpen = openSales.filter((o) => o.customer === 'Delhi Fashion Hub' && o.date >= plusDays(goLive, -20)).pop();
-    if (delhiOpen) line(daysAgo(1), 'NEFT-CR-DELHI FASHION HUB PVT-PYMT', 'HDFC426101871', 0, delhiOpen.total);
+    if (heldOpen) line(daysAgo(1), 'NEFT-CR-DELHI FASHION HUB PVT-PYMT', 'HDFC426101871', 0, heldOpen.total);
     line(daysAgo(0), 'SMS ALERT CHARGES', '', 59, 0);
     await call('finance', accounts, 'POST', `/bank-accounts/${ba.id}/statements`, { file_name: `icici-${daysAgo(0).slice(0, 7)}.csv`, csv: rows.join('\n') });
     // GSTR-2B for Surat: one supplier invoice matches, one differs, and one bill the supplier filed that we have not booked.

@@ -12,7 +12,7 @@ import { Badge, Button, Card, EmptyState, Input, Notice, PageHeader, Select, Ske
 interface Candidate { party_id: string; party_name: string; doc_no: string; doc_date: string; due_date: string; outstanding: number; days_overdue: number; bank: { name: string; account: string; ifsc: string; bank_name: string | null } | null; bank_changed_recently: boolean; awaiting_approval: boolean }
 interface RunItem { party?: string; party_id?: string; invoice: string; amount?: number; voucher?: string; status: string; error?: string }
 interface Run { id: string; number: string; total: number; released: number; items: RunItem[]; bank_file: string | null }
-interface RunRow { id: string; number: string; run_date: string; mode: string; total: number; released: number; count: number; created_by_name: string; created_at: string }
+interface RunRow { id: string; number: string; run_date: string; mode: string; total: number; released: number; waiting: number; count: number; created_by_name: string; created_at: string }
 
 const keyOf = (c: { party_id: string; doc_no: string }) => `${c.party_id}|${c.doc_no}`;
 
@@ -76,7 +76,7 @@ export function PaymentRunPage() {
       </div>
 
       {result && (
-        <Card className="mb-4" title={`${result.number} created`} description={`${fmtINR(result.released)} released of ${fmtINR(result.total)}`}
+        <Card className="mb-4" title={`${result.number} created`} description={`${fmtINR(result.released)} released of ${fmtINR(result.total)}${result.released < result.total ? '. Payments approved later join this run’s bank file; download it again after approval.' : ''}`}
           actions={<>{result.bank_file && <Button size="sm" variant="primary" icon={<Download className="size-4" />} onClick={() => void download(result.id, result.number, result.bank_file)}>Bank upload file</Button>}<Button size="sm" onClick={() => setResult(null)}>Close</Button></>} padded={false}>
           <SimpleTable rows={result.items} rowKey={(r) => `${r.invoice}${r.voucher ?? r.error}`} columns={[
             { key: 'p', header: 'Supplier', render: (r) => r.party ?? '—' },
@@ -114,9 +114,9 @@ export function PaymentRunPage() {
             { key: 'n', header: 'Run', render: (r) => <span className="font-mono text-[12.5px]">{r.number}</span> },
             { key: 'd', header: 'Date', render: (r) => fmtDate(r.run_date) },
             { key: 'c', header: 'Bills', align: 'right', render: (r) => r.count },
-            { key: 't', header: 'Released', align: 'right', render: (r) => <span className="tabular">{fmtINR(r.released)} <span className="text-slate-400">of {fmtINR(r.total)}</span></span> },
+            { key: 't', header: 'Released', align: 'right', render: (r) => <span className="tabular">{fmtINR(r.released)} <span className="text-slate-400">of {fmtINR(r.total)}</span>{r.waiting > 0 && <span className="block text-[11.5px] text-amber-600">{r.waiting} waiting for a checker</span>}</span> },
             { key: 'by', header: 'By', render: (r) => <span className="text-[12.5px] text-slate-500">{r.created_by_name} · {fmtRelative(r.created_at)}</span> },
-            { key: 'f', header: '', render: (r) => r.released > 0 && <Button size="xs" variant="ghost" icon={<Download className="size-3" />} onClick={() => void download(r.id, r.number)}>Bank file</Button> },
+            { key: 'f', header: '', render: (r) => r.released > 0 && can('finance.voucher.post') && <Button size="xs" variant="ghost" icon={<Download className="size-3" />} onClick={() => void download(r.id, r.number)}>Bank file</Button> },
           ]} />
         </Card>
       )}
