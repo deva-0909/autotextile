@@ -1,4 +1,5 @@
 import { ArrowLeft, Eye, EyeOff, KeyRound, Lock, Mail, ShieldCheck } from 'lucide-react';
+import { DemoLoginPanel, useDemoUsers } from '../components/DemoSwitcher';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError, type SessionUser } from '../lib/api';
@@ -59,6 +60,7 @@ export function LoginPage() {
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const [code, setCode] = useState('');
   const codeRef = useRef<HTMLInputElement>(null);
+  const demo = useDemoUsers();
 
   useEffect(() => { if (user) nav(params.get('next') ?? '/', { replace: true }); }, [user, nav, params]);
   useEffect(() => { if (mfaToken) codeRef.current?.focus(); }, [mfaToken]);
@@ -142,10 +144,12 @@ export function LoginPage() {
         </div>
         <Button type="submit" variant="primary" size="lg" className="w-full" loading={loading}>Sign in</Button>
       </form>
-      <div className="mt-8 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-[12.5px] text-slate-600">
-        <p className="font-medium text-slate-800">Demo environment</p>
-        <p className="mt-1">admin@textile.local · owner@textile.local · purchase@textile.local · surat.stores@textile.local — password <span className="font-mono">Textile@2026</span></p>
-      </div>
+      {demo.data?.length ? <DemoLoginPanel /> : (
+        <div className="mt-8 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-[12.5px] text-slate-600">
+          <p className="font-medium text-slate-800">Demo environment</p>
+          <p className="mt-1">admin@textile.local · owner@textile.local · purchase@textile.local · surat.stores@textile.local — password <span className="font-mono">Textile@2026</span></p>
+        </div>
+      )}
       <p className="mt-4 text-center text-[13px] text-slate-600">Buying fabric for your business? <Link to="/register" className="font-medium text-brand-600 hover:underline">Open a trade account</Link></p>
     </AuthShell>
   );

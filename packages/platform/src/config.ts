@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+// APP_ROOT_DIR is set when the code runs bundled (serverless), where this file's location says nothing about the repo.
+export const ROOT_DIR = process.env.APP_ROOT_DIR ? path.resolve(process.env.APP_ROOT_DIR) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 const envFile = path.join(ROOT_DIR, '.env');
 if (fs.existsSync(envFile)) process.loadEnvFile(envFile);

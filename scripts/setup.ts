@@ -7,7 +7,7 @@
  *        npm run setup -- --reset (drop and recreate the database)
  */
 import pg from 'pg';
-import { bootService, config, publish, tx } from '@erp/platform';
+import { SERVICES, bootService, config, createPool, publish, tx } from '@erp/platform';
 import { syncRoles } from '../services/identity/src/service.ts';
 import { SERVICE_DEFS } from './services.ts';
 import { hashPassword } from '../services/identity/src/security.ts';
@@ -44,7 +44,16 @@ async function ensureDatabase() {
   await client.end();
 }
 
-await ensureDatabase();
+// Hosted Postgres (DB_ROLE_PER_SERVICE=1, e.g. Supabase): the database exists and cannot be dropped, so a reset drops
+// the application's schemas instead.
+if (process.env.DB_ROLE_PER_SERVICE === '1') {
+  if (reset) {
+    console.log('• Dropping the application schemas');
+    const pool = createPool('identity');
+    for (const schema of [...SERVICES, 'bus']) await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await pool.end();
+  }
+} else await ensureDatabase();
 
 console.log('• Running migrations');
 const services = [];

@@ -2,7 +2,7 @@
   "name": "textile-erp",
   "private": true,
   "version": "0.1.0",
-  "description": "Textile Trading ERP — domain microservices (identity, organisation, masters, governance) behind an API gateway, with a React ERP web app.",
+  "description": "Textile Trading ERP \u2014 domain microservices (identity, organisation, masters, governance) behind an API gateway, with a React ERP web app.",
   "type": "module",
   "workspaces": [
     "packages/*",
@@ -21,12 +21,17 @@
     "dev:web": "npm run dev -w apps/web",
     "build": "npm run build -w apps/web",
     "test": "node --test --test-concurrency=1 \"tests/**/*.test.ts\"",
-    "typecheck": "tsc -p tsconfig.json && npm run typecheck -w apps/web"
+    "typecheck": "tsc -p tsconfig.json && npm run typecheck -w apps/web",
+    "build:vercel": "node scripts/build-vercel.ts"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
     "@types/node": "^22.18.0",
     "@types/pg": "^8.23.1",
+    "esbuild": "^0.28.2",
     "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@vercel/functions": "^3.10.5"
   }
 }

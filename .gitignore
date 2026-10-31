@@ -6,3 +6,4 @@ storage/
 *.log
 .DS_Store
 backups/
+.vercel/

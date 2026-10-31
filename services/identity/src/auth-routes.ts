@@ -93,6 +93,26 @@ export function authRoutes(r: Router, ctx: ServiceContext) {
     res.json(await startSession(ctx, req, res, user));
   });
 
+  /**
+   * Demo mode only (DEMO_MODE=1, for client walkthroughs on a demo database): list the active users and sign in as
+   * any of them without a password, so the presenter can switch roles in one click. Absent otherwise.
+   */
+  if (process.env.DEMO_MODE === '1') {
+    r.get('/auth/demo-users', async (_req, res) => {
+      res.json(await many(ctx.pool, `
+        SELECT u.email, u.name, u.designation, u.party_id IS NOT NULL AS portal, string_agg(DISTINCT ro.name, ', ') AS roles, min(ro.code) AS role_code
+        FROM users u LEFT JOIN user_roles ur ON ur.user_id = u.id LEFT JOIN roles ro ON ro.id = ur.role_id
+        WHERE u.status = 'active' GROUP BY u.id
+        ORDER BY (u.party_id IS NOT NULL), coalesce(array_position(ARRAY['owner','super_admin','management_approver','purchase_manager','purchase_executive','warehouse_manager','mill_ops_manager','sales_manager','sales_executive','dispatch_manager','customer_care','accounts_manager','accounts_executive','hr_manager','auditor','customer_company_admin','customer_buyer','supplier_portal','mill_user'], min(ro.code)), 99), u.name`));
+    });
+    r.post('/auth/demo-login', async (req, res) => {
+      const { email } = parse(z.object({ email: z.string().trim().min(1) }), req.body);
+      const user = await one<UserRow>(ctx.pool, 'SELECT * FROM users WHERE lower(email) = lower($1)', [email]);
+      if (!user || user.status !== 'active') throw unauthorized('No such active demo user');
+      res.json({ ...(await startSession(ctx, req, res, user)), mustChangePassword: false });
+    });
+  }
+
   r.post('/auth/mfa', async (req, res) => {
     const { mfaToken, code } = parse(z.object({ mfaToken: z.string(), code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code') }), req.body);
     let userId: string;

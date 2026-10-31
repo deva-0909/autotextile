@@ -7,6 +7,7 @@ import './index.css';
 import App from './App';
 import { AuthProvider } from './lib/auth';
 import { ToastProvider } from './components/overlay';
+import { DemoSwitcher } from './components/DemoSwitcher';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,6 +22,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <ToastProvider>
           <AuthProvider>
             <App />
+            <DemoSwitcher />
           </AuthProvider>
         </ToastProvider>
       </BrowserRouter>

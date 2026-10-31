@@ -91,6 +91,14 @@ describe('identity & security', () => {
     assert.ok(Object.values(r.body.services).every((s) => s === 'ok'));
   });
 
+  test('demo sign-in does not exist unless DEMO_MODE=1', async () => {
+    // Not a public route: without a token it is refused before routing, and no session is ever issued.
+    const r = await call(null, 'POST', '/api/identity/auth/demo-login', { email: 'owner@textile.local' });
+    assert.equal(r.status, 401);
+    assert.equal(r.body?.accessToken, undefined);
+    assert.equal((await call(null, 'GET', '/api/identity/auth/demo-users')).status, 401);
+  });
+
   test('protected routes need a token', async () => {
     assert.equal((await call(null, 'GET', '/api/masters/parties')).status, 401);
     assert.equal((await call('garbage', 'GET', '/api/masters/parties')).status, 401);

@@ -59,7 +59,8 @@ export interface Consumer {
   drain(): Promise<void>;
 }
 
-export function subscribe(pool: Pool, consumer: string, handlers: Record<string, Handler>, opts: { pollMs?: number } = {}): Consumer {
+/** `manual`: no polling timer and no LISTEN connection; events are processed only when `drain()` is called (serverless). */
+export function subscribe(pool: Pool, consumer: string, handlers: Record<string, Handler>, opts: { pollMs?: number; manual?: boolean } = {}): Consumer {
   const types = Object.keys(handlers);
   let stopped = false;
   let running: Promise<void> | null = null;
@@ -136,9 +137,9 @@ export function subscribe(pool: Pool, consumer: string, handlers: Record<string,
     }
   }
 
-  const timer = setInterval(() => void drain(), opts.pollMs ?? 2000);
-  timer.unref();
-  void (async () => {
+  const timer = opts.manual ? null : setInterval(() => void drain(), opts.pollMs ?? 2000);
+  timer?.unref();
+  if (!opts.manual) void (async () => {
     try {
       listener = await pool.connect();
       listener.on('notification', () => void drain());
@@ -150,7 +151,7 @@ export function subscribe(pool: Pool, consumer: string, handlers: Record<string,
     drain,
     async stop() {
       stopped = true;
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
       while (running) await running;
       if (listener) {
         await listener.query('UNLISTEN bus').catch(() => {});
