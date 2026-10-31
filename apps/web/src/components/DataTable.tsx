@@ -251,10 +251,16 @@ export function DataTable<T>({
 }
 
 /** Compact client-side table for short lists that are already loaded. */
-export function SimpleTable<T>({ rows, columns, rowKey, onRowClick, empty }: {
+export function SimpleTable<T>({ rows, columns, rowKey, onRowClick, empty, pageSize }: {
   rows: T[]; columns: Omit<Column<T>, 'sort' | 'csv'>[]; rowKey: (r: T) => string; onRowClick?: (r: T) => void; empty?: ReactNode;
+  /** Show this many rows at a time, with a pager underneath, when there are more. */
+  pageSize?: number;
 }) {
-  const body = useMemo(() => rows, [rows]);
+  const [pg, setPg] = useState(0);
+  const pages = pageSize ? Math.max(1, Math.ceil(rows.length / pageSize)) : 1;
+  const at = Math.min(pg, pages - 1);
+  useEffect(() => { setPg(0); }, [rows.length]);
+  const body = useMemo(() => (pageSize ? rows.slice(at * pageSize, (at + 1) * pageSize) : rows), [rows, pageSize, at]);
   return (
     <div className="scrollbar-thin overflow-x-auto">
       <table className="w-full text-left">
@@ -276,6 +282,16 @@ export function SimpleTable<T>({ rows, columns, rowKey, onRowClick, empty }: {
         </tbody>
       </table>
       {body.length === 0 && (empty ?? <EmptyState title="Nothing here yet" />)}
+      {pageSize && rows.length > pageSize && (
+        <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2 text-[12.5px] text-slate-500">
+          <span className="tabular">{at * pageSize + 1}–{Math.min(rows.length, (at + 1) * pageSize)} of {rows.length}</span>
+          <span className="flex items-center gap-1">
+            <button className="rounded px-2 py-1 hover:bg-slate-100 disabled:opacity-40" disabled={at === 0} onClick={() => setPg(at - 1)} aria-label="Previous page">‹ Previous</button>
+            <span className="tabular">Page {at + 1} of {pages}</span>
+            <button className="rounded px-2 py-1 hover:bg-slate-100 disabled:opacity-40" disabled={at >= pages - 1} onClick={() => setPg(at + 1)} aria-label="Next page">Next ›</button>
+          </span>
+        </div>
+      )}
     </div>
   );
 }

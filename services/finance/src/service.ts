@@ -1,4 +1,5 @@
 import { legacyRoutes } from './legacy.ts';
+import { paymentRunRoutes } from './payrun.ts';
 import { type ServiceDefinition, migrationsOf } from '@erp/platform';
 import { applyFinanceDecision, voucherRoutes } from './vouchers.ts';
 import { approvalDecidedConsumer, creditNoteConsumer, orderCancelledConsumer, payrollApprovedConsumer, payrollPaidConsumer, paymentReceivedConsumer, paymentRefundedConsumer, salesInvoiceConsumer, supplierInvoiceConsumer, transferConsumer } from './postings.ts';
@@ -19,6 +20,7 @@ export const financeService: ServiceDefinition = {
     bankRoutes(r, ctx);
     reportRoutes(r, ctx);
     legacyRoutes(r, ctx);
+    paymentRunRoutes(r, ctx);
   },
   consumers: () => ({
     'approval.decided': approvalDecidedConsumer(applyFinanceDecision),

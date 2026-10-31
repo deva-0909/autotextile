@@ -22,7 +22,7 @@ function download(name: string, data: unknown) {
 // ---------------------------------------------------------------- bank reconciliation
 interface BankAcc { id: string; bank_name: string; account_no: string; ifsc: string | null; code: string; account_name: string; book: string; book_balance: number; statement_balance: number | null; statement_to: string | null; unmatched: number }
 interface Cand { voucher_id: string; number: string; date: string; narration: string; amount: number; ref_match: boolean }
-interface BLine { id: string; txn_date: string; description: string; ref: string | null; debit: number; credit: number; balance: number | null; status: string; voucher_no: string | null; note: string | null; matched_by_name: string | null; candidates?: Cand[] }
+interface BLine { id: string; txn_date: string; description: string; ref: string | null; debit: number; credit: number; balance: number | null; status: string; voucher_no: string | null; note: string | null; matched_by_name: string | null; candidates?: Cand[]; receipt_suggestion?: { party_id: string; party_name: string; by: 'name' | 'amount'; bills: { doc_no: string; doc_date: string; outstanding: number; apply: number }[]; on_account: number } | null; }
 interface Recon { account: { bank_name: string; account_no: string }; lines: BLine[]; unpresented: { voucher_id: string; number: string; date: string; narration: string; debit: number; credit: number }[]; summary: { book_balance: number; statement_balance: number | null; bank_only_receipts: number; bank_only_payments: number; book_only_receipts: number; book_only_payments: number; derived_bank_balance: number; difference: number | null } }
 
 export function BankPage() {
@@ -40,6 +40,14 @@ export function BankPage() {
   const toast = useToast();
   const refresh = () => invalidatePrefix(qc, 'fin-');
   const match = async (l: BLine, voucherId: string) => { try { await api.post(`/finance/bank-lines/${l.id}/match`, { voucher_id: voucherId }); refresh(); } catch (e) { toast({ tone: 'error', title: 'Could not match', body: errMsg(e) }); } };
+  const recordReceipt = async (l: BLine) => {
+    const sg = l.receipt_suggestion!;
+    try {
+      const v = await api.post<{ number: string }>(`/finance/bank-lines/${l.id}/create`, { kind: 'customer_receipt', party_id: sg.party_id, bills: sg.bills.map((x) => ({ doc_no: x.doc_no, amount: x.apply })), narration: `Receipt from ${sg.party_name}${sg.bills.length ? ` against ${sg.bills.map((x) => x.doc_no).join(', ')}` : ''} · ${l.description}` });
+      toast({ tone: 'success', title: `Receipt ${v.number} recorded`, body: `${sg.party_name}${sg.bills.length ? `: ${sg.bills.length} invoice${sg.bills.length > 1 ? 's' : ''} settled` : ''}` });
+      refresh();
+    } catch (e) { toast({ tone: 'error', title: 'Could not record the receipt', body: errMsg(e) }); }
+  };
   const s = rec.data?.summary;
   return (
     <>
@@ -76,7 +84,13 @@ export function BankPage() {
                 { key: 'w', header: 'Withdrawal', align: 'right', render: (l) => fmtAmt(l.debit) },
                 { key: 'p', header: 'Deposit', align: 'right', render: (l) => fmtAmt(l.credit) },
                 { key: 'm', header: status === 'unmatched' ? 'Suggested match' : 'Voucher', render: (l) => status !== 'unmatched' ? <span className="text-[12.5px]">{l.voucher_no ?? '—'} {l.matched_by_name && <span className="text-slate-400">({l.matched_by_name})</span>}</span> : (
-                  <div className="space-y-1">{(l.candidates ?? []).slice(0, 2).map((c) => <div key={c.voucher_id} className="flex items-center gap-2 text-[12.5px]"><span className="font-mono">{c.number}</span><span className="max-w-[180px] truncate text-slate-500">{c.narration}</span>{c.ref_match && <Badge tone="success">UTR</Badge>}{can('finance.bank.reconcile') && <Button size="sm" onClick={() => void match(l, c.voucher_id)}>Match</Button>}</div>)}{!l.candidates?.length && <span className="text-[12.5px] text-slate-400">No voucher with this amount</span>}</div>) },
+                  <div className="space-y-1">{(l.candidates ?? []).slice(0, 2).map((c) => <div key={c.voucher_id} className="flex items-center gap-2 text-[12.5px]"><span className="font-mono">{c.number}</span><span className="max-w-[180px] truncate text-slate-500">{c.narration}</span>{c.ref_match && <Badge tone="success">UTR</Badge>}{can('finance.bank.reconcile') && <Button size="sm" onClick={() => void match(l, c.voucher_id)}>Match</Button>}</div>)}{!l.candidates?.length && !l.receipt_suggestion && <span className="text-[12.5px] text-slate-400">No voucher with this amount</span>}
+                    {l.receipt_suggestion && (() => { const sg = l.receipt_suggestion; return (
+                      <div className="text-[12.5px]">
+                        <p><span className="font-medium text-slate-900">{sg.party_name}</span> <Badge tone={sg.by === 'name' ? 'success' : 'neutral'}>{sg.by === 'name' ? 'Name in narration' : 'Same amount'}</Badge></p>
+                        <p className="text-slate-500">{sg.bills.length ? sg.bills.map((x) => `${x.doc_no}${x.apply < x.outstanding ? ` (part ${fmtAmt(x.apply)})` : ''}`).join(', ') : 'No open invoice'}{sg.on_account > 0 ? ` · ${fmtAmt(sg.on_account)} on account` : ''}</p>
+                        {can('finance.bank.reconcile') && <Button size="sm" className="mt-1" onClick={() => void recordReceipt(l)}>Record receipt</Button>}
+                      </div>); })()}</div>) },
                 { key: 'a', header: '', render: (l) => status === 'unmatched' && can('finance.bank.reconcile') ? <div className="flex gap-1"><Button size="sm" onClick={() => setCreate(l)}>Create entry</Button><Button size="sm" variant="ghost" onClick={() => setIgnore(l)}>Set aside</Button></div> : null },
               ]} />
             )}

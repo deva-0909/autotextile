@@ -94,7 +94,7 @@ export function MigrationPage() {
             {det.data.notes && <Notice tone="warning">{det.data.notes}</Notice>}
             {det.data.source_total != null && <div className="grid grid-cols-3 gap-3"><Stat label={`${det.data.control_label} in file`} value={fmtNum(det.data.source_total)} /><Stat label="In the ERP" value={det.data.erp_total == null ? '—' : fmtNum(det.data.erp_total)} /><Stat label="Difference" value={det.data.difference == null ? '—' : fmtNum(det.data.difference)} tone={det.data.difference == null ? undefined : Math.abs(det.data.difference) < 0.01 ? 'success' : 'danger'} /></div>}
             {det.data.reconciliation?.note && <Notice tone="info">{det.data.reconciliation.note}</Notice>}
-            <SimpleTable rows={det.data.rows} rowKey={(r: Row) => String(r.row_no)} columns={[
+            <SimpleTable pageSize={20} rows={det.data.rows} rowKey={(r: Row) => String(r.row_no)} columns={[
               { key: 'n', header: 'Line', render: (r: Row) => r.row_no },
               { key: 'd', header: 'Data', render: (r: Row) => <span className="font-mono text-[11.5px]">{Object.values(r.data).filter(Boolean).slice(0, 5).join(' · ')}</span> },
               { key: 's', header: 'Result', render: (r: Row) => <div><Badge tone={r.status === 'imported' ? 'success' : r.status === 'valid' ? 'info' : r.status === 'skipped' ? 'neutral' : 'danger'}>{r.status}</Badge>{r.result_ref && <span className="ml-1 font-mono text-[11.5px]">{r.result_ref}</span>}{[...(r.errors ?? []), r.error].filter(Boolean).map((e: string) => <p key={e} className="text-[11.5px] text-rose-600">{e}</p>)}</div> },

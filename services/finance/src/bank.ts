@@ -1,8 +1,8 @@
 import type { Router } from 'express';
 import { z } from 'zod';
-import { type Client, type ServiceContext, badRequest, conflict, many, notFound, one, optText, parse, reqText, requirePermission, tx } from '@erp/platform';
-import { auditReq, getParty, raiseAnomaly, round2 } from './common.ts';
-import { account, post } from './ledger.ts';
+import { type Client, type ServiceContext, badRequest, callService, conflict, many, notFound, one, optText, parse, reqText, requirePermission, tx } from '@erp/platform';
+import { S, auditReq, getParty, raiseAnomaly, round2 } from './common.ts';
+import { account, openBills, post } from './ledger.ts';
 
 interface Line { txn_date: string; description: string; ref: string | null; debit: number; credit: number; balance: number | null }
 
@@ -58,6 +58,43 @@ async function candidates(c: Client | ServiceContext['pool'], ba: { account_id: 
       AND NOT EXISTS (SELECT 1 FROM bank_lines b WHERE b.voucher_id = v.id) ORDER BY abs(v.voucher_date - $3::date) LIMIT 10`, [ba.account_id, Number(l.credit) > 0 ? l.credit : l.debit, l.txn_date]);
   const refHit = (r: { source_ref: string | null; narration: string }) => !!l.ref && ((r.source_ref ?? '').includes(l.ref) || r.narration.includes(l.ref) || l.description.includes(r.source_ref ?? '\u0000'));
   return rows.map((r) => ({ ...r, ref_match: refHit(r) })).sort((a, b) => Number(b.ref_match) - Number(a.ref_match));
+}
+
+/**
+ * Who paid an unidentified bank credit, and which invoices it settles: the customer whose name appears in the narration
+ * (or, failing that, the only open invoice of exactly that amount), then an invoice of the same amount, else the oldest.
+ */
+const STOP = new Set(['PVT', 'LTD', 'PRIVATE', 'LIMITED', 'THE', 'AND', 'CO', 'COMPANY', 'WORKS', 'HOUSE', 'GARMENTS', 'FABRICS', 'EXPORTS', 'KNIT', 'KNITS', 'TEXTILES', 'NEFT', 'RTGS', 'IMPS', 'UPI']);
+type Suggestion = { party_id: string; party_name: string; by: 'name' | 'amount'; bills: { doc_no: string; doc_date: string; outstanding: number; apply: number }[]; on_account: number };
+async function receiptSuggestion(ar: Awaited<ReturnType<typeof openBills>>, customers: { id: string; legal_name: string }[], l: { credit: number; description: string; ref: string | null }): Promise<Suggestion | null> {
+  const amt = Number(l.credit);
+  if (!(amt > 0)) return null;
+  const text = ` ${`${l.description} ${l.ref ?? ''}`.toUpperCase().replace(/[^A-Z0-9]+/g, ' ')} `;
+  let best: { id: string; legal_name: string; score: number } | null = null;
+  for (const cu of customers) {
+    const words = cu.legal_name.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').split(' ').filter((w) => w.length >= 3 && !STOP.has(w));
+    const hits = words.filter((w) => text.includes(` ${w} `)).length;
+    const score = words.length ? hits / words.length : 0;
+    if (hits && (!best || score > best.score)) best = { ...cu, score };
+  }
+  let by: Suggestion['by'] = 'name';
+  if (!best) {
+    const same = ar.bills.filter((b) => Math.abs(b.outstanding - amt) < 1);
+    if (same.length !== 1) return null;
+    best = { id: same[0]!.party_id, legal_name: same[0]!.party_name, score: 0 };
+    by = 'amount';
+  }
+  const open = ar.bills.filter((b) => b.party_id === best!.id && b.outstanding > 0.005).sort((a, b) => a.doc_date.localeCompare(b.doc_date));
+  const exact = open.find((b) => Math.abs(b.outstanding - amt) < 1);
+  let left = amt;
+  const bills: Suggestion['bills'] = [];
+  for (const b of exact ? [exact] : open) {
+    if (left <= 0.005) break;
+    const apply = round2(Math.min(left, b.outstanding));
+    bills.push({ doc_no: b.doc_no, doc_date: b.doc_date, outstanding: b.outstanding, apply });
+    left = round2(left - apply);
+  }
+  return { party_id: best.id, party_name: best.legal_name, by, bills, on_account: round2(left) };
 }
 
 export function bankRoutes(r: Router, { pool }: ServiceContext) {
@@ -116,7 +153,12 @@ export function bankRoutes(r: Router, { pool }: ServiceContext) {
     const status = (req.query.status as string) || 'unmatched';
     const lines = await many<{ txn_date: string; debit: number; credit: number; ref: string | null; description: string }>(pool, `SELECT b.*, b.txn_date::text, b.debit::float, b.credit::float, b.balance::float, v.number AS voucher_no FROM bank_lines b LEFT JOIN vouchers v ON v.id = b.voucher_id
       WHERE b.bank_account_id = $1 AND ($2 = 'all' OR b.status = $2) ORDER BY b.txn_date DESC, b.id LIMIT 500`, [ba.id, status]);
-    const withCand = status === 'unmatched' ? await Promise.all(lines.map(async (l) => ({ ...l, candidates: await candidates(pool, ba, l) }))) : lines;
+    const ar = status === 'unmatched' ? await openBills(pool, 'receivable') : null;
+    const customers = status === 'unmatched' ? (await callService<{ items: { id: string; legal_name: string }[] }>(S, 'masters', 'GET', '/parties?pageSize=500&f_type=customer').catch(() => ({ items: [] }))).items : [];
+    const withCand = status === 'unmatched' ? await Promise.all(lines.map(async (l) => {
+      const cands = await candidates(pool, ba, l);
+      return { ...l, candidates: cands, receipt_suggestion: !cands.length && Number(l.credit) > 0 ? await receiptSuggestion(ar!, customers, l) : null };
+    })) : lines;
     // Entries in the books not yet seen on the statement (cheques not presented, deposits in transit).
     const unpresented = await many<{ debit: number; credit: number }>(pool, `SELECT v.id AS voucher_id, v.number, v.voucher_date::text AS date, v.narration, l.debit::float, l.credit::float FROM voucher_lines l JOIN vouchers v ON v.id = l.voucher_id
       WHERE l.account_id = $1 AND v.status IN ('posted','reversed') AND v.voucher_type <> 'opening' AND NOT EXISTS (SELECT 1 FROM bank_lines b WHERE b.voucher_id = v.id) AND NOT ((v.status = 'reversed' AND NOT EXISTS (SELECT 1 FROM bank_lines b0 WHERE b0.voucher_id = v.id)) OR (v.reversal_of IS NOT NULL AND NOT EXISTS (SELECT 1 FROM bank_lines b0 WHERE b0.voucher_id = v.reversal_of))) ORDER BY v.voucher_date DESC LIMIT 200`, [ba.account_id]);
@@ -146,7 +188,8 @@ export function bankRoutes(r: Router, { pool }: ServiceContext) {
 
   /** Create the missing voucher from a statement line (bank charges, a customer's direct transfer, a gateway settlement, a supplier payment). */
   r.post('/bank-lines/:id/create', requirePermission('finance.bank.reconcile'), async (req, res) => {
-    const b = parse(z.object({ kind: z.enum(['customer_receipt', 'supplier_payment', 'gateway_settlement', 'bank_charges', 'other']), party_id: z.uuid().nullable().optional(), account_id: z.string().optional(), narration: optText(300) }), req.body);
+    const b = parse(z.object({ kind: z.enum(['customer_receipt', 'supplier_payment', 'gateway_settlement', 'bank_charges', 'other']), party_id: z.uuid().nullable().optional(), account_id: z.string().optional(), narration: optText(300),
+      bills: z.array(z.object({ doc_no: z.string().min(1).max(60), amount: z.number().positive() })).max(50).optional() }), req.body);
     const party = b.party_id ? await getParty(b.party_id) : null;
     const out = await tx(pool, async (c) => {
       const l = await one<{ id: string; status: string; bank_account_id: string; txn_date: string; description: string; ref: string | null; debit: number; credit: number }>(c, 'SELECT *, txn_date::text FROM bank_lines WHERE id = $1 FOR UPDATE', [req.params.id]);
@@ -163,9 +206,14 @@ export function bankRoutes(r: Router, { pool }: ServiceContext) {
       else if (b.kind === 'bank_charges') other = { account: 'bank_charges' };
       else { if (!b.account_id) throw badRequest('Choose the ledger account'); other = { account: b.account_id }; }
       const type = b.kind === 'gateway_settlement' ? 'contra' : inflow ? 'receipt' : 'payment';
+      // A receipt or payment set against named bills: one line per bill, anything left over on account.
+      const billed = round2((b.bills ?? []).reduce((t, x) => t + x.amount, 0));
+      if (b.bills?.length && !party) throw badRequest('Choose the customer or supplier the bills belong to');
+      if (billed > amt + 0.005) throw badRequest(`The bills add up to ₹${billed.toLocaleString('en-IN')}, more than the ₹${amt.toLocaleString('en-IN')} on this line`);
+      const split = b.bills?.length ? [...b.bills.map((x) => ({ ...other, bill_ref: x.doc_no, amount: x.amount })), ...(amt - billed > 0.005 ? [{ ...other, amount: round2(amt - billed) }] : [])] : [{ ...other, amount: amt }];
       const v = await post(c, { type, book_id: ba.book_id, date: l.txn_date, narration: b.narration ?? `${l.description}${l.ref ? ` · ${l.ref}` : ''}`, party_id: other.party_id ?? null, party_name: other.party_name ?? null, by: req.user!.name, approved_by: req.user!.name,
         source: { service: 'finance', type: 'bank_line', id: l.id, ref: l.ref },
-        lines: inflow ? [{ account: ba.account_id, debit: amt }, { ...other, credit: amt }] : [{ ...other, debit: amt }, { account: ba.account_id, credit: amt }] });
+        lines: inflow ? [{ account: ba.account_id, debit: amt }, ...split.map(({ amount, ...x }) => ({ ...x, credit: amount }))] : [...split.map(({ amount, ...x }) => ({ ...x, debit: amount })), { account: ba.account_id, credit: amt }] });
       await c.query(`UPDATE bank_lines SET status = 'matched', voucher_id = $2, matched_by_name = $3, matched_at = now() WHERE id = $1`, [l.id, v.id, req.user!.name]);
       if (b.kind === 'supplier_payment' && party) {
         const dup = await one<{ number: string }>(c, `SELECT v.number FROM vouchers v JOIN voucher_lines x ON x.voucher_id = v.id WHERE v.voucher_type = 'payment' AND v.status = 'posted' AND v.id <> $1 AND x.party_id = $2 AND x.debit = $3 AND abs(v.voucher_date - $4::date) <= 30 LIMIT 1`, [v.id, party.id, amt, l.txn_date]);

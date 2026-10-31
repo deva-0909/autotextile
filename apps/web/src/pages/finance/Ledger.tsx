@@ -135,7 +135,7 @@ export function LedgerPage() {
       {q.isError ? <ErrorState error={q.error} /> : !d ? <Skeleton className="h-96" /> : (
         <Card padded={false}>
           <div className="flex justify-between border-b border-slate-100 px-5 py-3 text-[13px]"><span>Opening balance</span><Amt v={d.opening} className="font-semibold" /></div>
-          <SimpleTable rows={d.entries} rowKey={(e) => `${e.voucher_id}-${e.debit}-${e.credit}-${e.balance}`} onRowClick={(e) => nav(`/finance/vouchers/${e.voucher_id}`)} empty={<EmptyState icon={<BookOpen className="size-5" />} title="No entries in this range" />} columns={[
+          <SimpleTable pageSize={20} rows={d.entries} rowKey={(e) => `${e.voucher_id}-${e.debit}-${e.credit}-${e.balance}`} onRowClick={(e) => nav(`/finance/vouchers/${e.voucher_id}`)} empty={<EmptyState icon={<BookOpen className="size-5" />} title="No entries in this range" />} columns={[
             { key: 'd', header: 'Date', render: (e) => <span className="whitespace-nowrap">{fmtDate(e.date)}</span> },
             { key: 'v', header: 'Voucher', render: (e) => <div><p className="font-mono text-[12.5px]">{e.number}</p><p className="text-[11.5px] text-slate-500">{humanize(e.voucher_type)} · {e.book}{e.status === 'reversed' ? ' · reversed' : ''}</p></div> },
             { key: 'n', header: 'Particulars', render: (e) => <div className="max-w-md"><p className="truncate">{e.party_name ?? e.against}</p><p className="truncate text-[12px] text-slate-500">{e.narration}</p></div> },
@@ -154,7 +154,7 @@ export function LedgerPage() {
 export interface VRow { id: string; number: string; voucher_type: string; date: string; narration: string; party_name?: string | null; amount: number; status: string; book: string; source_service?: string; manual?: boolean; created_by_name?: string; approved_by_name?: string | null }
 function VoucherTable({ rows, onOpen }: { rows: VRow[]; onOpen: (id: string) => void }) {
   return (
-    <SimpleTable rows={rows} rowKey={(v) => v.id} onRowClick={(v) => onOpen(v.id)} empty={<EmptyState icon={<Receipt className="size-5" />} title="No vouchers" />} columns={[
+    <SimpleTable pageSize={20} rows={rows} rowKey={(v) => v.id} onRowClick={(v) => onOpen(v.id)} empty={<EmptyState icon={<Receipt className="size-5" />} title="No vouchers" />} columns={[
       { key: 'd', header: 'Date', render: (v) => <span className="whitespace-nowrap">{fmtDate(v.date)}</span> },
       { key: 'n', header: 'Voucher', render: (v) => <div className="whitespace-nowrap"><p className="font-mono text-[12.5px] font-semibold">{v.number}</p><p className="text-[11.5px] text-slate-500">{humanize(v.voucher_type)} · {v.book}{v.source_service && v.source_service !== 'finance' ? ` · ${v.source_service}` : v.manual ? ' · manual' : ''}</p></div> },
       { key: 'p', header: 'Particulars', render: (v) => <div className="max-w-xs xl:max-w-sm">{v.party_name ? <><p className="truncate">{v.party_name}</p><p className="truncate text-[12px] text-slate-500">{v.narration}</p></> : <p className="line-clamp-2 text-[13px]">{v.narration}</p>}</div> },
@@ -337,7 +337,7 @@ export function AgeingPage({ kind }: { kind: 'receivables' | 'payables' }) {
             {cols.map(([k, l]) => <Stat key={k} label={k === 'not_due' ? l : `${l} days overdue`} value={fmtINR(q.data!.totals[k])} tone={k === 'd90_plus' && q.data!.totals[k]! > 0 ? 'danger' : k !== 'not_due' && q.data!.totals[k]! > 0 ? 'warning' : undefined} />)}
           </div>
           <Card padded={false}>
-            <SimpleTable rows={q.data.rows} rowKey={(r) => r.party_id} onRowClick={(r) => nav(`/finance/${kind}/${r.party_id}`)} empty={<EmptyState icon={<Landmark className="size-5" />} title="Nothing outstanding" />} columns={[
+            <SimpleTable pageSize={20} rows={q.data.rows} rowKey={(r) => r.party_id} onRowClick={(r) => nav(`/finance/${kind}/${r.party_id}`)} empty={<EmptyState icon={<Landmark className="size-5" />} title="Nothing outstanding" />} columns={[
               { key: 'p', header: kind === 'receivables' ? 'Customer' : 'Supplier', render: (r) => r.party_name },
               { key: 'b', header: 'Balance', align: 'right', render: (r) => <Amt v={r.balance} className="font-semibold" /> },
               ...cols.map(([k, l]) => ({ key: k, header: l, align: 'right' as const, render: (r: AgeRow) => <span className={k === 'd90_plus' && r[k] > 0 ? 'font-semibold text-rose-600' : ''}>{fmtAmt(r[k])}</span> })),
@@ -368,7 +368,7 @@ export function PartyLedgerPage({ kind }: { kind: 'receivables' | 'payables' }) 
           <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ value: 'bills', label: 'Open bills', count: d.open_bills.length }, { value: 'ledger', label: 'Ledger' }, ...(kind === 'payables' ? [{ value: 'tds' as const, label: 'TDS', count: d.tds.length }] : [])]} />
           <Card padded={false}>
             {tab === 'bills' ? (
-              <SimpleTable rows={d.open_bills} rowKey={(b) => b.doc_no} empty={<EmptyState title="No open bills" />} columns={[
+              <SimpleTable pageSize={20} rows={d.open_bills} rowKey={(b) => b.doc_no} empty={<EmptyState title="No open bills" />} columns={[
                 { key: 'n', header: 'Document', render: (b) => <span className="font-mono text-[12.5px]">{b.doc_no}</span> },
                 { key: 'd', header: 'Date', render: (b) => fmtDate(b.doc_date) },
                 { key: 'u', header: 'Due', render: (b) => fmtDate(b.due_date) },
@@ -377,7 +377,7 @@ export function PartyLedgerPage({ kind }: { kind: 'receivables' | 'payables' }) 
                 { key: 'b', header: 'Age', render: (b) => <Badge tone={b.bucket === 'not_due' ? 'success' : b.bucket === 'd90_plus' ? 'danger' : 'warning'}>{b.bucket === 'not_due' ? 'Not due' : `${b.bucket.replace('d', '').replace('_plus', '+').replace('_', '–')} days`}</Badge> },
               ]} />
             ) : tab === 'ledger' ? (
-              <SimpleTable rows={d.entries} rowKey={(e) => `${e.voucher_id}${e.balance}`} onRowClick={(e) => nav(`/finance/vouchers/${e.voucher_id}`)} columns={[
+              <SimpleTable pageSize={20} rows={d.entries} rowKey={(e) => `${e.voucher_id}${e.balance}`} onRowClick={(e) => nav(`/finance/vouchers/${e.voucher_id}`)} columns={[
                 { key: 'd', header: 'Date', render: (e) => fmtDate(e.date) },
                 { key: 'v', header: 'Voucher', render: (e) => <div><p className="font-mono text-[12.5px]">{e.number}</p><p className="text-[11.5px] text-slate-500">{humanize(e.voucher_type)} · {e.book}</p></div> },
                 { key: 'n', header: 'Narration', render: (e) => <span className="text-[12.5px]">{e.narration}</span> },

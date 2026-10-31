@@ -62,7 +62,7 @@ fs.writeFileSync(path.join(fn, '.vc-config.json'), JSON.stringify({
   memory: 1024,
   // Next to the Supabase database (ap-south-1, Mumbai); every request makes many small queries.
   regions: [process.env.FUNCTION_REGION ?? 'bom1'],
-  environment: { APP_ROOT_DIR: '/var/task', STORAGE_DIR: '/tmp/storage', NODE_OPTIONS: '--enable-source-maps', DB_ROLE_PER_SERVICE: '1', PG_POOL_MAX: '3' },
+  environment: { APP_ROOT_DIR: '/var/task', STORAGE_DIR: '/tmp/storage', STORAGE_BACKEND: 'database', NODE_OPTIONS: '--enable-source-maps', DB_ROLE_PER_SERVICE: '1', PG_POOL_MAX: '3' },
 }, null, 2));
 
 // 3. Routing and cron

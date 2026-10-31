@@ -579,6 +579,10 @@ export async function seedOperations(services: RunningService[]) {
         if (paidOn > daysAgo(0)) continue;
         await call('finance', accounts, 'POST', '/gst/payments', { book_id: surat.id, period: `${m}-01`, paid_on: paidOn, arn: `AA24${m.replace('-', '')}0${String(m.slice(5)).padStart(2, '0')}1`, challan_ref: `CPIN-${m.replace('-', '')}` }).catch((e) => console.error(`[seed] GSTR-3B ${m}: ${(e as Error).message}`));
       }
+      // A supplier payment run for the bills now due: one bank file for everything released.
+      const due = (await call<{ party_id: string; doc_no: string; days_overdue: number; bank: unknown; awaiting_approval: boolean }[]>('finance', accounts, 'GET', '/payment-run/candidates'))
+        .filter((x) => x.bank && !x.awaiting_approval && x.days_overdue >= 0).slice(0, 4);
+      if (due.length) await call('finance', accounts, 'POST', '/payment-runs', { date: daysAgo(1), mode: 'neft', items: due.map((x) => ({ party_id: x.party_id, invoice_number: x.doc_no })) });
     } catch (e) { console.error(`[seed] history before go-live skipped: ${(e as Error).message}`); }
     await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(6), narration: 'Godown rent, Surat — October', reference: 'NEFT 2610-778', lines: [{ account_id: a('5500'), debit: 85000 }, { account_id: a('1200'), credit: 85000 }] });
     await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(4), narration: 'DGVCL power bill — September', lines: [{ account_id: a('5510'), debit: 18450 }, { account_id: a('1200'), credit: 18450 }] });
@@ -604,6 +608,8 @@ export async function seedOperations(services: RunningService[]) {
     if (paid) line(daysAgo(3), `NEFT-DR-${payee!.party_name.toUpperCase()}`, 'NEFT ICICN52026103', paid, 0);
     for (const g of gw) line(daysAgo(1), 'ICICI PG SETTLEMENT', g.utr ?? 'PGSETTLE', 0, Number(g.amount));
     line(daysAgo(1), 'NEFT-CR-RUPA APPAREL HOUSE-ADV', 'SBIN426101155', 0, 50000);
+    const delhiOpen = openSales.filter((o) => o.customer === 'Delhi Fashion Hub' && o.date >= plusDays(goLive, -20)).pop();
+    if (delhiOpen) line(daysAgo(1), 'NEFT-CR-DELHI FASHION HUB PVT-PYMT', 'HDFC426101871', 0, delhiOpen.total);
     line(daysAgo(0), 'SMS ALERT CHARGES', '', 59, 0);
     await call('finance', accounts, 'POST', `/bank-accounts/${ba.id}/statements`, { file_name: `icici-${daysAgo(0).slice(0, 7)}.csv`, csv: rows.join('\n') });
     // GSTR-2B for Surat: one supplier invoice matches, one differs, and one bill the supplier filed that we have not booked.

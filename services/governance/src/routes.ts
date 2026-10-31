@@ -4,7 +4,7 @@ import {
   type BusEvent, type Client, type Handler, type ServiceContext, audit, badRequest, conflict, contextOf, forbidden, hasPermission,
   listQuery, many, notFound, one, optText, orderLimit, page, parse, publish, reqText, requirePermission, tx,
 } from '@erp/platform';
-import { MAX_UPLOAD_BYTES, checkFile, fullPath, store } from './storage.ts';
+import { MAX_UPLOAD_BYTES, checkFile, load, store } from './storage.ts';
 
 const S = 'governance';
 /** Service-to-service calls carry a non-UUID identity (svc:<name>); store it as unknown. */
@@ -173,7 +173,7 @@ export function routes(r: Router, { pool }: ServiceContext) {
     const body = req.body as Buffer;
     const { fileName, mime } = fileInfo(req);
     checkFile(mime, body);
-    const stored = await store(body);
+    const stored = await store(body, pool);
     const doc = await tx(pool, async (c) => {
       const d = await one<{ id: string }>(c, `
         INSERT INTO documents (document_type, title, entity_type, entity_id, expires_on, created_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
@@ -193,7 +193,7 @@ export function routes(r: Router, { pool }: ServiceContext) {
     const body = req.body as Buffer;
     const { fileName, mime } = fileInfo(req);
     checkFile(mime, body);
-    const stored = await store(body);
+    const stored = await store(body, pool);
     const out = await tx(pool, async (c) => {
       const d = await one<{ current_version: number; status: string }>(c, 'SELECT current_version, status FROM documents WHERE id = $1 FOR UPDATE', [req.params.id]);
       if (!d) throw notFound('Document');
@@ -217,7 +217,9 @@ export function routes(r: Router, { pool }: ServiceContext) {
     res.setHeader('Content-Type', v.mime_type);
     res.setHeader('Content-Disposition', `${req.query.download ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(v.file_name)}`);
     res.setHeader('Cache-Control', 'private, no-store');
-    res.sendFile(fullPath(v.storage_key));
+    const body = await load(v.storage_key, pool);
+    if (!body) throw notFound('The file for this document version');
+    res.send(body);
   });
 
   r.post('/documents/:id/archive', requirePermission('governance.document.delete'), async (req, res) => {

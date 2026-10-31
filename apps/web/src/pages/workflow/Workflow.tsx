@@ -200,7 +200,7 @@ export function CommunicationsPage() {
           </div>}
           <div className="mb-3 flex flex-wrap gap-2"><Segmented value={status} onChange={setStatus} options={[{ value: '', label: 'All' }, { value: 'queued', label: 'Queued' }, { value: 'delivered,read', label: 'Delivered' }, { value: 'failed', label: 'Failed' }, { value: 'skipped', label: 'Skipped' }]} /><Input className="w-64" placeholder="Customer, number, reference" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
           <Card padded={false}>
-            {!log.data ? <Skeleton className="m-5 h-40" /> : <SimpleTable rows={log.data.rows} rowKey={(m) => m.id} onRowClick={setMsg} empty={<EmptyState icon={<MessageSquare className="size-5" />} title="No messages" />} columns={[
+            {!log.data ? <Skeleton className="m-5 h-40" /> : <SimpleTable pageSize={20} rows={log.data.rows} rowKey={(m) => m.id} onRowClick={setMsg} empty={<EmptyState icon={<MessageSquare className="size-5" />} title="No messages" />} columns={[
               { key: 'w', header: 'When', render: (m) => <span className="whitespace-nowrap">{fmtDateTime(m.created_at)}</span> },
               { key: 'c', header: 'Channel', render: (m) => <Badge tone={CH_TONE[m.channel as keyof typeof CH_TONE]}>{m.channel === 'whatsapp' ? 'WhatsApp' : m.channel.toUpperCase()}</Badge> },
               { key: 't', header: 'To', render: (m) => <div><p>{m.to_name}</p><p className="font-mono text-[11.5px] text-slate-500">{m.to_address}</p></div> },

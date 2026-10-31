@@ -2,7 +2,7 @@ import {
   ArrowRightLeft, BadgeIndianRupee, CircleDollarSign, ClipboardPen, Contact, Inbox, Map as MapIcon, PackageCheck, PackageOpen, ScanLine, Shuffle, Tag, Target,
   AlarmClock, BookMarked, Boxes, Building2, ClipboardCheck, ClipboardList, Cog, Factory, FileSearch, FileStack, Gauge, History, KeyRound, Layers,
   LayoutDashboard, LineChart, Medal, Package, Receipt, Rocket, ScanText, ShieldAlert, ShieldCheck, ShoppingCart, Truck, UserCog, Users, Warehouse,
-  Workflow, Wallet, Radar, FileBarChart, BrainCircuit, Bot, HeartPulse, TriangleAlert, ListTodo, UserCircle, MessagesSquare, FileSignature, ArrowRightLeft as Handover, CalendarCheck, CalendarDays, Briefcase, IndianRupee, Users2, ListChecks, BookOpen, FileSpreadsheet, Landmark, Percent, ScrollText, Scale, LockKeyhole, Siren, HandCoins, ArrowDownToLine, CreditCard, UserPlus, MessageSquareWarning, Undo2, Store, GraduationCap, LifeBuoy, Milestone, PanelsTopLeft, type LucideIcon,
+  Workflow, Wallet, Radar, FileBarChart, BrainCircuit, Bot, HeartPulse, TriangleAlert, ListTodo, UserCircle, MessagesSquare, FileSignature, ArrowRightLeft as Handover, CalendarCheck, CalendarDays, Briefcase, IndianRupee, Users2, ListChecks, BookOpen, FileSpreadsheet, Landmark, Percent, ScrollText, Scale, LockKeyhole, Siren, HandCoins, ArrowDownToLine, CreditCard, UserPlus, MessageSquareWarning, Undo2, Store, GraduationCap, LifeBuoy, Milestone, PanelsTopLeft, Send, type LucideIcon,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon; perms?: string[]; phase?: string }
@@ -135,6 +135,7 @@ export const NAV: NavGroup[] = [
       { to: '/finance/accounts', label: 'Chart of accounts', icon: BookOpen, perms: ['finance.read'] },
       { to: '/finance/receivables', label: 'Receivables', icon: ArrowDownToLine, perms: ['finance.read'] },
       { to: '/finance/payables', label: 'Payables', icon: HandCoins, perms: ['finance.read'] },
+      { to: '/finance/payment-run', label: 'Payment run', icon: Send, perms: ['finance.voucher.post'] },
       { to: '/finance/bank', label: 'Bank reconciliation', icon: Landmark, perms: ['finance.read'] },
       { to: '/finance/gst', label: 'GST', icon: FileSpreadsheet, perms: ['finance.read'] },
       { to: '/finance/tds', label: 'TDS', icon: Percent, perms: ['finance.read'] },

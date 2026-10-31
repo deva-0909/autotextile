@@ -16,8 +16,10 @@ only the PostgreSQL database. Locally nothing changes: `npm run setup` and `npm 
 - **Setup is automatic**: the first request on an empty database migrates every schema and loads the demo data
   (about 10 seconds, once; concurrent cold starts wait for it). To reset the demo later, set `SETUP_SECRET` and call
   `POST /api/_setup?reset=1` with `Authorization: Bearer <SETUP_SECRET>`; without it that endpoint does not exist.
-- **Not available on Vercel:** backups and restore tests (`pg_dump` is not installed; use Supabase's own backups) and
-  durable file storage (uploaded documents live in `/tmp` and disappear when the instance is recycled).
+- **Uploaded documents are kept in the database** (`STORAGE_BACKEND=database`, set by the build): a Vercel instance has
+  no lasting disk. Uploads are limited to 20 MB each; keep an eye on the free plan's 500 MB database limit, and move
+  to S3-compatible storage (Supabase Storage) for real volumes.
+- **Not available on Vercel:** backups and restore tests (`pg_dump` is not installed; use Supabase's own backups).
 
 ## One-time steps
 

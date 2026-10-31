@@ -8,6 +8,7 @@ import { EntitiesPage } from './pages/Entities';
 import { WarehouseDetailPage, WarehousesPage } from './pages/Warehouses';
 import { ConfigurationPage } from './pages/Configuration';
 import { MenuAccessPage } from './pages/MenuAccess';
+import { PaymentRunPage } from './pages/finance/PaymentRun';
 import { PartnerDetailPage, PartnersPage } from './pages/Partners';
 import { CataloguePage } from './pages/Catalogue';
 import { ReferencePage } from './pages/Reference';
@@ -224,6 +225,7 @@ export default function App() {
         <Route path="/finance/receivables" element={<Guard perms={['finance.read']}><AgeingPage kind="receivables" /></Guard>} />
         <Route path="/finance/receivables/:id" element={<Guard perms={['finance.read']}><PartyLedgerPage kind="receivables" /></Guard>} />
         <Route path="/finance/payables" element={<Guard perms={['finance.read']}><AgeingPage kind="payables" /></Guard>} />
+        <Route path="/finance/payment-run" element={<Guard perms={['finance.read']}><PaymentRunPage /></Guard>} />
         <Route path="/finance/payables/:id" element={<Guard perms={['finance.read']}><PartyLedgerPage kind="payables" /></Guard>} />
         <Route path="/finance/bank" element={<Guard perms={['finance.read']}><BankPage /></Guard>} />
         <Route path="/finance/gst" element={<Guard perms={['finance.read']}><GstPage /></Guard>} />
