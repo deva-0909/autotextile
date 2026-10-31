@@ -2,7 +2,7 @@ import {
   ArrowRightLeft, BadgeIndianRupee, CircleDollarSign, ClipboardPen, Contact, Inbox, Map as MapIcon, PackageCheck, PackageOpen, ScanLine, Shuffle, Tag, Target,
   AlarmClock, BookMarked, Boxes, Building2, ClipboardCheck, ClipboardList, Cog, Factory, FileSearch, FileStack, Gauge, History, KeyRound, Layers,
   LayoutDashboard, LineChart, Medal, Package, Receipt, Rocket, ScanText, ShieldAlert, ShieldCheck, ShoppingCart, Truck, UserCog, Users, Warehouse,
-  Workflow, Wallet, Radar, FileBarChart, BrainCircuit, Bot, HeartPulse, TriangleAlert, ListTodo, UserCircle, MessagesSquare, FileSignature, ArrowRightLeft as Handover, CalendarCheck, CalendarDays, Briefcase, IndianRupee, Users2, ListChecks, BookOpen, FileSpreadsheet, Landmark, Percent, ScrollText, Scale, LockKeyhole, Siren, HandCoins, ArrowDownToLine, CreditCard, UserPlus, MessageSquareWarning, Undo2, Store, type LucideIcon,
+  Workflow, Wallet, Radar, FileBarChart, BrainCircuit, Bot, HeartPulse, TriangleAlert, ListTodo, UserCircle, MessagesSquare, FileSignature, ArrowRightLeft as Handover, CalendarCheck, CalendarDays, Briefcase, IndianRupee, Users2, ListChecks, BookOpen, FileSpreadsheet, Landmark, Percent, ScrollText, Scale, LockKeyhole, Siren, HandCoins, ArrowDownToLine, CreditCard, UserPlus, MessageSquareWarning, Undo2, Store, GraduationCap, LifeBuoy, Milestone, type LucideIcon,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon; perms?: string[]; phase?: string }
@@ -165,9 +165,15 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
-    label: 'Coming next',
+    label: 'Go-live',
     items: [
-      { to: '/programme', label: 'Programme tracker', icon: Rocket },
+      { to: '/golive', label: 'Readiness', icon: Rocket, perms: ['golive.read'] },
+      { to: '/golive/migration', label: 'Data migration', icon: FileSpreadsheet, perms: ['golive.read'] },
+      { to: '/golive/uat', label: 'UAT', icon: ListChecks, perms: ['golive.read'] },
+      { to: '/golive/training', label: 'Training', icon: GraduationCap, perms: ['golive.read'] },
+      { to: '/golive/cutover', label: 'Cutover', icon: ClipboardList, perms: ['golive.read'] },
+      { to: '/golive/hypercare', label: 'Hypercare', icon: LifeBuoy },
+      { to: '/programme', label: 'Programme tracker', icon: Milestone },
     ],
   },
 ];

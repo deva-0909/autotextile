@@ -58,7 +58,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
       </nav>
-      <div className="border-t border-nav-800 px-5 py-3 text-[11px] text-slate-500">Releases P1–P10 · Foundation to AI</div>
+      <div className="border-t border-nav-800 px-5 py-3 text-[11px] text-slate-500">Releases P1–P11 · Foundation to go-live</div>
     </div>
   );
 }

@@ -13,5 +13,6 @@ import { financeService } from '../services/finance/src/service.ts';
 import { workflowService } from '../services/workflow/src/service.ts';
 import { hrmsService } from '../services/hrms/src/service.ts';
 import { insightsService } from '../services/insights/src/service.ts';
+import { goliveService } from '../services/golive/src/service.ts';
 
-export const SERVICE_DEFS = [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService, inventoryService, crmService, commerceService, fulfilmentService, financeService, workflowService, hrmsService, insightsService];
+export const SERVICE_DEFS = [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService, inventoryService, crmService, commerceService, fulfilmentService, financeService, workflowService, hrmsService, insightsService, goliveService];

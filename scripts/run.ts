@@ -20,6 +20,7 @@ const PROCS: [string, string, number][] = [
   ['workflow', 'services/workflow/src/main.ts', 90],
   ['hrms', 'services/hrms/src/main.ts', 31],
   ['insights', 'services/insights/src/main.ts', 35],
+  ['golive', 'services/golive/src/main.ts', 92],
   ['gateway', 'services/gateway/src/main.ts', 34],
 ];
 

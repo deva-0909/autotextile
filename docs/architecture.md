@@ -44,6 +44,7 @@ Browser ──► gateway :4000 ──► /api/identity/*      identity :4101   
 | P8 ✅ | finance (GSTIN books, automatic postings, vouchers with maker-checker, AR/AP, GST registers and returns, TDS, bank reconciliation, valuation, statements, period close, anomaly alerts) |
 | P9 ✅ | workflow (message templates, consent, outbox and delivery log, rules engine, tasks/My Work, contracts, handover), hrms (employees, recruitment, attendance, leave, comp-off, payroll) |
 | P10 ✅ | insights (control tower, report builder, intelligence, business assistant on Claude, exception centre, system health, backups and restore tests) |
+| P11 ✅ | golive (migration batches with validation, load, reconciliation and sign-off; UAT scenarios, defects and sign-off; training; cutover; go/no-go; hypercare incidents) |
 
 ## Event bus
 
@@ -116,6 +117,18 @@ Make synchronous calls first, then audit and publish.
   ranks warehouses, and reserves in inventory. A split is never automatic: it becomes an approval.
 - **Dispatch gates** are computed from facts (picked, packed, invoiced, settled/credit/approved override) and
   re-checked at dispatch time inside the transaction.
+
+## P11 design notes
+
+- **Migration goes through the front door.** Golive never writes another service’s tables. Each validated row is
+  loaded by calling the owning service’s API as the uploading user (`callAsUser`), so the same validation, numbering,
+  audit and events apply as in daily work, and a user cannot load what they could not enter by hand.
+- **Reconciliation reads back.** After loading, golive reads the created records (parties, opening vouchers by
+  number, inwards by source reference and weighed kg) and compares them with the file’s control totals. Sign-off must
+  come from a different user from the one who loaded the batch.
+- **Readiness is computed, not ticked.** The go/no-go page evaluates live data (UAT, defects, migration, training,
+  cutover, and the latest backup’s restore test from insights) every time it is opened; the decision is stored with
+  the criteria as they were at that moment and the rollback plan.
 
 ## P10 design notes
 

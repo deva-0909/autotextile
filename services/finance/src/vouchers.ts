@@ -152,6 +152,24 @@ export function voucherRoutes(r: Router, { pool }: ServiceContext) {
     res.status(201).json(out);
   });
 
+  /** Opening customer and supplier bills from the previous system (migration): each becomes an opening voucher and a bill, so ageing continues. */
+  r.post('/opening-bills', requirePermission('finance.voucher.post'), async (req, res) => {
+    const b = parse(z.object({ kind: z.enum(['receivable', 'payable']), party_id: z.uuid(), doc_no: reqText(60), doc_date: date, due_date: date, amount: z.number().positive(), book_id: z.uuid().optional(), reference: optText(80) }), req.body);
+    const party = await getParty(b.party_id);
+    const out = await tx(pool, async (c) => {
+      const book = b.book_id ?? (await books(c)).find((x) => x.is_primary)!.id;
+      const ctl = b.kind === 'receivable' ? 'receivables' : 'payables';
+      const v = await post(c, { type: 'opening', book_id: book, date: b.doc_date, narration: `Opening ${b.kind} ${b.doc_no} — ${party.legal_name}${b.reference ? ` (${b.reference})` : ''}`, party_id: party.id, party_name: party.legal_name, by: req.user!.name, approved_by: 'migration sign-off',
+        source: { service: 'finance', type: 'opening_bill', id: `${b.kind}:${party.id}:${b.doc_no}`, ref: b.reference ?? null },
+        lines: b.kind === 'receivable' ? [{ account: ctl, debit: b.amount, party_id: party.id, party_name: party.legal_name, bill_ref: b.doc_no }, { account: 'opening_difference', credit: b.amount }]
+          : [{ account: 'opening_difference', debit: b.amount }, { account: ctl, credit: b.amount, party_id: party.id, party_name: party.legal_name, bill_ref: b.doc_no }],
+        bill: { kind: b.kind, party_id: party.id, party_name: party.legal_name, doc_no: b.doc_no, doc_date: b.doc_date, due_date: b.due_date, amount: b.amount } });
+      if (!v.existing) await auditReq(c, req, 'opening_bill', v.id, 'imported', { after: b });
+      return v;
+    });
+    res.status(201).json(out);
+  });
+
   r.post('/vouchers/:id/reverse', requirePermission('finance.voucher.approve'), async (req, res) => {
     const b = parse(z.object({ reason: reqText(300), date: date.optional() }), req.body);
     const out = await tx(pool, async (c) => {

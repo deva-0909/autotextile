@@ -2,6 +2,7 @@
  * Loads example procurement and job-work activity through the services' own APIs,
  * so the demo data is validated, numbered and audited exactly like real use.
  */
+import { seedScenarios } from '../services/golive/src/readiness.ts';
 import type { AddressInfo } from 'node:net';
 import { type RunningService, type ServiceName, setServicePorts } from '@erp/platform';
 import { DEMO_PASSWORD } from './seed-data.ts';
@@ -506,6 +507,28 @@ export async function seedOperations(services: RunningService[]) {
     await call('insights', accounts, 'POST', '/reports', { name: 'Sales by customer, month by month', definition: { dataset: 'sales_register', from: '2026-04-01', group_by: ['party_name', 'doc_date'], date_grain: 'month', measures: [{ field: 'taxable', agg: 'sum' }, { field: 'kg', agg: 'sum' }], sort: { field: 'sum_taxable', dir: 'desc' } }, shared: true, schedule: 'monthly' });
     await call('insights', stores, 'POST', '/reports', { name: 'Stock older than 60 days', definition: { dataset: 'stock_lots', filters: { logic: 'and', rules: [{ field: 'age_days', op: 'gt', value: 60 }] }, columns: ['lot_no', 'sku', 'kg', 'value', 'age_days', 'recommendation'], sort: { field: 'age_days', dir: 'desc' } }, shared: true, schedule: 'weekly' });
     await call('insights', salesMgr, 'POST', '/reports', { name: 'Leads by source and stage', definition: { dataset: 'leads', group_by: ['source_name', 'stage'], measures: [{ field: 'est_value', agg: 'sum' }, { field: 'number', agg: 'count_distinct' }] }, shared: true });
+    // ---------- P11: UAT in progress, training under way, first cutover steps done ----------
+    {
+      const owner = await login('owner@textile.local');
+      await seedScenarios(services.find((s) => s.ctx.name === 'golive')!.ctx.pool);
+      const scen = await call<{ id: string; code: string; phase: string }[]>('golive', admin, 'GET', '/uat/scenarios');
+      for (const sc of scen.filter((x) => ['P1', 'P2', 'P4'].includes(x.phase)))
+        await call('golive', admin, 'POST', `/uat/scenarios/${sc.id}/result`, { result: 'passed', evidence: 'Run on the demo data; result matched the expected outcome' });
+      const p7 = scen.find((x) => x.phase === 'P7');
+      if (p7) await call('golive', stores, 'POST', `/uat/scenarios/${p7.id}/result`, { result: 'failed', evidence: 'Packing slip prints the roll count but not the total kg', defect: { title: 'Packing slip missing total weight', severity: 'S3' } });
+      const tr = await call<{ staff: { id: string; email: string }[] }>('golive', admin, 'GET', '/training');
+      const plan: Record<string, string[]> = { 'purchase@textile.local': ['PUR-1', 'PUR-2'], 'surat.stores@textile.local': ['STO-1'], 'accounts@textile.local': ['ACC-1'], 'salesmgr@textile.local': ['SAL-1'], 'admin@textile.local': ['ADM-1'] };
+      const mods = (await call<{ modules: { code: string }[] }>('golive', admin, 'GET', '/training')).modules.map((m) => m.code);
+      for (const [email, codes] of Object.entries(plan)) {
+        const u = tr.staff.find((x) => x.email === email);
+        const valid = codes.filter((c) => mods.includes(c));
+        if (!u || !valid.length) continue;
+        await call('golive', admin, 'POST', '/training/assign', { user_ids: [u.id], module_codes: valid });
+        if (email !== 'accounts@textile.local') await call('golive', admin, 'POST', '/training/complete', { user_id: u.id, module_code: valid[0], score: 85 });
+      }
+      const cut = (await call<{ tasks: { id: string; seq: number }[] }>('golive', owner, 'GET', '/cutover')).tasks;
+      for (const t of cut.filter((x) => x.seq <= 20)) await call('golive', owner, 'PATCH', `/cutover/${t.id}`, { status: 'done', notes: 'Checked during the dry run' });
+    }
     const wf = services.find((s) => s.ctx.name === 'workflow')!.ctx.pool;
     await runContractChecks(wf);
     await dispatchMessages(wf);

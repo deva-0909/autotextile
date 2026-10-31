@@ -14,11 +14,12 @@ It is built phase by phase from the *Developer Brief & Functional Specification 
 - **P8 — Finance: double-entry books per GSTIN, automatic postings, AR/AP ageing, GST returns and 2B match, TDS, bank reconciliation, statements, period close, alerts**
 - **P9 — Workflow and people: customer WhatsApp/SMS/email with consent and delivery tracking, rules and tasks (My Work), contracts, handover, HRMS and payroll**
 - **P10 — Insights and AI: control tower, report builder, explainable intelligence, business assistant (Claude), exception centre, backups with restore tests**
+- **P11 — Go-live: data migration with reconciliation and sign-off, UAT and defects, role-based training, cutover checklist, go/no-go, hypercare**
 
 | | |
 |---|---|
 | **Architecture** | Domain microservices behind an API gateway, PostgreSQL (schema per service), Postgres-backed event bus |
-| **Services in this release** | `identity` · `organisation` · `masters` · `governance` · `procurement` · `jobwork` · `inventory` · `crm` · `commerce` · `fulfilment` · `finance` · `workflow` · `hrms` · `insights` · `gateway` |
+| **Services in this release** | `identity` · `organisation` · `masters` · `governance` · `procurement` · `jobwork` · `inventory` · `crm` · `commerce` · `fulfilment` · `finance` · `workflow` · `hrms` · `insights` · `golive` · `gateway` |
 | **Web app** | React 19 + TypeScript + Tailwind CSS, served by the gateway |
 | **Runs on** | Windows, macOS or Linux — Node.js and PostgreSQL only, no Docker needed |
 
@@ -147,6 +148,14 @@ See [docs/architecture.md](docs/architecture.md) for the design and
 - **Exception centre:** every open alert from every module in one list, most severe first, with “explain”.
 - **Continuity:** system health (services, event-bus lag, parked events with replay, database size), `pg_dump` backups with checksum and row counts, one-click restore tests into a scratch database, `npm run backup -- --verify` for the nightly schedule, offline put-away on the scan station, and a runbook ([docs/continuity.md](docs/continuity.md)). `npm run load-test` measures throughput and p95 latency.
 
+## What’s in P11 — Migration, UAT, training & go-live
+
+- **Data migration:** CSV templates for parties, opening receivables/payables (bill-wise), the opening trial balance and opening stock by lot and roll. Each upload is validated row by row (GSTIN check digit, PAN, ledger codes, warehouses, duplicates), loaded through the owning services’ own APIs with the uploader’s permissions, reconciled by reading the data back against the file’s control totals, and signed off by a business owner who did not load it.
+- **UAT:** one scenario per tracker requirement plus cross-cutting tests (exceptions, permissions, concurrency, tax, barcodes, integrations, performance, security, backup/restore). A failed run raises a defect with severity; a retest re-opens the scenario. A phase is signed off only when every scenario passed or was waived and no S1/S2 defect is open.
+- **Training:** 15 role modules with the screens they cover; assign, record completion and score.
+- **Cutover and go/no-go:** a 19-step checklist (prepare, freeze, migrate, verify, go-live, stabilise) with owners; a readiness page that checks UAT, defects, migration sign-offs, training, cutover and a backup restore-tested in the last 24 hours; the decision is recorded with its rollback plan.
+- **Hypercare:** anyone can report a problem; P1–P4 severities with response and resolution deadlines, notifications and breach flags.
+
 ## Run it on Windows (no Docker)
 
 ### 1. Install the prerequisites (one time)
@@ -238,7 +247,8 @@ A good first tour:
 10. Sign in as **accounts** → *B2B commerce*: payments and their reconciliation, customer advances, token policies (one Kolkata rule waits for approval). Then *Finance*: the vouchers posted automatically from the invoices and receipts above, the bank reconciliation (three statement lines left to explain — try *Create entry* on the gateway settlement), GST returns with the 2B match, TDS, and the statements.
 11. Sign in as **hr** → *HR & payroll*: last month’s payroll (posted in accounts), today’s attendance, the resignation with its exit checklist and handover task; then *My HR* as **sales.east** (on leave today, so CRM skips him). As **salesmgr**, open *Communications* for the WhatsApp/SMS/email log and *Workflow rules*; as **millops**, *Contracts* shows a rate contract due for renewal.
 12. Sign in as **owner** → *Insights & AI*: the control tower and today’s brief, *Intelligence*, *Reports* (three shared reports), and ask the *Assistant* “Which fabrics should we reorder?”. As **admin**, *System health* → *Back up now* → *Test restore*.
-13. Sign in as **admin** → *Approvals* to approve what is waiting, then look at the *Audit trail*.
+13. Sign in as **owner** → *Go-live*: readiness shows what is still open; *UAT* has P1, P2 and P4 passed and one P7 defect; *Training* and *Cutover* are under way. As **admin**, download the parties template in *Data migration*, upload it, load and reconcile; then sign it off as **owner**.
+14. Sign in as **admin** → *Approvals* to approve what is waiting, then look at the *Audit trail*.
 
 ### Payment gateway
 

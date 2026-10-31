@@ -1,4 +1,4 @@
-# Requirement traceability — releases P1–P10
+# Requirement traceability — releases P1–P11
 
 Source: *Textile_Trading_ERP_Development_and_Figma_Tracker.xlsx*, Requirements and Figma Screens sheets.
 Statuses:
@@ -153,6 +153,15 @@ Statuses:
 | REQ-0090 | Textile business copilot | **Built / partial** | Natural-language questions (Claude with read-only tools under the user’s permissions), daily brief, exception explanations, PO/receipt/invoice reconciliation, voice input and read-aloud in the browser; actions only as links | Needs `ANTHROPIC_API_KEY`; built-in answers otherwise |
 | REQ-0091 | Offline mobile and disaster recovery | **Built / partial** | Offline put-away queue on the scan station; backups with checksum and restore test; scheduled backup script; RPO/RTO targets; health and bus monitoring; parked-event replay; runbook; load-test script | Offline capture beyond put-away; automated off-site copy |
 
+## P11 — UAT, migration, training, go-live & stabilisation
+
+| ID | Requirement | Status | Implementation | Remaining (phase) |
+|---|---|---|---|---|
+| REQ-0092 | Opening balances and master migration | **Built / partial** | Templates, row validation, load through service APIs, read-back reconciliation and owner sign-off for parties, bill-wise AR/AP (advances as opposite-side bills), opening trial balance and opening stock by lot/roll | Open POs, open job-work, open sales orders and GST carry-forward have no template yet; they are entered on the normal screens at cutover |
+| REQ-0093 | End-to-end UAT and regression | **Built** | Scenario per requirement plus 14 cross-cutting scenarios; results with evidence; defects with severity and retest; phase sign-off rules; 102 automated integration tests and `npm run load-test` | Executing the scenarios is the business team’s work (**Business**) |
+| REQ-0094 | Role-based training | **Built** | 15 modules by role with covered screens; assignment, completion and score; completion feeds readiness | Training material and sessions (**Business**) |
+| REQ-0095 | Cutover and hypercare | **Built** | 19-step cutover checklist with owners; live readiness criteria; go/no-go with rollback plan; incidents with P1–P4 response/resolution deadlines and breach flags | The go/no-go decision and support ownership (**Business**) |
+
 ### Known gaps
 
 - **MFA is optional per user.** The setting *Require MFA for privileged users* exists, but the login does not force enrolment yet.
@@ -232,6 +241,9 @@ Statuses:
 | FIG-068 | AI exception and anomaly centre | `/insights/exceptions` |
 | FIG-069 | Supplier / stock / customer intelligence | `/insights/intelligence` |
 | FIG-070 | Backup and system health | `/system` |
+| FIG-071 | Migration reconciliation dashboard | `/golive/migration` |
+| FIG-072 | UAT defect and sign-off tracker | `/golive/uat` |
+| extra | Go-live readiness, training, cutover, hypercare | `/golive`, `/golive/training`, `/golive/cutover`, `/golive/hypercare` |
 | extra | Approvals inbox, document library, configuration, programme tracker, claims, reservations, issue to mill, sales dashboard, targets | `/approvals`, `/governance/documents`, `/organisation/configuration`, `/programme`, `/jobwork/claims`, `/inventory/reservations`, `/inventory/mill-issues`, `/crm`, `/crm/performance` |
 
 ## Acceptance tests (tracker sheet) touched by P1

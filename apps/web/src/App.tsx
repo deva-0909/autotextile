@@ -48,6 +48,7 @@ import { AnomaliesPage, BankPage, ClosePage, GstPage, StatementsPage, TdsPage } 
 import { AllTasksPage, CommunicationsPage, ContractDetailPage, ContractsPage, HandoverPage, MyWorkPage, RuleEditorPage, RulesPage } from './pages/workflow/Workflow';
 import { AttendancePage, EmployeeDetailPage, EmployeesPage, HrOverview, LeavePage, MyHrPage, PayrollPage, PayrollRunPage, PayslipPage, RecruitmentPage } from './pages/hr/Hr';
 import { AssistantPage, ControlTowerPage, ExceptionsPage, IntelligencePage, ReportBuilderPage, ReportsPage, SystemHealthPage } from './pages/insights/Insights';
+import { CutoverPage, GoLivePage, HypercarePage, MigrationPage, TrainingPage, UatPage } from './pages/golive/GoLive';
 import type { ReactNode } from 'react';
 
 function Guard({ perms, children }: { perms?: string[]; children: ReactNode }) {
@@ -252,6 +253,12 @@ export default function App() {
         <Route path="/insights/intelligence" element={<Guard perms={['insights.read']}><IntelligencePage /></Guard>} />
         <Route path="/insights/exceptions" element={<Guard perms={['insights.read']}><ExceptionsPage /></Guard>} />
         <Route path="/insights/assistant" element={<Guard perms={['insights.ai.use']}><AssistantPage /></Guard>} />
+        <Route path="/golive" element={<Guard perms={['golive.read']}><GoLivePage /></Guard>} />
+        <Route path="/golive/migration" element={<Guard perms={['golive.read']}><MigrationPage /></Guard>} />
+        <Route path="/golive/uat" element={<Guard perms={['golive.read']}><UatPage /></Guard>} />
+        <Route path="/golive/training" element={<Guard perms={['golive.read']}><TrainingPage /></Guard>} />
+        <Route path="/golive/cutover" element={<Guard perms={['golive.read']}><CutoverPage /></Guard>} />
+        <Route path="/golive/hypercare" element={<HypercarePage />} />
         <Route path="/system" element={<Guard perms={['system.health.read']}><SystemHealthPage /></Guard>} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/programme" element={<ProgrammePage />} />
