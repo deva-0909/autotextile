@@ -7,6 +7,7 @@ import { DashboardPage } from './pages/Dashboard';
 import { EntitiesPage } from './pages/Entities';
 import { WarehouseDetailPage, WarehousesPage } from './pages/Warehouses';
 import { ConfigurationPage } from './pages/Configuration';
+import { MenuAccessPage } from './pages/MenuAccess';
 import { PartnerDetailPage, PartnersPage } from './pages/Partners';
 import { CataloguePage } from './pages/Catalogue';
 import { ReferencePage } from './pages/Reference';
@@ -144,6 +145,7 @@ export default function App() {
         <Route path="/reference" element={<Guard perms={['masters.reference.read']}><ReferencePage /></Guard>} />
         <Route path="/security/users" element={<Guard perms={['identity.user.read']}><UsersPage /></Guard>} />
         <Route path="/security/roles" element={<Guard perms={['identity.role.read']}><RolesPage /></Guard>} />
+        <Route path="/security/menu-access" element={<Guard perms={['identity.role.manage', 'identity.user.manage']}><MenuAccessPage /></Guard>} />
         <Route path="/security/activity" element={<Guard perms={['identity.session.read']}><LoginActivityPage /></Guard>} />
         <Route path="/governance/audit" element={<Guard perms={['governance.audit.read']}><AuditPage /></Guard>} />
         <Route path="/governance/documents" element={<Guard perms={['governance.document.read']}><DocumentsPage /></Guard>} />

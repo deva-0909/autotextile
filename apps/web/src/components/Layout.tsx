@@ -6,7 +6,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { api, qs, type Page } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { fmtRelative } from '../lib/format';
-import { ALL_ITEMS, NAV } from '../lib/nav';
+import { ALL_ITEMS, NAV, pageOf } from '../lib/nav';
 import { Menu, MenuItem } from './overlay';
 import { Avatar, Badge } from './ui';
 
@@ -23,10 +23,10 @@ const store = {
  * as the user left them). Collapsed: a narrow strip with one icon per group; clicking one opens its pages beside it.
  */
 function Sidebar({ collapsed = false, onToggle, onNavigate }: { collapsed?: boolean; onToggle?: () => void; onNavigate?: () => void }) {
-  const { can } = useAuth();
+  const { can, sees } = useAuth();
   const loc = useLocation();
   const summary = useQuery({ queryKey: ['governance-summary'], queryFn: () => api.get<{ approvalsToDecide: number }>('/governance/summary'), refetchInterval: 30_000 });
-  const groups = useMemo(() => NAV.map((g) => ({ ...g, items: g.items.filter((i) => !i.perms || can(...i.perms)) })).filter((g) => g.items.length), [can]);
+  const groups = useMemo(() => NAV.map((g) => ({ ...g, items: g.items.filter((i) => (!i.perms || can(...i.perms)) && sees(i.to)) })).filter((g) => g.items.length), [can, sees]);
   const isActive = (to: string) => (to === '/' ? loc.pathname === '/' : loc.pathname === to || loc.pathname.startsWith(`${to}/`));
   const activeGroup = groups.find((g) => g.items.some((i) => isActive(i.to)))?.label;
   const [open, setOpen] = useState<string[]>(() => JSON.parse(store.get('nav.open') ?? '["Overview"]') as string[]);
@@ -182,7 +182,7 @@ interface SearchHit { kind: string; label: string; sub?: string; to: string }
 
 function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const nav = useNavigate();
-  const { can } = useAuth();
+  const { can, sees } = useAuth();
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [active, setActive] = useState(0);
@@ -191,8 +191,8 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
   useEffect(() => { if (open) { setQ(''); setActive(0); setTimeout(() => inputRef.current?.focus(), 10); } }, [open]);
 
   const pages = useMemo(
-    () => ALL_ITEMS.filter((i) => (!i.perms || can(...i.perms)) && i.label.toLowerCase().includes(q.toLowerCase())).map((i) => ({ kind: i.group, label: i.label, to: i.to })),
-    [q, can],
+    () => ALL_ITEMS.filter((i) => (!i.perms || can(...i.perms)) && sees(i.to) && i.label.toLowerCase().includes(q.toLowerCase())).map((i) => ({ kind: i.group, label: i.label, to: i.to })),
+    [q, can, sees],
   );
 
   useEffect(() => {
@@ -262,9 +262,11 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
 }
 
 export function Layout({ children }: { children: ReactNode }) {
-  const { user, signOut } = useAuth();
+  const { user, signOut, sees } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
+  const page = pageOf(loc.pathname);
+  const hidden = page && !sees(page.to) ? page : null;
   const [palette, setPalette] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   // The desktop menu starts collapsed to a strip of group icons and remembers the user's choice.
@@ -332,7 +334,7 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </header>
         <main className="scrollbar-thin flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-[1680px] px-4 py-5 lg:px-6 lg:py-5">{children}</div>
+          <div className="mx-auto max-w-[1680px] px-4 py-5 lg:px-6 lg:py-5">{hidden ? <NotInMenu page={hidden.label} /> : children}</div>
         </main>
       </div>
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
@@ -342,4 +344,15 @@ export function Layout({ children }: { children: ReactNode }) {
 
 export function PageLink({ to, children }: { to: string; children: ReactNode }) {
   return <Link to={to} className="link">{children}</Link>;
+}
+
+/** Shown instead of a page that the owner or admin has taken out of this person's menu. */
+function NotInMenu({ page }: { page: string }) {
+  return (
+    <div className="mx-auto mt-16 max-w-md text-center">
+      <p className="text-[15px] font-semibold text-slate-900">{page} is not in your menu</p>
+      <p className="mt-1 text-[13px] text-slate-500">Your owner or administrator chooses which pages each role and person sees. Ask them if you need this page.</p>
+      <Link to="/" className="link mt-3 inline-block text-[13px]">Go to your dashboard</Link>
+    </div>
+  );
 }

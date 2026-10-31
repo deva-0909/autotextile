@@ -5,7 +5,7 @@ import {
   type Client, type ServiceContext, audit, badRequest, config, contextOf, many, one, parse, signAccessToken, tx, unauthorized,
 } from '@erp/platform';
 import { hashPassword, passwordProblem, randomToken, sha256, verifyPassword, verifyTotp } from './security.ts';
-import { loadAuthUser } from './users.ts';
+import { loadAuthUser, loadMenu } from './users.ts';
 
 export const MAX_FAILED = 5;
 export const LOCK_MINUTES = 15;
@@ -54,7 +54,7 @@ async function startSession(ctx: ServiceContext, req: Request, res: Response, us
   });
   const authUser = await loadAuthUser(ctx.pool, user.id, session.id);
   setRefreshCookie(res, refresh);
-  return { accessToken: await signAccessToken(authUser), user: authUser, mustChangePassword: user.must_change_password };
+  return { accessToken: await signAccessToken(authUser), user: { ...authUser, menu: await loadMenu(ctx.pool, user.id) }, mustChangePassword: user.must_change_password };
 }
 
 export function authRoutes(r: Router, ctx: ServiceContext) {
@@ -151,7 +151,7 @@ export function authRoutes(r: Router, ctx: ServiceContext) {
     setRefreshCookie(res, next);
     const user = await loadAuthUser(ctx.pool, s.user_id, s.id);
     const flags = await one<{ must_change_password: boolean }>(ctx.pool, 'SELECT must_change_password FROM users WHERE id = $1', [s.user_id]);
-    res.json({ accessToken: await signAccessToken(user), user, mustChangePassword: flags!.must_change_password });
+    res.json({ accessToken: await signAccessToken(user), user: { ...user, menu: await loadMenu(ctx.pool, s.user_id) }, mustChangePassword: flags!.must_change_password });
   });
 
   r.post('/auth/logout', async (req, res) => {

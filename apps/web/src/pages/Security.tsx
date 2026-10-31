@@ -14,7 +14,7 @@ import { PasswordRules } from './Login';
 
 interface Role { id: string; code: string; name: string; description: string | null; is_system: boolean; user_count: number; permissions: { code: string; limit: number | null }[] }
 interface Permission { code: string; module: string; label: string; sensitive?: boolean }
-interface UserRow { id: string; email: string; name: string; phone: string | null; employee_code: string | null; designation: string | null; status: string; mfa_enabled: boolean; must_change_password: boolean; last_login_at: string | null; locked_until: string | null; roles: { code: string; name: string }[] }
+interface UserRow { id: string; email: string; name: string; phone: string | null; employee_code: string | null; designation: string | null; status: string; mfa_enabled: boolean; must_change_password: boolean; last_login_at: string | null; locked_until: string | null; roles: { code: string; name: string }[]; parent_user_id?: string | null; parent_name?: string | null; custom_menu?: boolean }
 type Scope = Record<'entity' | 'gstin' | 'branch' | 'warehouse', '*' | string[]>;
 interface UserDetail extends Omit<UserRow, 'roles'> { roles: { id: string; code: string; name: string }[]; scope: Scope; failed_attempts: number; created_at: string }
 interface Structure { entities: { id: string; legal_name: string }[]; gstRegistrations: { id: string; gstin: string; state_name: string }[]; branches: { id: string; name: string }[]; warehouses: { id: string; code: string; name: string }[] }
@@ -25,6 +25,7 @@ export function UsersPage() {
   const { can } = useAuth();
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [open, setOpen] = useState<string | 'new' | null>(null);
+  const [parent, setParent] = useState<UserDetail | null>(null);
   const roles = useQuery({ queryKey: ['roles'], queryFn: () => api.get<Role[]>('/identity/roles') });
   return (
     <>
@@ -50,7 +51,7 @@ export function UsersPage() {
           { key: 'name', header: 'User', sort: 'name', csv: (r) => r.name, render: (r) => (
             <div className="flex items-center gap-3">
               <Avatar name={r.name} />
-              <div><p className="font-medium text-slate-900">{r.name}</p><p className="text-[12px] text-slate-500">{r.email}</p></div>
+              <div><p className="font-medium text-slate-900">{r.name}{r.custom_menu && <Badge className="ml-1.5" tone="neutral">Own menu</Badge>}</p><p className="text-[12px] text-slate-500">{r.email}{r.parent_name && <> · sub-user of {r.parent_name}</>}</p></div>
             </div>
           ) },
           { key: 'designation', header: 'Designation', csv: (r) => r.designation, render: (r) => r.designation ?? '—' },
@@ -60,7 +61,8 @@ export function UsersPage() {
           { key: 'status', header: 'Status', sort: 'status', csv: (r) => r.status, render: (r) => isLocked(r) ? <Badge tone="danger" dot>Locked</Badge> : <StatusBadge status={r.status} /> },
         ]}
       />
-      {open && <UserDrawer userId={open === 'new' ? undefined : open} roles={roles.data ?? []} onClose={() => setOpen(null)} />}
+      {open && <UserDrawer key={open + (parent?.id ?? '')} userId={open === 'new' ? undefined : open} parent={open === 'new' ? parent : null} roles={roles.data ?? []} onClose={() => { setOpen(null); setParent(null); }}
+        onAddSubUser={(d) => { setParent(d); setOpen('new'); }} />}
     </>
   );
 }
@@ -94,7 +96,7 @@ function ScopePicker({ label, value, onChange, options }: { label: string; value
   );
 }
 
-function UserDrawer({ userId, roles, onClose }: { userId?: string; roles: Role[]; onClose: () => void }) {
+function UserDrawer({ userId, roles, onClose, parent, onAddSubUser }: { userId?: string; roles: Role[]; onClose: () => void; parent?: UserDetail | null; onAddSubUser?: (u: UserDetail) => void }) {
   const { can, user: me } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
@@ -120,6 +122,9 @@ function UserDrawer({ userId, roles, onClose }: { userId?: string; roles: Role[]
     setScope(d.scope);
   }, [u.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A sub-user starts with the parent's roles and data scope.
+  useEffect(() => { if (parent) { setRoleIds(parent.roles.map((r) => r.id)); setScope(parent.scope); } }, [parent]);
+
   const refresh = () => { invalidatePrefix(qc, '/identity/users'); qc.invalidateQueries({ queryKey: ['user', userId] }); };
 
   async function save() {
@@ -127,8 +132,8 @@ function UserDrawer({ userId, roles, onClose }: { userId?: string; roles: Role[]
     try {
       const profile = { email: f.values.email, name: f.values.name, phone: f.values.phone || null, employee_code: f.values.employee_code || null, designation: f.values.designation || null };
       if (!userId) {
-        await api.post('/identity/users', { ...profile, password: f.values.password, roleIds, scope });
-        toast({ tone: 'success', title: 'User created', body: 'They must change the temporary password at first sign-in.' });
+        await api.post('/identity/users', { ...profile, password: f.values.password, roleIds, scope, parent_user_id: parent?.id ?? null });
+        toast({ tone: 'success', title: parent ? `Sub-user of ${parent.name} created` : 'User created', body: parent ? 'They start with the same menu as the role; narrow it under Security → Menu access.' : 'They must change the temporary password at first sign-in.' });
       } else if (tab === 'access') {
         await api.put(`/identity/users/${userId}/access`, { roleIds, scope, reason: reason || null });
         toast({ tone: 'success', title: 'Access updated', body: 'Takes effect at their next token refresh (within 15 minutes).' });
@@ -190,8 +195,9 @@ function UserDrawer({ userId, roles, onClose }: { userId?: string; roles: Role[]
   );
 
   return (
-    <Drawer open onClose={onClose} width="lg" title={userId ? u.data?.name ?? 'User' : 'Invite user'} description={u.data?.email}
-      footer={manage && tab !== 'security' && <><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={saving} onClick={save}>{userId ? 'Save' : 'Create user'}</Button></>}>
+    <Drawer open onClose={onClose} width="lg" title={userId ? u.data?.name ?? 'User' : parent ? `Add a sub-user of ${parent.name}` : 'Invite user'}
+      description={userId ? u.data?.email : parent ? `Starts with ${parent.name}’s roles and data scope. Narrow their menu afterwards under Menu access.` : undefined}
+      footer={manage && tab !== 'security' && <>{userId && u.data && onAddSubUser && <Button className="mr-auto" icon={<Plus className="size-4" />} onClick={() => onAddSubUser(u.data!)}>Add sub-user</Button>}<Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={saving} onClick={save}>{userId ? 'Save' : 'Create user'}</Button></>}>
       {userId && !u.data ? <Skeleton className="h-64" /> : !userId ? (
         <div className="space-y-8">{profile}{access}</div>
       ) : (

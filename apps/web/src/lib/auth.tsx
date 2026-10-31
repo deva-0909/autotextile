@@ -7,11 +7,16 @@ interface AuthState {
   ready: boolean;
   mustChangePassword: boolean;
   can: (...codes: string[]) => boolean;
+  /** Whether a menu page is in this person's menu (Overview pages always are). */
+  sees: (path: string) => boolean;
   signIn: (result: { accessToken: string; user: SessionUser; mustChangePassword: boolean }) => void;
   signOut: () => Promise<void>;
   reload: () => Promise<void>;
   passwordChanged: () => void;
 }
+
+/** The Overview pages every signed-in person keeps. */
+export const ALWAYS_SHOWN = ['/', '/approvals', '/my-work', '/me'];
 
 const Ctx = createContext<AuthState | null>(null);
 
@@ -47,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ready,
     mustChangePassword,
     can: (...codes) => !!user && codes.some((c) => user.permissions.includes(c) || user.permissions.includes('*')),
+    sees: (path) => !!user && (ALWAYS_SHOWN.includes(path) || !user.menu || user.menu.includes(path)),
     signIn: (r) => {
       setAccessToken(r.accessToken);
       setUser(r.user);

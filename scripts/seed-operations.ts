@@ -51,6 +51,14 @@ export async function seedOperations(services: RunningService[]) {
     const salesWest = await login('sales@textile.local');
     const salesSouth = await login('sales.south@textile.local');
 
+    // A sub-user: the Surat stores manager's assistant, in the same role but with a narrower menu.
+    {
+      const dir = await call<{ items: { id: string; email: string }[] }>('identity', admin, 'GET', '/users?pageSize=100');
+      const rakesh = await call<{ id: string; roles: { id: string }[]; scope: unknown }>('identity', admin, 'GET', `/users/${dir.items.find((u) => u.email === 'surat.stores@textile.local')!.id}`);
+      await call('identity', admin, 'POST', '/users', { email: 'stores.assistant@textile.local', name: 'Mahesh Vasava', designation: 'Stores Assistant (sub-user of Rakesh Patel)',
+        password: DEMO_PASSWORD, roleIds: rakesh.roles.map((r) => r.id), scope: rakesh.scope, parent_user_id: rakesh.id,
+        menu: ['/inventory/scan', '/inventory/inward', '/inventory/qc', '/inventory/stock', '/inventory/stocktakes', '/workflow/tasks'] });
+    }
     const wh = await call<{ id: string; code: string }[]>('organisation', admin, 'GET', '/warehouses');
     // ---------- P9: customers who opted in to WhatsApp and SMS updates (recorded before any order is placed) ----------
     {

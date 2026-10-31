@@ -34,6 +34,8 @@ export interface SessionUser {
   id: string; name: string; email: string; roles: string[]; permissions: string[];
   scope: Record<'entity' | 'gstin' | 'branch' | 'warehouse', '*' | string[]>;
   partyId?: string | null;
+  /** Pages shown in this person's menu (set by the owner or admin per role or user); null means every page they may open. */
+  menu?: string[] | null;
 }
 
 type Body = BodyInit | object | undefined;

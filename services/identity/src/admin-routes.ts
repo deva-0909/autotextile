@@ -1,11 +1,11 @@
-import type { Router } from 'express';
+import type { Request, Router } from 'express';
 import { z } from 'zod';
 import {
   ALL_PERMISSION_CODES, PERMISSIONS, type DataScope, type ServiceContext, audit, badRequest, conflict, contextOf, diff, forbidden,
   listQuery, many, notFound, one, optText, orderLimit, page, parse, reqText, requirePermission, tx,
 } from '@erp/platform';
 import { hashPassword, newTotpSecret, otpauthUrl, passwordProblem, verifyPassword, verifyTotp } from './security.ts';
-import { PUBLIC_USER_COLUMNS, loadAuthUser, loadScope, saveScope } from './users.ts';
+import { PUBLIC_USER_COLUMNS, loadAuthUser, loadMenu, loadScope, saveScope } from './users.ts';
 
 const scopeList = z.union([z.literal('*'), z.array(z.uuid())]);
 const scopeSchema = z.object({ entity: scopeList, gstin: scopeList, branch: scopeList, warehouse: scopeList });
@@ -25,7 +25,43 @@ export function adminRoutes(r: Router, ctx: ServiceContext) {
   // ---------- current user ----------
   r.get('/me', async (req, res) => {
     const u = await one<Record<string, unknown>>(pool, `SELECT ${PUBLIC_USER_COLUMNS} FROM users u WHERE u.id = $1`, [req.user!.id]);
-    res.json({ ...u, ...(await loadAuthUser(pool, req.user!.id, req.user!.sessionId)) });
+    res.json({ ...u, ...(await loadAuthUser(pool, req.user!.id, req.user!.sessionId)), menu: await loadMenu(pool, req.user!.id) });
+  });
+
+  // ---------- menu access (which pages a role or a user sees) ----------
+  const menuItems = z.array(z.string().regex(/^\/[a-z0-9/-]*$/)).max(300).nullable();
+  r.get('/menu-access', requirePermission('identity.role.read', 'identity.user.read'), async (_req, res) => {
+    res.json(await many(pool, `SELECT m.scope, m.ref, m.items, m.updated_by_name, m.updated_at,
+      CASE WHEN m.scope = 'user' THEN (SELECT name FROM users WHERE id::text = m.ref) ELSE (SELECT name FROM roles WHERE code = m.ref) END AS ref_name
+      FROM menu_access m ORDER BY m.scope, ref_name`));
+  });
+  /** Effective menu of one user (what they see now), for previews. */
+  r.get('/menu-access/users/:id/effective', requirePermission('identity.user.read'), async (req, res) => {
+    res.json({ items: await loadMenu(pool, String(req.params.id)) });
+  });
+  const saveMenu = async (req: Request, scope: 'role' | 'user', ref: string, label: string) => {
+    const { items, reason } = parse(z.object({ items: menuItems, reason: optText(300) }), req.body);
+    await tx(pool, async (c) => {
+      const before = await one<{ items: string[] }>(c, 'SELECT items FROM menu_access WHERE scope = $1 AND ref = $2', [scope, ref]);
+      if (items === null) await c.query('DELETE FROM menu_access WHERE scope = $1 AND ref = $2', [scope, ref]);
+      else await c.query(`INSERT INTO menu_access (scope, ref, items, updated_by_name) VALUES ($1, $2, $3, $4)
+        ON CONFLICT (scope, ref) DO UPDATE SET items = EXCLUDED.items, updated_by_name = EXCLUDED.updated_by_name, updated_at = now()`, [scope, ref, items, req.user!.name]);
+      await audit(c, 'identity', contextOf(req), { entity: scope === 'role' ? 'role' : 'user', entityId: ref, action: 'menu_access_changed', reason,
+        before: { menu: before?.items ?? 'all pages' }, after: { menu: items ?? 'all pages', for: label } });
+    });
+  };
+  r.put('/menu-access/roles/:code', requirePermission('identity.role.manage'), async (req, res) => {
+    const role = await one<{ code: string; name: string }>(pool, 'SELECT code, name FROM roles WHERE code = $1', [req.params.code]);
+    if (!role) throw notFound('Role');
+    if (role.code === 'super_admin') throw badRequest('Super Admin always sees every page');
+    await saveMenu(req, 'role', role.code, role.name);
+    res.json({ ok: true });
+  });
+  r.put('/menu-access/users/:id', requirePermission('identity.user.manage'), async (req, res) => {
+    const u = await one<{ id: string; name: string }>(pool, 'SELECT id, name FROM users WHERE id = $1', [req.params.id]);
+    if (!u) throw notFound('User');
+    await saveMenu(req, 'user', u.id, u.name);
+    res.json({ ok: true });
   });
 
   r.post('/me/password', async (req, res) => {
@@ -150,6 +186,8 @@ export function adminRoutes(r: Router, ctx: ServiceContext) {
     const rows = await many<{ total_count: number }>(pool, `
       SELECT ${PUBLIC_USER_COLUMNS},
         COALESCE((SELECT json_agg(json_build_object('code', r.code, 'name', r.name) ORDER BY r.name) FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = u.id), '[]') AS roles,
+        (SELECT p.name FROM users p WHERE p.id = u.parent_user_id) AS parent_name,
+        EXISTS (SELECT 1 FROM menu_access m WHERE m.scope = 'user' AND m.ref = u.id::text) AS custom_menu,
         count(*) OVER ()::int AS total_count
       FROM users u ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ${orderLimit(lq, params).replace(/ORDER BY (\w+)/, 'ORDER BY u.$1')}`, params);
     res.json(page(rows, lq));
@@ -171,14 +209,16 @@ export function adminRoutes(r: Router, ctx: ServiceContext) {
   });
 
   r.post('/users', requirePermission('identity.user.manage'), async (req, res) => {
-    const body = parse(userBody.extend({ password: z.string(), roleIds: z.array(z.uuid()).default([]), scope: scopeSchema }), req.body);
+    const body = parse(userBody.extend({ password: z.string(), roleIds: z.array(z.uuid()).default([]), scope: scopeSchema, parent_user_id: z.uuid().nullable().optional(), menu: menuItems.optional() }), req.body);
     const problem = passwordProblem(body.password);
     if (problem) throw badRequest(`Temporary password: ${problem}`);
     const created = await tx(pool, async (c) => {
       const u = await one<{ id: string }>(c, `
-        INSERT INTO users (email, name, phone, employee_code, designation, password_hash, must_change_password, created_by, party_id)
-        VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8) RETURNING id`,
-        [body.email, body.name, body.phone ?? null, body.employee_code ?? null, body.designation ?? null, await hashPassword(body.password), req.user!.id.startsWith('svc:') ? null : req.user!.id, body.party_id ?? null]);
+        INSERT INTO users (email, name, phone, employee_code, designation, password_hash, must_change_password, created_by, party_id, parent_user_id)
+        VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, $9) RETURNING id`,
+        [body.email, body.name, body.phone ?? null, body.employee_code ?? null, body.designation ?? null, await hashPassword(body.password), req.user!.id.startsWith('svc:') ? null : req.user!.id, body.party_id ?? null, body.parent_user_id ?? null]);
+      if (body.parent_user_id && !(await one(c, 'SELECT 1 FROM users WHERE id = $1', [body.parent_user_id]))) throw badRequest('The parent user does not exist');
+      if (body.menu) await c.query(`INSERT INTO menu_access (scope, ref, items, updated_by_name) VALUES ('user', $1, $2, $3)`, [u!.id, body.menu, req.user!.name]);
       for (const roleId of body.roleIds) await c.query('INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)', [u!.id, roleId]);
       await saveScope(c, u!.id, body.scope as DataScope);
       const { password: _p, ...safe } = body;
