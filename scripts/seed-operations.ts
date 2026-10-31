@@ -295,6 +295,44 @@ export async function seedOperations(services: RunningService[]) {
     for (const [n, rev, kg] of [['Selvi Raman', 900000, 3000], ['Arjun Mehta', 1200000, 4500], ['Sourav Ghosh', 600000, 2200]] as const)
       await call('crm', salesMgr, 'PUT', '/targets', { user_id: member(n), period: new Date().toISOString().slice(0, 7), leads: 40, qualified: 15, quotes: 12, kg, revenue: rev, margin_pct: 10, new_customers: 3 });
 
+    // ---------- P6/P7: customer portal orders, payments, allocation, dispatch ----------
+    await drain();
+    const dispatcher = await login('dispatch@textile.local');
+    const muruganBuyer = await login('buyer@srimurugan.example');
+    const kolkataBuyer = await login('purchase@kolkatahosiery.example');
+    const simulatePay = async (link: string) => { await call('commerce', null, 'POST', `/public/pay/${link}/simulate`, { outcome: 'success' }); await drain(); };
+    // Freight rates on the main lanes.
+    for (const [tr, mode, from, to, rate, min, eta] of [['VRL Logistics', 'PTL', '24', '33', 4.5, 1500, 4], ['Gati Express', 'PTL', '24', '33', 5, 1200, 3], ['VRL Logistics', 'PTL', '24', '19', 5.5, 1800, 5], ['Gati Express', 'PTL', '24', '27', 3.2, 900, 2], ['VRL Logistics', 'FTL', '24', '07', 2.8, 18000, 3]] as const)
+      await call('fulfilment', dispatcher, 'POST', '/freight-rates', { transporter_id: party(tr), mode, from_state: from, to_state: to, rate_per_kg: rate, min_charge: min, eta_days: eta });
+    // The accepted Sri Murugan quotation became a sales order (credit customer: booked, stock already reserved). Pick, pack, invoice, dispatch.
+    const soMurugan = (await call<{ id: string; channel: string; customer_name: string }[]>('commerce', admin, 'GET', '/orders')).find((o) => o.channel === 'crm_quotation')!;
+    const fM = (await call<{ id: string }[]>('fulfilment', dispatcher, 'GET', `/fulfilments?order=${soMurugan.id}`))[0]!;
+    const pickM = (await call<{ pick_list: { barcode: string; weight_kg: number }[] }>('fulfilment', dispatcher, 'GET', `/fulfilments/${fM.id}`)).pick_list;
+    for (const r of pickM) await call('fulfilment', dispatcher, 'POST', `/fulfilments/${fM.id}/pick`, { barcode: r.barcode, weight_kg: r.weight_kg });
+    await call('fulfilment', dispatcher, 'POST', `/fulfilments/${fM.id}/pack`, { packages: Math.ceil(pickM.length / 4), gross_kg: Math.ceil(pickM.reduce((s, r) => s + Number(r.weight_kg), 0) + 6) });
+    await call('fulfilment', accounts, 'POST', `/fulfilments/${fM.id}/invoice`);
+    const shipM = await call<{ shipment_id: string }>('fulfilment', dispatcher, 'POST', `/fulfilments/${fM.id}/dispatch`, { transporter_id: party('VRL Logistics'), transporter_name: 'VRL Logistics', mode: 'PTL', lr_number: 'VRL-771950', vehicle_no: 'GJ05BX7012', driver_name: 'Ramesh', driver_phone: '9898012345', eway_bill_no: '381200559911', freight_amount: 1800, eta_date: inDays(2) });
+    await call('fulfilment', dispatcher, 'POST', `/shipments/${shipM.shipment_id}/milestones`, { milestone: 'in_transit', location: 'Vadodara hub', note: 'Departed hub' });
+    // Kolkata Hosiery orders fleece on the portal, pays the token, and the order waits to be picked.
+    const flc = (await call<{ items: { id: string; product_id: string }[] }>('inventory', admin, 'GET', `/lots?f_product=${sku('FLC-320-CHR')}&f_in_stock=true`)).items[0]!;
+    await call('commerce', kolkataBuyer, 'POST', '/portal/cart/add', { product_id: sku('FLC-320-CHR'), lot_id: flc.id, kg: 120 });
+    const soK1 = await call<{ id: string; payment: { link_token: string } }>('commerce', kolkataBuyer, 'POST', '/portal/cart/checkout', { ship_to: 'Kolkata Hosiery Works, Howrah' });
+    await simulatePay(soK1.payment.link_token);
+    // A second Kolkata order left unpaid (shows the token and the pay button).
+    const blkLot = (await call<{ items: { id: string }[] }>('inventory', admin, 'GET', `/lots?f_product=${sku('SJ-180-BLK')}&f_in_stock=true`)).items[0]!;
+    await call('commerce', kolkataBuyer, 'POST', '/portal/cart/add', { product_id: sku('SJ-180-BLK'), lot_id: blkLot.id, kg: 150 });
+    await call('commerce', kolkataBuyer, 'POST', '/portal/cart/checkout', {});
+    // Sri Murugan reorders interlock on the portal (credit: booked straight away).
+    const intLot = (await call<{ items: { id: string }[] }>('inventory', admin, 'GET', `/lots?f_product=${sku('INT-220-RFD')}&f_in_stock=true`)).items[0]!;
+    await call('commerce', muruganBuyer, 'POST', '/portal/cart/add', { product_id: sku('INT-220-RFD'), lot_id: intLot.id, kg: 250 });
+    await call('commerce', muruganBuyer, 'POST', '/portal/cart/checkout', { ship_to: 'Unit 2, Tiruppur' });
+    await call('commerce', muruganBuyer, 'POST', '/portal/complaints', { order_id: soMurugan.id, category: 'delivery', subject: 'Please confirm delivery date', description: 'We need the navy jersey by Monday for cutting.' });
+    // A large phone order no single warehouse can supply: waits for an allocation decision (split suggested).
+    await call('commerce', salesMgr, 'POST', '/orders', { customer_id: party('Delhi Fashion Hub'), lines: [{ product_id: sku('SJ-160-NVY'), kg: 600 }], notes: 'Phone order — Vikas' });
+    // Customer-specific token policy waiting for approval; a website registration waiting for review.
+    await call('commerce', salesMgr, 'POST', '/token-policies', { name: 'Kolkata Hosiery — trusted buyer', scope: 'customer', scope_ref: party('Kolkata Hosiery Works'), basis: 'percent', value: 5, min_amount: 2000, validity_days: 10, refundable: true, cancellation_fee_pct: 0, reason: 'Five years of on-time payments' });
+    await call('commerce', null, 'POST', '/public/registrations', { company_name: 'Erode Knit Wear', gstin: null, city: 'Erode', contact_name: 'P. Kannan', email: 'kannan@erodeknit.example', phone: '9443012345', message: 'Interested in interlock and pique for school uniforms' });
+
     await drain();
     await runProcurementChecks(services.find((s) => s.ctx.name === 'procurement')!.ctx.pool);
     await runJobworkChecks(services.find((s) => s.ctx.name === 'jobwork')!.ctx.pool);

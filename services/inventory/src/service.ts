@@ -6,6 +6,7 @@ import { applyPriceDecision, pricingRoutes } from './pricing.ts';
 import { reservationRoutes } from './reservations.ts';
 import { applyTransferDecision, transferRoutes } from './transfers.ts';
 import { applyStocktakeDecision, stocktakeRoutes } from './stocktake.ts';
+import { dispatchRoutes } from './dispatch.ts';
 
 function approvalHandler() {
   return async (ev: BusEvent, c: Client) => {
@@ -27,6 +28,7 @@ export const inventoryService: ServiceDefinition = {
     reservationRoutes(r, ctx);
     transferRoutes(r, ctx);
     stocktakeRoutes(r, ctx);
+    dispatchRoutes(r, ctx);
   },
   consumers: () => ({
     'procurement.receipt.recorded': receiptConsumer(),

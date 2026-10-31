@@ -179,6 +179,12 @@ const STATUS: Record<string, [Tone, string]> = {
   passed: ['success', 'QC passed'], partial: ['warning', 'Partly passed'], completed: ['success', 'Completed'], counting: ['info', 'Counting'], picked: ['success', 'Picked'], expired: ['neutral', 'Expired'],
   superseded: ['neutral', 'Superseded'], used: ['neutral', 'Used'], rejected_internal: ['danger', 'Price rejected'], lost: ['danger', 'Lost'], won: ['success', 'Won'], merged: ['neutral', 'Merged'],
   new: ['info', 'New'], assigned: ['brand', 'Assigned'], contact_pending: ['warning', 'Contact pending'], contacted: ['brand', 'Contacted'], qualified: ['violet', 'Qualified'], quotation: ['info', 'Quotation'],
+  pending_company_approval: ['warning', 'Awaiting buyer approval'], awaiting_allocation: ['warning', 'Awaiting allocation'], pending_payment: ['warning', 'Awaiting token'], booked: ['success', 'Booked'],
+  in_fulfilment: ['brand', 'In fulfilment'], partially_dispatched: ['warning', 'Partly dispatched'], delivered: ['success', 'Delivered'], created: ['warning', 'Awaiting payment'],
+  refunded: ['neutral', 'Refunded'], partially_refunded: ['warning', 'Partly refunded'], in_progress: ['brand', 'In progress'],
+  needs_decision: ['warning', 'Needs decision'], split_pending: ['warning', 'Split awaiting approval'], decided: ['success', 'Decided'], released: ['info', 'Released'], picking: ['brand', 'Picking'], packed: ['violet', 'Packed'], invoiced: ['info', 'Invoiced'],
+  credit: ['violet', 'Credit'], override: ['warning', 'Override'], out_for_delivery: ['info', 'Out for delivery'], exception: ['danger', 'Exception'],
+  requested: ['warning', 'Requested'], authorized: ['brand', 'Authorised'], inspected: ['violet', 'Inspected'], filed: ['info', 'Filed'], settled: ['success', 'Settled'],
   negotiation: ['warning', 'Negotiation'], order_confirmed: ['success', 'Order confirmed'], nurture: ['neutral', 'Nurture'], missing: ['danger', 'Missing'],
 };
 export function StatusBadge({ status }: { status: string }) {

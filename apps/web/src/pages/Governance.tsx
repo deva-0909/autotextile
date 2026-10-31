@@ -89,6 +89,10 @@ function recordLink(a: { approval_type: string; ref_id: string; payload: Record<
     case 'stock_adjustment': return `/inventory/stocktakes/${a.ref_id}`;
     case 'quotation_price': return `/crm/quotations/${a.ref_id}`;
     case 'credit_limit': case 'credit_override': return p.customer_id ? `/crm/credit/${p.customer_id}` : '/crm/credit';
+    case 'token_policy': return '/commerce/token-policies';
+    case 'reservation_extension': return p.order ? `/commerce/orders/${encodeURIComponent(String(p.order))}` : '/commerce/orders';
+    case 'split_fulfilment': return `/fulfilment/orders/${a.ref_id}`;
+    case 'dispatch_gate_override': return `/fulfilment/${a.ref_id}`;
     default: return null;
   }
 }

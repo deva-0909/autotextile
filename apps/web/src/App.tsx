@@ -38,6 +38,11 @@ import { AllocationPage } from './pages/crm/Allocation';
 import { PriceApprovalsPage, QuotationBuilderPage, QuotationDetailPage, QuotationsPage } from './pages/crm/Quotations';
 import { CreditDetailPage, CreditPage, Customer360Page, CustomersPage, CrmDashboard, PerformancePage } from './pages/crm/Customers';
 import { MillClaims, MillHome, MillJob, MillJobs, PortalLayout, SupplierHome, SupplierOrder } from './pages/portal/Portal';
+import { PayPage, RegisterPage, TrackPage } from './pages/commerce/Public';
+import { CartPage, CustomerAccountPage, CustomerCompanyPage, CustomerOrderPage, CustomerOrdersPage, CustomerPortalLayout, CustomerSupportPage, ProductPage, ShopPage } from './pages/commerce/CustomerPortal';
+import { CommerceOrderDetailPage, CommerceOrdersPage, ComplaintsPage, PaymentsPage, RegistrationsPage, TokenPoliciesPage, WalletPage } from './pages/commerce/Admin';
+import { AllocationListPage, DispatchCockpit, FulfilmentDetailPage, OrderAllocationPage, ReturnDetailPage, ReturnsPage, ShipmentDetailPage, ShipmentsPage } from './pages/fulfilment/Fulfilment';
+import { InvoicePage } from './pages/fulfilment/Invoice';
 import type { ReactNode } from 'react';
 
 function Guard({ perms, children }: { perms?: string[]; children: ReactNode }) {
@@ -58,11 +63,44 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/pay/:token" element={<PayPage />} />
+        <Route path="/track/:token" element={<TrackPage />} />
         <Route path="*" element={<Navigate to={`/login${loc.pathname !== '/' ? `?next=${encodeURIComponent(loc.pathname + loc.search)}` : ''}`} replace />} />
       </Routes>
     );
   }
   if (mustChangePassword) return <ChangePasswordRequired />;
+
+  // Pages opened from a shared link look the same whoever opens them.
+  if (/^\/(pay|track)\//.test(loc.pathname)) {
+    return (
+      <Routes>
+        <Route path="/pay/:token" element={<PayPage />} />
+        <Route path="/track/:token" element={<TrackPage />} />
+      </Routes>
+    );
+  }
+
+  // Customer buyers get the B2B shop and their account.
+  if (user.partyId && user.permissions.some((p) => p.startsWith('portal.customer.'))) {
+    return (
+      <CustomerPortalLayout>
+        <Routes>
+          <Route path="/shop" element={<ShopPage />} />
+          <Route path="/shop/:id" element={<ProductPage />} />
+          <Route path="/cart" element={<CartPage />} />
+          <Route path="/portal/orders" element={<CustomerOrdersPage />} />
+          <Route path="/portal/orders/:id" element={<CustomerOrderPage />} />
+          <Route path="/portal/invoices/:id" element={<InvoicePage back="/portal/orders" />} />
+          <Route path="/portal/account" element={<CustomerAccountPage />} />
+          <Route path="/portal/support" element={<CustomerSupportPage />} />
+          <Route path="/portal/company" element={<CustomerCompanyPage />} />
+          <Route path="*" element={<Navigate to="/shop" replace />} />
+        </Routes>
+      </CustomerPortalLayout>
+    );
+  }
 
   // Supplier and mill users act for one business partner and only see the partner portal.
   if (user.partyId) {
@@ -153,6 +191,22 @@ export default function App() {
         <Route path="/crm/credit" element={<Guard perms={['crm.read']}><CreditPage /></Guard>} />
         <Route path="/crm/credit/:id" element={<Guard perms={['crm.read']}><CreditDetailPage /></Guard>} />
         <Route path="/crm/performance" element={<Guard perms={['crm.read']}><PerformancePage /></Guard>} />
+        <Route path="/commerce/orders" element={<Guard perms={['commerce.read']}><CommerceOrdersPage /></Guard>} />
+        <Route path="/commerce/orders/:id" element={<Guard perms={['commerce.read']}><CommerceOrderDetailPage /></Guard>} />
+        <Route path="/commerce/token-policies" element={<Guard perms={['commerce.read']}><TokenPoliciesPage /></Guard>} />
+        <Route path="/commerce/wallet" element={<Guard perms={['commerce.read']}><WalletPage /></Guard>} />
+        <Route path="/commerce/payments" element={<Guard perms={['commerce.read']}><PaymentsPage /></Guard>} />
+        <Route path="/commerce/registrations" element={<Guard perms={['commerce.registration.approve', 'commerce.read']}><RegistrationsPage /></Guard>} />
+        <Route path="/commerce/complaints" element={<Guard perms={['commerce.read']}><ComplaintsPage /></Guard>} />
+        <Route path="/fulfilment" element={<Guard perms={['fulfilment.read']}><DispatchCockpit /></Guard>} />
+        <Route path="/fulfilment/allocation" element={<Guard perms={['fulfilment.read']}><AllocationListPage /></Guard>} />
+        <Route path="/fulfilment/orders/:orderId" element={<Guard perms={['fulfilment.read']}><OrderAllocationPage /></Guard>} />
+        <Route path="/fulfilment/invoices/:id" element={<Guard perms={['fulfilment.read']}><InvoicePage /></Guard>} />
+        <Route path="/fulfilment/shipments" element={<Guard perms={['fulfilment.read']}><ShipmentsPage /></Guard>} />
+        <Route path="/fulfilment/shipments/:id" element={<Guard perms={['fulfilment.read']}><ShipmentDetailPage /></Guard>} />
+        <Route path="/fulfilment/returns" element={<Guard perms={['fulfilment.read']}><ReturnsPage /></Guard>} />
+        <Route path="/fulfilment/returns/:id" element={<Guard perms={['fulfilment.read']}><ReturnDetailPage /></Guard>} />
+        <Route path="/fulfilment/:id" element={<Guard perms={['fulfilment.read']}><FulfilmentDetailPage /></Guard>} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/programme" element={<ProgrammePage />} />
         <Route path="/roadmap/:phase" element={<RoadmapPage />} />

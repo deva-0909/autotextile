@@ -1,4 +1,4 @@
-# Requirement traceability — releases P1–P5
+# Requirement traceability — releases P1–P7
 
 Source: *Textile_Trading_ERP_Development_and_Figma_Tracker.xlsx*, Requirements and Figma Screens sheets.
 Statuses:
@@ -85,6 +85,32 @@ Statuses:
 | REQ-0047 | Advance and credit by approval | **Built / partial** | Advance by default; credit limit and days, one-time overrides and blocks by a checker; exposure check on order acceptance | Outstanding, ageing and the overdue hold use accounts receivable (P8) |
 | REQ-0048 | Targets and incentives | **Built / partial** | Monthly targets; leads, response time, qualified, quotes, kg, revenue, margin, new/repeat customers from verified outcomes; incentive eligibility | Collections (P8); incentive slabs and payout calculation |
 
+## P6 — B2B customer website, booking, payment & customer portal
+
+| ID | Requirement | Status | Implementation | Remaining (phase) |
+|---|---|---|---|---|
+| REQ-0049 | B2B catalogue and fabric search | **Built / partial** | Catalogue from QC-passed, priced, available lots; filters by category and free text over SKU, GSM, colour; lot detail with grade, dye lot, shade and location | Product photos/swatches (no image upload yet); price visibility per customer group |
+| REQ-0050 | Customer onboarding | **Built** | Public registration, checker approval creating or linking the customer master and first portal admin; company users and roles (admin, buyer, accounts) | GSTIN verification against the GST portal is manual |
+| REQ-0051 | Ordering | **Built** | Cart with MOQ and availability checks, company-side approval above a limit, repeat order, cancellation with policy fee, phone orders by staff | — |
+| REQ-0052 | Token policy | **Built** | Percent of taxable value excluding GST or fixed, min/max, hold days, refundability and fee; customer › product › category › campaign › default; maker-checker | — |
+| REQ-0053 | Payments | **Built / partial** | Gateway adapter, signed callback + server-side verification, idempotency, sandbox bank, refunds, reconciliation report | ICICI live integration needs merchant credentials and the bank’s API spec (adapter stub refuses until configured) |
+| REQ-0054 | Reservation | **Built** | Atomic reservation on allocation, expiry of unpaid orders, approved extensions, duplicate booking prevented by inventory locks | — |
+| REQ-0055 | Customer portal | **Built** | Orders, token/invoice payment, invoices, tracking, POD, returns, complaints, account and company pages | Email/WhatsApp copies of updates arrive with P9 |
+| REQ-0056 | Wallet / advance | **Built / partial** | Append-only advance ledger; tokens, advances, application to invoices, credit notes, cancellation fees, refunds | Ledger postings to the GL arrive with P8; refund of a credit note balance is a manual payment-link reversal |
+
+## P7 — Order orchestration, allocation, dispatch & transport
+
+| ID | Requirement | Status | Implementation | Remaining (phase) |
+|---|---|---|---|---|
+| REQ-0057 | Allocation engine | **Built** | Dispatch priority (Surat first), coverage, grade, distance band, freight, ETA, workload; comparison with reasons | Distance uses state-zone bands, not road distance |
+| REQ-0058 | Manual override | **Built** | Override needs a reason; recommended and chosen options both stored and audited | — |
+| REQ-0059 | Split fulfilment | **Built** | Never automatic; split request goes to management approval; one fulfilment and invoice per warehouse GSTIN | — |
+| REQ-0060 | Dispatch gates | **Built** | Invoice, payment (advance applied, credit terms, approved override), e-way bill above threshold | E-way bill number is entered, not generated through the NIC API |
+| REQ-0061 | Picking | **Built** | Pick list by bin, scan with weight tolerance, wrong/duplicate roll refused, unpick, pack | — |
+| REQ-0062 | Transport | **Built / partial** | Freight rate cards and quotes, transporter, LR, vehicle, milestones, shareable tracking link | Live GPS from transporters |
+| REQ-0063 | Delivery | **Built** | POD with received kg, condition and receiver; shortage/damage opens a transport claim | — |
+| REQ-0064 | Returns | **Built / partial** | RMA request, authorisation, scan receipt, disposition, credit note credited to the customer advance | Replacement orders are created manually; e-invoice IRN for invoices/credit notes not generated (GSP integration) |
+
 ### Known gaps
 
 - **MFA is optional per user.** The setting *Require MFA for privileged users* exists, but the login does not force enrolment yet.
@@ -131,6 +157,20 @@ Statuses:
 | FIG-035 | Quotation builder and version history | `/crm/quotations/new`, `/crm/quotations/:id` |
 | FIG-036 | Price negotiation and approval | `/crm/price-approvals` |
 | FIG-037 | Customer credit application and limit | `/crm/credit`, `/crm/credit/:id` |
+| FIG-038 | Catalogue and fabric detail | `/shop`, `/shop/:id` (customer user) |
+| FIG-039 | Customer registration and company users | `/register`, `/portal/company`, `/commerce/registrations` |
+| FIG-040 | Cart and checkout | `/cart` |
+| FIG-041 | Payment and status | `/pay/:token`, `/commerce/payments` |
+| FIG-042 | Customer order tracking | `/portal/orders`, `/portal/orders/:id`, `/commerce/orders/:id` |
+| FIG-043 | Token policy configuration | `/commerce/token-policies` |
+| FIG-044 | Customer advance / wallet ledger | `/commerce/wallet`, `/portal/account` |
+| FIG-045 | Warehouse recommendation and comparison | `/fulfilment/allocation`, `/fulfilment/orders/:orderId` |
+| FIG-046 | Split fulfilment approval | `/fulfilment/orders/:orderId`, `/approvals` |
+| FIG-047 | Dispatch readiness cockpit | `/fulfilment` |
+| FIG-048 | Pick list and barcode scan | `/fulfilment/:id` |
+| FIG-049 | Transporter, LR and tracking | `/fulfilment/shipments`, `/fulfilment/shipments/:id`, `/track/:token` |
+| FIG-050 | Delivery tracking and POD | `/portal/orders/:id`, `/fulfilment/shipments/:id` |
+| FIG-051 | Return / RMA and claims | `/fulfilment/returns`, `/fulfilment/returns/:id`, `/fulfilment/shipments?tab=claims` |
 | extra | Approvals inbox, document library, configuration, programme tracker, claims, reservations, issue to mill, sales dashboard, targets | `/approvals`, `/governance/documents`, `/organisation/configuration`, `/programme`, `/jobwork/claims`, `/inventory/reservations`, `/inventory/mill-issues`, `/crm`, `/crm/performance` |
 
 ## Acceptance tests (tracker sheet) touched by P1

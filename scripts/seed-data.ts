@@ -74,7 +74,7 @@ export async function seedOrganisation(c: Client) {
         [doc, g, fy.id, `${short[state]}${p}/2627/`]);
     }
   }
-  for (const [doc, p] of [['purchase_order', 'PO/2627/'], ['job_work_challan', 'JW/2627/'], ['transfer_order', 'TO/2627/'], ['quotation', 'QT/2627/'], ['purchase_requisition', 'PR/2627/'], ['rfq', 'RFQ/2627/'], ['goods_receipt', 'GRN/2627/'], ['quality_claim', 'QC/2627/'], ['stocktake', 'ST/2627/'], ['lead', 'LD/2627/'], ['credit_application', 'CR/2627/'], ['reservation', 'RS/2627/']]) {
+  for (const [doc, p] of [['purchase_order', 'PO/2627/'], ['job_work_challan', 'JW/2627/'], ['transfer_order', 'TO/2627/'], ['quotation', 'QT/2627/'], ['purchase_requisition', 'PR/2627/'], ['rfq', 'RFQ/2627/'], ['goods_receipt', 'GRN/2627/'], ['quality_claim', 'QC/2627/'], ['stocktake', 'ST/2627/'], ['lead', 'LD/2627/'], ['credit_application', 'CR/2627/'], ['reservation', 'RS/2627/'], ['sales_order', 'SO/2627/'], ['rma', 'RMA/2627/'], ['shipment', 'SHP/2627/']]) {
     await c.query(`INSERT INTO organisation.number_series (doc_type, fiscal_year_id, prefix, padding) VALUES ($1, $2, $3, 5) ON CONFLICT DO NOTHING`, [doc, fy.id, p]);
   }
   return { entityId: e.id as string, regs, warehouses: wh };
@@ -160,6 +160,9 @@ export const DEMO_USERS: { email: string; name: string; designation: string; rol
   { email: 'sales.east@textile.local', name: 'Sourav Ghosh', designation: 'Sales Executive, East', role: 'sales_executive', scope: 'all' },
   { email: 'auditor@textile.local', name: 'CA Review Desk', designation: 'Statutory Auditor', role: 'auditor', scope: 'all' },
   { email: 'millops@textile.local', name: 'Karthik Raman', designation: 'Mill Operations Manager', role: 'mill_ops_manager', scope: 'all' },
+  { email: 'dispatch@textile.local', name: 'Imran Shaikh', designation: 'Dispatch Manager', role: 'dispatch_manager', scope: 'all' },
+  { email: 'buyer@srimurugan.example', name: 'S. Murugan', designation: 'Customer portal: company admin', role: 'customer_company_admin', scope: 'none', party: 'Sri Murugan Garments' },
+  { email: 'purchase@kolkatahosiery.example', name: 'Debashis Roy', designation: 'Customer portal: buyer', role: 'customer_buyer', scope: 'none', party: 'Kolkata Hosiery Works' },
   { email: 'supplier@ambica.example', name: 'Ambica Dispatch Desk', designation: 'Supplier portal user', role: 'supplier_portal', scope: 'none', party: 'Shree Ambica Knitters' },
   { email: 'mill@suratprocess.example', name: 'Surat Process House Desk', designation: 'Mill portal user', role: 'mill_user', scope: 'none', party: 'Surat Process House' },
 ];

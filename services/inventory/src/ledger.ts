@@ -6,7 +6,7 @@ import { round3 } from './common.ts';
  * the roll's current position (a projection of that ledger) in the same transaction.
  */
 export type RollState = 'qc_hold' | 'available' | 'reserved' | 'allocated' | 'in_transit' | 'at_mill' | 'damaged' | 'rejected' | 'dispatched' | 'consumed' | 'written_off';
-export type MovementType = 'inward' | 'qc' | 'putaway' | 'move' | 'reserve' | 'release' | 'allocate' | 'pick' | 'transfer_out' | 'transfer_in' | 'issue_to_mill' | 'consume_at_mill' | 'split' | 'adjust_in' | 'adjust_out' | 'weight_adjust' | 'damage' | 'write_off';
+export type MovementType = 'inward' | 'qc' | 'putaway' | 'move' | 'reserve' | 'release' | 'allocate' | 'pick' | 'transfer_out' | 'transfer_in' | 'issue_to_mill' | 'consume_at_mill' | 'split' | 'adjust_in' | 'adjust_out' | 'weight_adjust' | 'damage' | 'write_off' | 'return_in';
 
 /** States that are physically in one of our warehouses. */
 export const PHYSICAL: RollState[] = ['qc_hold', 'available', 'reserved', 'allocated', 'damaged', 'rejected'];

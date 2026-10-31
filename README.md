@@ -9,11 +9,13 @@ It is built phase by phase from the *Developer Brief & Functional Specification 
 - **P3 — Mill job work, mill portal, rate engine, yield & deadlines**
 - **P4 — Inventory: lots & roll barcodes, QC, price tags, immutable stock ledger, WMS, transfers, stock counts**
 - **P5 — Sales & CRM: lead capture, allocation, pipeline, customer 360, quotations, pricing & credit approvals**
+- **P6 — B2B commerce: trade portal, cart, token booking, payment gateway (sandbox), customer advance ledger**
+- **P7 — Fulfilment: warehouse allocation engine, split approval, pick by scan, GST invoice, dispatch gates, transport, POD, returns**
 
 | | |
 |---|---|
 | **Architecture** | Domain microservices behind an API gateway, PostgreSQL (schema per service), Postgres-backed event bus |
-| **Services in this release** | `identity` · `organisation` · `masters` · `governance` · `procurement` · `jobwork` · `inventory` · `crm` · `gateway` |
+| **Services in this release** | `identity` · `organisation` · `masters` · `governance` · `procurement` · `jobwork` · `inventory` · `crm` · `commerce` · `fulfilment` · `gateway` |
 | **Web app** | React 19 + TypeScript + Tailwind CSS, served by the gateway |
 | **Runs on** | Windows, macOS or Linux — Node.js and PostgreSQL only, no Docker needed |
 
@@ -92,6 +94,25 @@ See [docs/architecture.md](docs/architecture.md) for the design and
 - **Credit:** advance by default; credit limits, one-time overrides and blocks through a checker. Accepting a quotation runs the credit check and reserves the quoted lots.
 - **Targets & performance:** leads, response time, qualified leads, quotes, kg, revenue, margin and new vs repeat customers against monthly targets, counting only verified outcomes; incentive eligibility.
 
+## What’s in P6 — B2B commerce
+
+- **Trade portal** for customer companies: fabric catalogue from QC-passed stock (by category, GSM, colour, SKU), lot detail with shade and grade, cart with MOQ and live availability checks.
+- **Registration:** companies apply on `/register`; a checker approves, which creates the customer master and the company’s first login (temporary password shown once). Company admins add their own buyers and accounts users and can set an order value above which a second person in their company must approve.
+- **Token booking:** advance customers pay a token before stock is held. The token is a percentage of the taxable value (GST excluded) or a fixed amount, with min/max, hold days and refund terms. The most specific rule wins — customer › product › category › campaign › company default — and every rule needs maker-checker approval.
+- **Payments:** gateway adapter with a signed callback *and* a separate server-side status check before anything is marked paid; idempotent; rejected signatures are logged. `PAYMENT_GATEWAY=sandbox` simulates the bank; the ICICI adapter is wired but needs merchant credentials.
+- **Reservation:** stock is reserved atomically when an order is allocated; unpaid orders expire and release it; extensions need approval.
+- **Customer advance ledger:** append-only. Tokens and advances credit it; invoices consume it at dispatch; credit notes add to it; refunds come only out of unapplied money.
+- **Internal screens:** sales orders (including phone orders), payments and gateway reconciliation, customer advances, token policies, registrations, complaints.
+
+## What’s in P7 — Order orchestration & dispatch
+
+- **Allocation engine:** Surat first by configured dispatch priority, then coverage, grade, distance band, freight estimate, ETA and workload; the comparison is shown with the reason for the choice.
+- **Never auto-splits:** a split across warehouses goes to management approval. Overrides need a reason; recommended and chosen options are both kept.
+- **Pick by scan** against the reservation (wrong roll, already-picked and weight tolerance are refused), pack, then a **GST tax invoice** from the warehouse’s own GSTIN series (CGST+SGST or IGST by place of supply).
+- **Dispatch gates:** invoice required; advance customers must have paid (advance is applied automatically), credit customers within terms, otherwise an approved override. E-way bill number required above the threshold.
+- **Transport:** freight rate cards and quotes, LR/vehicle, milestones, shareable tracking link (`/track/:token`), proof of delivery with shortage/damage that opens a transport claim.
+- **Returns (RMA):** request from the portal or internally, authorise, receive by scan into a returns location, disposition, credit note credited to the customer’s advance.
+
 ## Run it on Windows (no Docker)
 
 ### 1. Install the prerequisites (one time)
@@ -143,7 +164,7 @@ npm start
 
 `npm run setup` creates the `textile_erp` database, runs every service’s migrations and loads demo data,
 including sample requisitions, RFQs, purchase orders, invoices, job-work orders, scanned stock, transfers, leads, quotations and credit.
-`npm start` launches the eight services and the gateway in one window. Open **http://localhost:4000**.
+`npm start` launches the ten services and the gateway in one window. Open **http://localhost:4000**.
 
 > Upgrading from an earlier release? Run `npm install` and then `npm run setup -- --reset` once, to load the demo data for the new modules.
 
@@ -162,6 +183,9 @@ Demo users all share the password `Textile@2026`:
 | `salesmgr@textile.local` | Sales Manager | whole team, allocation rules, attendance, targets, price approvals |
 | `auditor@textile.local` | Auditor / CA | read-only, including the audit trail |
 | `millops@textile.local` | Mill Operations Manager | job-work orders, mills, rate cards, claims |
+| `dispatch@textile.local` | Dispatch Manager | allocation, pick/pack, invoices, dispatch, transport, returns |
+| `buyer@srimurugan.example` | Customer portal — company admin (Sri Murugan Garments, credit) | shop, orders, invoices, company users |
+| `purchase@kolkatahosiery.example` | Customer portal — buyer (Kolkata Hosiery Works, advance) | shop, orders, token payments |
 | `supplier@ambica.example` | Supplier portal (Shree Ambica Knitters) | the supplier’s own POs, dispatches and invoices |
 | `mill@suratprocess.example` | Mill portal (Surat Process House) | the mill’s incoming material, jobs, stages and claims |
 
@@ -174,7 +198,14 @@ A good first tour:
 5. Sign in as **surat.stores** → *Inventory*: open the inward waiting to be scanned, the QC queue, a lot’s genealogy, the warehouse map, the transfer to Kolkata (tax invoice, IGST) and the stock count in progress. Try the *Scan station* on your phone.
 6. Sign in as **salesmgr** → *Sales & CRM*: the lead inbox (one Kolkata lead is unassigned because Sourav is on leave — open it to see why), *Lead allocation*, the customer 360 for Sri Murugan Garments, and *Price approvals*.
 7. Sign in as **sales.south** to see only your own leads, then build a quotation and watch the margin and approval flag change as you type a price.
-8. Sign in as **admin** → *Approvals* to approve what is waiting, then look at the *Audit trail*.
+8. Sign in as **purchase@kolkatahosiery.example**: open the order waiting for its token and pay it on the sandbox payment page; the order is booked and appears in dispatch.
+9. Sign in as **dispatch** → *Fulfilment*: the Delhi order needs a decision (no single warehouse has 600 kg) — request a split; scan rolls on a released fulfilment, pack, invoice and dispatch; open the delivered shipment’s tracking and POD.
+10. Sign in as **accounts** → *B2B commerce*: payments and their reconciliation, customer advances, token policies (one Kolkata rule waits for approval).
+11. Sign in as **admin** → *Approvals* to approve what is waiting, then look at the *Audit trail*.
+
+### Payment gateway
+
+`PAYMENT_GATEWAY=sandbox` (default) shows a stand-in bank page with *Pay* and *Simulate a declined payment*; the ERP still checks a signed callback and verifies the status separately. To go live with ICICI, set `PAYMENT_GATEWAY=icici` with the merchant credentials once the bank issues them; until then that adapter refuses requests rather than pretending.
 
 ### Optional: AI invoice extraction
 

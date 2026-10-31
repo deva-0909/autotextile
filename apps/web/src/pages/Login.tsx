@@ -146,6 +146,7 @@ export function LoginPage() {
         <p className="font-medium text-slate-800">Demo environment</p>
         <p className="mt-1">admin@textile.local · owner@textile.local · purchase@textile.local · surat.stores@textile.local — password <span className="font-mono">Textile@2026</span></p>
       </div>
+      <p className="mt-4 text-center text-[13px] text-slate-600">Buying fabric for your business? <Link to="/register" className="font-medium text-brand-600 hover:underline">Open a trade account</Link></p>
     </AuthShell>
   );
 }

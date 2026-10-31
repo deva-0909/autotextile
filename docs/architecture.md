@@ -39,8 +39,8 @@ Browser ──► gateway :4000 ──► /api/identity/*      identity :4101   
 | P3 ✅ | jobwork (process templates, rate engine, mill stock, job-work orders/challans, stages, returns/yield, claims, mill portal) |
 | P4 ✅ | inventory (lots, rolls, barcodes, immutable stock ledger, inward/QC, price tags, WMS, reservations, transfers, stock counts) |
 | P5 ✅ | crm (lead sources/webhooks, duplicates, allocation, pipeline, quotations, pricing and credit approvals, targets) |
-| P6 | commerce (catalogue, cart, token booking, ICICI gateway, customer portal) |
-| P7 | fulfilment (allocation engine, pick/pack, dispatch, transport, POD) |
+| P6 ✅ | commerce (catalogue, cart, registrations, token policies, orders, payment gateway adapter, customer advance ledger, complaints, customer portal) |
+| P7 ✅ | fulfilment (allocation engine, split approval, pick/pack, GST invoice, dispatch gates, transport, tracking, POD, claims, returns) |
 | P8 | accounting (double-entry GL, AP/AR, GST, TDS, bank reconciliation) |
 | P9 | workflow (rules, tasks, escalation), notifications (WhatsApp/SMS/email), hrms |
 | P10 | analytics/BI, intelligence (AI copilot) |
@@ -71,10 +71,16 @@ Events in P1:
 | `procurement.receipt.recorded` | procurement | jobwork → mill stock (direct-to-mill receipts); inventory → an inward to weigh and scan (warehouse receipts) |
 | `jobwork.order.issued` | jobwork | inventory → rolls to issue to the mill (warehouse-sourced lines) |
 | `jobwork.return.recorded` | jobwork | inventory → consumes the grey rolls at the mill and opens an inward for the finished lot |
-| `inventory.price.changed` | inventory | (catalogue/commerce P6) |
+| `inventory.price.changed` | inventory | (catalogue cache) |
+| `crm.quotation.accepted` | crm | commerce → sales order from the quotation |
+| `commerce.order.booked` / `.extended` / `.cancelled` | commerce | fulfilment → allocation plan, hold extension, release |
+| `fulfilment.plan.reserved` | fulfilment | commerce → order awaits token or is booked on credit |
+| `commerce.payment.received` | commerce | fulfilment → re-checks the payment gate |
+| `fulfilment.started` / `.dispatched` / `.delivered` | fulfilment | commerce → order status |
+| `fulfilment.invoiced`, `fulfilment.credit_note.issued` | fulfilment | (accounting P8) |
 | `inventory.transfer.dispatched` | inventory | (accounting P8: inter-GSTIN supply) |
 | `inventory.reservation.picked` | inventory | (fulfilment P7) |
-| `crm.lead.created`, `crm.quotation.accepted` | crm | (sales orders P7, analytics P10) |
+| `crm.lead.created` | crm | (analytics P10) |
 | `procurement.invoice.posted` | procurement | (accounting GL in P8) |
 | `jobwork.claim.accepted` | jobwork | (accounting P8) |
 | `<service>.<entity>.changed` | all | (future read-model caches) |
@@ -86,6 +92,23 @@ number, a setting), it calls that service’s REST API through `callService` (`p
 with a short-lived service token (`svc:<name>`). It never reads the other service’s tables. Examples:
 procurement asks organisation for the next PO number and masters for party details; the mill portal sends a
 mill’s invoice to procurement’s `/captures/inbound`; uploaded files go to governance’s document store.
+
+**Ordering rule inside a transaction.** `publish` holds a database advisory lock until commit so event ids
+commit in order. A transaction that has already published (directly, or through `audit`/`notify`) must not then
+make a synchronous call to a service that also publishes, or that service waits on the lock held by the caller.
+Make synchronous calls first, then audit and publish.
+
+## P6/P7 design notes
+
+- **Payments.** `services/commerce/src/gateway.ts` is the only code that knows a bank. A payment becomes `success`
+  only when the HMAC-signed callback (checked against the raw request body) and a server-side status query agree.
+  Callbacks are idempotent; bad signatures are recorded in their own transaction and refused.
+- **Customer advance** is a separate append-only ledger (`wallet_ledger`, triggers block UPDATE/DELETE/TRUNCATE).
+  Application to an invoice is idempotent per invoice number under an advisory lock.
+- **Allocation** reads availability from inventory (counting the order’s own reservations when re-deciding),
+  ranks warehouses, and reserves in inventory. A split is never automatic: it becomes an approval.
+- **Dispatch gates** are computed from facts (picked, packed, invoiced, settled/credit/approved override) and
+  re-checked at dispatch time inside the transaction.
 
 ## P2/P3 design notes
 

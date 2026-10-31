@@ -170,7 +170,7 @@ export function adminRoutes(r: Router, ctx: ServiceContext) {
       const u = await one<{ id: string }>(c, `
         INSERT INTO users (email, name, phone, employee_code, designation, password_hash, must_change_password, created_by, party_id)
         VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8) RETURNING id`,
-        [body.email, body.name, body.phone ?? null, body.employee_code ?? null, body.designation ?? null, await hashPassword(body.password), req.user!.id, body.party_id ?? null]);
+        [body.email, body.name, body.phone ?? null, body.employee_code ?? null, body.designation ?? null, await hashPassword(body.password), req.user!.id.startsWith('svc:') ? null : req.user!.id, body.party_id ?? null]);
       for (const roleId of body.roleIds) await c.query('INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)', [u!.id, roleId]);
       await saveScope(c, u!.id, body.scope as DataScope);
       const { password: _p, ...safe } = body;

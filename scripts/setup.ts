@@ -16,6 +16,8 @@ import { procurementService } from '../services/procurement/src/service.ts';
 import { jobworkService } from '../services/jobwork/src/service.ts';
 import { inventoryService } from '../services/inventory/src/service.ts';
 import { crmService } from '../services/crm/src/service.ts';
+import { commerceService } from '../services/commerce/src/service.ts';
+import { fulfilmentService } from '../services/fulfilment/src/service.ts';
 import { hashPassword } from '../services/identity/src/security.ts';
 import { DEMO_PASSWORD, DEMO_USERS, linkPortalUsers, seedMasters, seedOrganisation, seedSalesTeam, seedUsers } from './seed-data.ts';
 import { seedOperations } from './seed-operations.ts';
@@ -54,7 +56,7 @@ await ensureDatabase();
 
 console.log('• Running migrations');
 const services = [];
-for (const def of [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService, inventoryService, crmService]) {
+for (const def of [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService, inventoryService, crmService, commerceService, fulfilmentService]) {
   services.push(await bootService(def, { pollMs: 200 }));
   console.log(`  ✓ ${def.name}`);
 }
@@ -94,6 +96,7 @@ if (n > 0) {
   await seedOperations(services);
   console.log('  ✓ procurement and job-work examples (requisition, RFQ, POs, receipts, invoices, job-work orders)');
   console.log('  ✓ inventory and sales examples (lots and rolls, transfers, a stock count, leads, quotations, credit)');
+  console.log('  ✓ commerce and fulfilment examples (portal orders, token payments, a dispatched shipment, an order awaiting a split)');
 }
 
 for (const s of services) await s.close();

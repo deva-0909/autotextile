@@ -2,7 +2,7 @@ import {
   ArrowRightLeft, BadgeIndianRupee, CircleDollarSign, ClipboardPen, Contact, Inbox, Map as MapIcon, PackageCheck, PackageOpen, ScanLine, Shuffle, Tag, Target,
   AlarmClock, Banknote, BookMarked, Boxes, Building2, ClipboardCheck, ClipboardList, Cog, Factory, FileSearch, FileStack, Gauge, History, KeyRound, Layers,
   LayoutDashboard, LineChart, Medal, Package, Receipt, Rocket, ScanText, ShieldAlert, ShieldCheck, ShoppingCart, Sparkles, Truck, UserCog, Users, Warehouse,
-  Workflow, type LucideIcon,
+  Workflow, Wallet, CreditCard, UserPlus, MessageSquareWarning, Undo2, Store, type LucideIcon,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon; perms?: string[]; phase?: string }
@@ -85,6 +85,26 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
+    label: 'B2B commerce',
+    items: [
+      { to: '/commerce/orders', label: 'Sales orders', icon: Store, perms: ['commerce.read'] },
+      { to: '/commerce/payments', label: 'Payments', icon: CreditCard, perms: ['commerce.read'] },
+      { to: '/commerce/wallet', label: 'Customer advances', icon: Wallet, perms: ['commerce.read'] },
+      { to: '/commerce/token-policies', label: 'Token policies', icon: BadgeIndianRupee, perms: ['commerce.read'] },
+      { to: '/commerce/registrations', label: 'Registrations', icon: UserPlus, perms: ['commerce.registration.approve', 'commerce.read'] },
+      { to: '/commerce/complaints', label: 'Complaints', icon: MessageSquareWarning, perms: ['commerce.read'] },
+    ],
+  },
+  {
+    label: 'Fulfilment',
+    items: [
+      { to: '/fulfilment', label: 'Dispatch cockpit', icon: Gauge, perms: ['fulfilment.read'] },
+      { to: '/fulfilment/allocation', label: 'Warehouse allocation', icon: Shuffle, perms: ['fulfilment.read'] },
+      { to: '/fulfilment/shipments', label: 'Shipments & freight', icon: Truck, perms: ['fulfilment.read'] },
+      { to: '/fulfilment/returns', label: 'Returns', icon: Undo2, perms: ['fulfilment.read'] },
+    ],
+  },
+  {
     label: 'Security & governance',
     items: [
       { to: '/security/users', label: 'Users', icon: UserCog, perms: ['identity.user.read'] },
@@ -97,8 +117,6 @@ export const NAV: NavGroup[] = [
   {
     label: 'Coming next',
     items: [
-      { to: '/roadmap/P6', label: 'B2B commerce', icon: Layers, phase: 'P6' },
-      { to: '/roadmap/P7', label: 'Dispatch & transport', icon: Truck, phase: 'P7' },
       { to: '/roadmap/P8', label: 'Accounting & GST', icon: Banknote, phase: 'P8' },
       { to: '/roadmap/P9', label: 'Workflow & HRMS', icon: Workflow, phase: 'P9' },
       { to: '/roadmap/P10', label: 'BI & AI', icon: Sparkles, phase: 'P10' },

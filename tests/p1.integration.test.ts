@@ -15,6 +15,8 @@ import { procurementService } from '../services/procurement/src/service.ts';
 import { jobworkService } from '../services/jobwork/src/service.ts';
 import { inventoryService } from '../services/inventory/src/service.ts';
 import { crmService } from '../services/crm/src/service.ts';
+import { commerceService } from '../services/commerce/src/service.ts';
+import { fulfilmentService } from '../services/fulfilment/src/service.ts';
 import { createGateway } from '../services/gateway/src/app.ts';
 import { hashPassword, totp } from '../services/identity/src/security.ts';
 import { DEMO_PASSWORD, DEMO_USERS, seedMasters, seedOrganisation } from '../scripts/seed-data.ts';
@@ -57,7 +59,7 @@ async function login(email: string, password = DEMO_PASSWORD) {
 before(async () => {
   await adminQuery(`DROP DATABASE IF EXISTS "${testDb}" WITH (FORCE)`);
   await adminQuery(`CREATE DATABASE "${testDb}"`);
-  for (const def of [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService, inventoryService, crmService]) {
+  for (const def of [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService, inventoryService, crmService, commerceService, fulfilmentService]) {
     services.push(await bootService(def, { databaseUrl: testUrl.toString(), pollMs: 100 }));
   }
   const [, identity] = services;

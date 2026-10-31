@@ -60,8 +60,9 @@
 /* Roll labels print on their own; everything else is hidden while printing. */
 .print-only { display: none; }
 @media print {
-  body > *:not(.print-only) { display: none !important; }
+  body:has(> .print-only) > *:not(.print-only) { display: none !important; }
   .print-only { display: grid !important; }
+  .print-only .invoice-sheet { box-shadow: none; max-width: none; }
   .roll-label { break-inside: avoid; border-color: #000; }
   @page { margin: 4mm; }
 }

@@ -42,7 +42,8 @@ export async function bootService(def: ServiceDefinition, opts: { databaseUrl?: 
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 'loopback');
-  app.use(express.json({ limit: '2mb' }));
+  // Keep the raw bytes too: signed webhooks are verified against exactly what was sent.
+  app.use(express.json({ limit: '2mb', verify: (req, _res, buf) => { (req as Request & { rawBody?: string }).rawBody = buf.toString('utf8'); } }));
   app.use((req, res, next) => {
     res.setHeader('x-request-id', (req.headers['x-request-id'] as string) ?? randomUUID());
     next();
