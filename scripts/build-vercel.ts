@@ -44,15 +44,23 @@ for (const f of runtimeFiles) {
   fs.mkdirSync(path.dirname(path.join(fn, f)), { recursive: true });
   fs.copyFileSync(path.join(root, f), path.join(fn, f));
 }
+// Each service's SQL migrations, for the one-time setup endpoint.
+for (const svc of fs.readdirSync(path.join(root, 'services'))) {
+  const dir = path.join(root, 'services', svc, 'migrations');
+  if (fs.existsSync(dir)) fs.cpSync(dir, path.join(fn, 'services', svc, 'migrations'), { recursive: true });
+}
 fs.writeFileSync(path.join(fn, '.vc-config.json'), JSON.stringify({
   runtime: 'nodejs22.x',
   handler: 'index.mjs',
   launcherType: 'Nodejs',
   shouldAddHelpers: false,
   supportsResponseStreaming: true,
-  maxDuration: 60,
+  // Generous for the one-time setup; normal requests take well under a second.
+  maxDuration: 300,
   memory: 1024,
-  environment: { APP_ROOT_DIR: '/var/task', STORAGE_DIR: '/tmp/storage', NODE_OPTIONS: '--enable-source-maps' },
+  // Next to the Supabase database (ap-south-1, Mumbai); every request makes many small queries.
+  regions: [process.env.FUNCTION_REGION ?? 'bom1'],
+  environment: { APP_ROOT_DIR: '/var/task', STORAGE_DIR: '/tmp/storage', NODE_OPTIONS: '--enable-source-maps', DB_ROLE_PER_SERVICE: '1', PG_POOL_MAX: '3' },
 }, null, 2));
 
 // 3. Routing and cron

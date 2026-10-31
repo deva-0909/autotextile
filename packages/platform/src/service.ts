@@ -7,7 +7,7 @@ import { migrate } from './migrate.ts';
 import { ensureBus, subscribe, type Consumer, type Handler } from './bus.ts';
 import { AppError, fromPg } from './errors.ts';
 import { authenticate } from './auth.ts';
-import type { ServiceName } from './config.ts';
+import { ROOT_DIR, type ServiceName } from './config.ts';
 
 export interface ServiceContext {
   name: ServiceName;
@@ -39,7 +39,9 @@ export async function bootService(def: ServiceDefinition, opts: { databaseUrl?: 
   // (which uses session locks), and events are drained explicitly instead of by a timer and LISTEN.
   if (!opts.serverless) {
     await ensureBus(pool);
-    await migrate(pool, def.name, def.migrationsDir);
+    // Bundled (APP_ROOT_DIR set), a module's own location no longer points at its migrations; they are shipped as
+    // services/<name>/migrations under the root instead.
+    await migrate(pool, def.name, process.env.APP_ROOT_DIR ? path.join(ROOT_DIR, 'services', def.name, 'migrations') : def.migrationsDir);
   }
   const ctx: ServiceContext = { name: def.name, pool };
 

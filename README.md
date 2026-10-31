@@ -157,6 +157,7 @@ See [docs/architecture.md](docs/architecture.md) for the design and
 - **Hypercare:** anyone can report a problem; P1–P4 severities with response and resolution deadlines, notifications and breach flags.
 
 Open items, parked for later, are listed in [docs/pending.md](docs/pending.md).
+Hosting the demo on Vercel and Supabase, with the role switcher: [docs/deploy-vercel-supabase.md](docs/deploy-vercel-supabase.md).
 
 ## Run it on Windows (no Docker)
 

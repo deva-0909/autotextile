@@ -13,6 +13,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { waitUntil } from '@vercel/functions';
+import pg from 'pg';
 import { type Pool, type RunningService, type ServiceName, bootService, setServicePorts } from '@erp/platform';
 import { SERVICE_DEFS } from '../scripts/services.ts';
 import { createGateway } from '../services/gateway/src/app.ts';
@@ -28,11 +29,45 @@ import { runProcurementChecks } from '../services/procurement/src/automation.ts'
 import { runContractChecks } from '../services/workflow/src/contracts.ts';
 import { runScheduled } from '../services/workflow/src/engine.ts';
 import { dispatchMessages } from '../services/workflow/src/messaging.ts';
+import { setupDatabase } from '../scripts/setup-lib.ts';
+
+/**
+ * Supabase connection: either DATABASE_URL (transaction pooler, user erp_owner.<ref>) is set, or it is worked out from
+ * SUPABASE_PROJECT_REF, SUPABASE_REGION and DB_PASSWORD by trying the region's pooler clusters (a project lives on one
+ * of them; the other answers "tenant not found"). The session-mode URL (port 5432) is used for setup only.
+ */
+let resolved: Promise<{ transaction: string; session: string }> | null = null;
+async function resolveDatabase() {
+  if (process.env.DATABASE_URL) {
+    const u = new URL(process.env.DATABASE_URL);
+    const session = new URL(u); session.port = '5432';
+    return { transaction: u.toString(), session: process.env.DATABASE_URL_SESSION ?? session.toString() };
+  }
+  const ref = process.env.SUPABASE_PROJECT_REF, region = process.env.SUPABASE_REGION, password = process.env.DB_PASSWORD;
+  if (!ref || !region || !password) throw new Error('Set DATABASE_URL, or SUPABASE_PROJECT_REF, SUPABASE_REGION and DB_PASSWORD');
+  const errors: string[] = [];
+  for (const cluster of ['aws-0', 'aws-1', 'aws-2']) {
+    const host = `${cluster}-${region}.pooler.supabase.com`;
+    const c = new pg.Client({ host, port: 6543, user: `erp_identity.${ref}`, password, database: 'postgres', ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 5_000 });
+    try {
+      await c.connect();
+      await c.end();
+      const base = `postgres://erp_owner.${ref}:${encodeURIComponent(password)}@${host}`;
+      return { transaction: `${base}:6543/postgres`, session: `${base}:5432/postgres` };
+    } catch (e) {
+      errors.push(`${host}: ${(e as Error).message}`);
+      await c.end().catch(() => {});
+    }
+  }
+  throw new Error(`No Supabase pooler accepted the login: ${errors.join('; ')}`);
+}
+const database = () => (resolved ??= resolveDatabase().catch((e) => { resolved = null; throw e; }));
 
 type Booted = { gateway: ReturnType<typeof createGateway>; services: RunningService[] };
 let booted: Promise<Booted> | null = null;
 
 async function boot(): Promise<Booted> {
+  process.env.DATABASE_URL = (await database()).transaction;
   const services = await Promise.all(SERVICE_DEFS.map((def) => bootService(def, { serverless: true })));
   const ports: Partial<Record<ServiceName, number>> = {};
   await Promise.all(services.map((s) => new Promise<void>((resolve) => {
@@ -85,7 +120,6 @@ async function runChecks(services: RunningService[], force = false) {
 }
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
-  const { gateway, services } = await (booted ??= boot().catch((e) => { booted = null; throw e; }));
   // The route sends /api/<rest> here as /api?__path=<rest>; put the original path back for the gateway.
   const u = new URL(req.url ?? '/', 'http://x');
   const rest = u.searchParams.get('__path');
@@ -94,6 +128,29 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     req.url = `/api/${rest}${u.search}`;
   }
   const url = req.url ?? '/';
+  // One-time (repeatable) schema and demo data load, streamed back as it runs: POST /api/_setup[?reset=1]
+  // with `Authorization: Bearer $SETUP_SECRET`. Disabled when SETUP_SECRET is not set.
+  if (url.startsWith('/api/_setup')) {
+    if (!process.env.SETUP_SECRET || req.method !== 'POST' || req.headers.authorization !== `Bearer ${process.env.SETUP_SECRET}`) {
+      res.statusCode = 404;
+      return res.end();
+    }
+    res.setHeader('content-type', 'text/plain; charset=utf-8');
+    const db = await database();
+    const transaction = process.env.DATABASE_URL;
+    process.env.DATABASE_URL = db.session;
+    try {
+      await setupDatabase({ reset: new URL(url, 'http://x').searchParams.get('reset') === '1', log: (line) => void res.write(`${line}\n`) });
+      res.end('✔ setup complete\n');
+    } catch (e) {
+      res.end(`✖ setup failed: ${(e as Error).stack ?? e}\n`);
+    } finally {
+      if (transaction === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = transaction;
+    }
+    return;
+  }
+  const { gateway, services } = await (booted ??= boot().catch((e) => { booted = null; throw e; }));
   if (url.startsWith('/api/_cron')) {
     if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
       res.statusCode = 401;
