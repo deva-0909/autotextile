@@ -79,7 +79,13 @@ export function MenuAccessPage() {
     toast({ tone: 'success', title: 'Menu saved', body: 'People see the change the next time they sign in or within 15 minutes.' });
   };
 
-  const list = tab === 'roles' ? staffRoles.map((r) => ({ id: r.code, name: r.name, sub: `${r.user_count} ${r.user_count === 1 ? 'person' : 'people'}`, badge: r.code === 'super_admin' || !roleMenu(r.code) ? 'All pages' : `${roleMenu(r.code)!.length} pages` }))
+  // Pages a role can actually open from its menu: in its menu and covered by its permissions.
+  const pagesOf = (r: Role) => {
+    const ps = new Set(r.permissions.map((p) => p.code));
+    const menu = roleMenu(r.code)!;
+    return NAV.flatMap((g) => g.items).filter((i) => !ALWAYS_SHOWN.includes(i.to) && menu.includes(i.to) && (!i.perms || i.perms.some((p) => ps.has(p)))).length;
+  };
+  const list = tab === 'roles' ? staffRoles.map((r) => ({ id: r.code, name: r.name, sub: `${r.user_count} ${r.user_count === 1 ? 'person' : 'people'}`, badge: r.code === 'super_admin' || !roleMenu(r.code) ? 'All pages' : `${pagesOf(r)} pages` }))
     : people.map((u) => ({ id: u.id, name: u.name, sub: `${u.roles.map((r) => r.name).join(', ')}${u.parent_name ? ` · sub-user of ${u.parent_name}` : ''}`, badge: userMenu(u.id) ? 'Own menu' : 'As role' }));
   const selectedId = tab === 'roles' ? selRole?.code : selUser?.id;
 
