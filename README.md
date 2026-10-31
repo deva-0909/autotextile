@@ -156,6 +156,8 @@ See [docs/architecture.md](docs/architecture.md) for the design and
 - **Cutover and go/no-go:** a 19-step checklist (prepare, freeze, migrate, verify, go-live, stabilise) with owners; a readiness page that checks UAT, defects, migration sign-offs, training, cutover and a backup restore-tested in the last 24 hours; the decision is recorded with its rollback plan.
 - **Hypercare:** anyone can report a problem; P1–P4 severities with response and resolution deadlines, notifications and breach flags.
 
+Open items, parked for later, are listed in [docs/pending.md](docs/pending.md).
+
 ## Run it on Windows (no Docker)
 
 ### 1. Install the prerequisites (one time)
