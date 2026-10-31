@@ -198,7 +198,7 @@ async function readiness(req: Parameters<Parameters<Router['get']>[1]>[0], pool:
   const sys = await callAsUser<{ backups: { status: string; restore_status: string | null; finished_at: string | null }[] }>(String(req.headers.authorization ?? ''), 'insights', 'GET', '/system/health').catch(() => null);
   const lastBackup = sys?.backups.find((b) => b.status === 'completed');
   // Open POs and orders are optional (a business may have none at cutover), but once started they must be signed off.
-  const migObjects = ['parties', 'opening_balances', 'opening_gl', 'opening_stock', ...['open_pos', 'open_orders', 'open_job_work', 'gst_credit'].filter((t) => mig.some((m) => m.object_type === t))];
+  const migObjects = ['parties', 'opening_balances', 'opening_gl', 'opening_stock', ...['open_pos', 'open_orders', 'open_job_work', 'gst_credit', 'gst_cash', 'itc_reversals'].filter((t) => mig.some((m) => m.object_type === t))];
   const criteria = [
     { key: 'uat', label: 'Every UAT scenario passed or waived', ok: !!uat && uat.total > 0 && uat.done === uat.total, detail: `${uat?.done ?? 0} of ${uat?.total ?? 0}; ${uat?.failed ?? 0} failed or blocked` },
     { key: 'defects', label: 'No open S1 or S2 defects', ok: def!.s12 === 0, detail: `${def!.s12} open S1/S2, ${def!.open} open in all` },

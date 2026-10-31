@@ -194,6 +194,51 @@ Shree Ambica Knitters,JWC/0391,2026-03-09,RFD,2026-04-08,SJ-160-NVY,10,246,,`;
     assert.equal((await h.call(t.accounts!, 'POST', '/finance/gst/opening-credit', { gstin: book.gstin, as_of: month, igst: 1, cgst: 0, sgst: 0 })).status, 409, 'different figures are refused');
     assert.ok((await h.ok(t.accounts!, 'GET', '/finance/reports/trial-balance?from=2020-04-01')).balanced);
   });
+
+  test('GST cash ledger and pending ITC reversals: cash pays tax head by head; reversals hit 4(B) in their month and Rule 37 credit is reclaimed', async () => {
+    const book = (await h.ok(t.accounts!, 'GET', '/finance/books')).find((x: { is_primary: boolean }) => x.is_primary);
+    const month = new Date().toISOString().slice(0, 7);
+    const nx = new Date(); nx.setUTCDate(1); nx.setUTCMonth(nx.getUTCMonth() + 1);
+    const next = nx.toISOString().slice(0, 7);
+    const old = new Date(Date.now() - 200 * 86_400_000).toISOString().slice(0, 10);
+    const recent = new Date(Date.now() - 20 * 86_400_000).toISOString().slice(0, 10);
+
+    const cash = await load(t.accounts!, 'gst_cash', `gstin,as_of_month,igst,cgst,sgst\n${book.gstin},${month},12000,3500,3500`);
+    const ci = await h.ok(t.accounts!, 'POST', `/golive/migration/batches/${cash.id}/import`);
+    assert.equal(ci.erp_total, 19000);
+
+    const csv = `gstin,supplier,doc_no,doc_date,reason,reverse_in_month,igst,cgst,sgst
+${book.gstin},Shree Ambica Knitters,AMB/771,${old},rule_37,${month},0,2950,2950
+${book.gstin},Common services,EXP/12,${recent},rule_42_43,${month},400,0,0
+${book.gstin},Shree Ambica Knitters,AMB/799,${recent},rule_37,${month},0,100,100
+${book.gstin},Shree Ambica Knitters,AMB/800,${recent},other,${month},0,0,0`;
+    const b = await load(t.accounts!, 'itc_reversals', csv);
+    assert.equal(b.valid, 2);
+    const rows = (await h.ok(t.accounts!, 'GET', `/golive/migration/batches/${b.id}`)).rows;
+    assert.match(rows.find((r: { row_no: number }) => r.row_no === 4).errors[0], /180 days/);
+    assert.match(rows.find((r: { row_no: number }) => r.row_no === 5).errors.join(' '), /credit to reverse/);
+    const imp = await h.ok(t.accounts!, 'POST', `/golive/migration/batches/${b.id}/import`);
+    assert.equal(imp.erp_total, 6300, JSON.stringify((await h.ok(t.accounts!, 'GET', `/golive/migration/batches/${b.id}`)).rows.map((r: { status: string; error: string }) => [r.status, r.error])));
+
+    const g = (await h.ok(t.accounts!, 'GET', `/finance/gst/returns?month=${month}&book=${book.id}`)).gstr3b;
+    assert.deepEqual(g.cash_ledger_brought_forward, { igst: 12000, cgst: 3500, sgst: 3500 });
+    assert.deepEqual(g.itc_reversed_4b1, { igst: 400, cgst: 0, sgst: 0 });
+    assert.deepEqual(g.itc_reversed_4b2, { igst: 0, cgst: 2950, sgst: 2950 });
+    assert.equal(g.net_itc_4c.cgst, Math.round((g.itc_4a.cgst - 2950) * 100) / 100);
+    for (const hd of ['igst', 'cgst', 'sgst']) {
+      assert.ok(g.paid_from_cash_ledger[hd] <= g.cash_ledger_brought_forward[hd], 'cash is used within its own head');
+      assert.equal(Math.round((g.cash_ledger_brought_forward[hd] - g.paid_from_cash_ledger[hd]) * 100) / 100, g.cash_ledger_carried_forward[hd]);
+    }
+
+    const rev = (await h.ok(t.accounts!, 'GET', `/finance/gst/itc-reversals?book=${book.id}`)).find((r: { doc_no: string }) => r.doc_no === 'AMB/771');
+    assert.equal((await h.call(t.accounts!, 'POST', `/finance/gst/itc-reversals/${(await h.ok(t.accounts!, 'GET', `/finance/gst/itc-reversals?book=${book.id}`)).find((r: { reason: string }) => r.reason === 'rule_42_43').id}/reclaim`, { period: next })).status, 409, 'only Rule 37 credit comes back');
+    await h.ok(t.accounts!, 'POST', `/finance/gst/itc-reversals/${rev.id}/reclaim`, { period: next });
+    const g2 = (await h.ok(t.accounts!, 'GET', `/finance/gst/returns?month=${next}&book=${book.id}`)).gstr3b;
+    assert.deepEqual(g2.itc_reclaimed, { igst: 0, cgst: 2950, sgst: 2950 });
+    assert.deepEqual(g2.credit_brought_forward, g.credit_carried_forward, 'credit rolls into the next month');
+    assert.deepEqual(g2.cash_ledger_brought_forward, g.cash_ledger_carried_forward, 'cash ledger rolls into the next month');
+    assert.ok((await h.ok(t.accounts!, 'GET', '/finance/reports/trial-balance?from=2020-04-01')).balanced);
+  });
 });
 
 describe('P11 UAT, training, cutover and hypercare', () => {

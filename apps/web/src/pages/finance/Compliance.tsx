@@ -168,9 +168,11 @@ function AddBankModal({ open, onClose, onDone }: { open: boolean; onClose: () =>
 
 // ---------------------------------------------------------------- GST
 interface Tot { taxable: number; cgst: number; sgst: number; igst: number }
+type Heads = Omit<Tot, 'taxable'>;
 interface GstRet { book: { id: string; gstin: string; code: string }; month: string;
   gstr1: { b2b: (Tot & { doc_no: string; doc_date: string; party_name: string; party_gstin: string; place_of_supply: string; transfer: boolean; value: number })[]; b2cs: (Tot & { place_of_supply: string; rate: number })[]; cdnr: (Tot & { doc_no: string; doc_date: string; party_name: string; party_gstin: string | null })[]; hsn: (Tot & { hsn: string; rate: number; qty: number })[] };
-  gstr3b: { outward_3_1_a: Tot; reverse_charge_3_1_d: Tot; itc_4a: Tot; liability: Omit<Tot, 'taxable'>; cash_payable: Omit<Tot, 'taxable'>; credit_brought_forward: Omit<Tot, 'taxable'>; credit_carried_forward: Omit<Tot, 'taxable'> };
+  gstr3b: { outward_3_1_a: Tot; reverse_charge_3_1_d: Tot; itc_4a: Tot; itc_reclaimed: Heads; itc_reversed_4b1: Heads; itc_reversed_4b2: Heads; net_itc_4c: Heads; liability: Heads; cash_payable: Heads; credit_brought_forward: Heads; credit_carried_forward: Heads;
+    cash_ledger_brought_forward: Heads; paid_from_cash_ledger: Heads; cash_ledger_carried_forward: Heads };
   inward: (Tot & { id: number; doc_no: string; doc_date: string; party_name: string; party_gstin: string | null; doc_type: string })[]; itc_reconciliation: { lines: number; matched: number; issues: number } }
 const taxCols = <T extends Tot>() => [
   { key: 't', header: 'Taxable', align: 'right' as const, render: (r: T) => fmtAmt(r.taxable) },
@@ -199,18 +201,24 @@ export function GstPage() {
             <TaxGrid rows={[['(a) Outward taxable supplies (net of credit notes)', g.gstr3b.outward_3_1_a], ['(d) Inward supplies liable to reverse charge', g.gstr3b.reverse_charge_3_1_d]]} />
           </Card>
           <Card title="4. Eligible input tax credit">
-            <TaxGrid rows={[['(A)(5) All other ITC', g.gstr3b.itc_4a]]} />
+            <TaxGrid rows={[['(A)(5) All other ITC', g.gstr3b.itc_4a], ...(hasAny(g.gstr3b.itc_reclaimed) ? [['(A)(5) ITC reclaimed (reported in 4(D)(1))', g.gstr3b.itc_reclaimed] as [string, Heads]] : []),
+              ['(B)(1) Reversed — Rules 38, 42 and 43', g.gstr3b.itc_reversed_4b1], ['(B)(2) Reversed — others (incl. Rule 37)', g.gstr3b.itc_reversed_4b2], ['(C) Net ITC available', g.gstr3b.net_itc_4c]]} />
             {g.itc_reconciliation.lines > 0 ? <p className="mt-3 text-[12.5px] text-slate-600">GSTR-2B: {g.itc_reconciliation.matched} of {g.itc_reconciliation.lines} lines match; {g.itc_reconciliation.issues} need attention.</p> : <p className="mt-3 text-[12.5px] text-amber-700">GSTR-2B for this month is not imported yet — claim only credit that appears in 2B.</p>}
           </Card>
-          <Card className="lg:col-span-2" title="Payment of tax" description="Credit is used in the order the law prescribes: IGST credit against IGST, then CGST, then SGST; CGST and SGST credit against their own head, then IGST.">
-            <SimpleTable rows={(['igst', 'cgst', 'sgst'] as const).map((h) => ({ h, liab: g.gstr3b.liability[h], cash: g.gstr3b.cash_payable[h], bf: g.gstr3b.credit_brought_forward[h], cf: g.gstr3b.credit_carried_forward[h] }))} rowKey={(r) => r.h} columns={[
+          <Card className="lg:col-span-2" title="Payment of tax" description="Credit is used in the order the law prescribes: IGST credit against IGST, then CGST, then SGST; CGST and SGST credit against their own head, then IGST. The cash ledger then pays each head from its own balance (b/f brought forward, c/f carried forward).">
+            <SimpleTable rows={(['igst', 'cgst', 'sgst'] as const).map((h) => ({ h, liab: g.gstr3b.liability[h], cash: g.gstr3b.cash_payable[h], bf: g.gstr3b.credit_brought_forward[h], cf: g.gstr3b.credit_carried_forward[h], led: g.gstr3b.paid_from_cash_ledger[h], ledBf: g.gstr3b.cash_ledger_brought_forward[h], ledCf: g.gstr3b.cash_ledger_carried_forward[h] }))} rowKey={(r) => r.h} columns={[
               { key: 'h', header: 'Tax', render: (r) => r.h.toUpperCase() },
-              { key: 'b', header: 'Credit brought forward', align: 'right', render: (r) => fmtAmt(r.bf, false) },
+              { key: 'b', header: 'Credit b/f', align: 'right', render: (r) => fmtAmt(r.bf, false) },
               { key: 'l', header: 'Liability', align: 'right', render: (r) => fmtAmt(r.liab, false) },
-              { key: 'u', header: 'Paid through credit', align: 'right', render: (r) => fmtAmt(r.liab - r.cash, false) },
-              { key: 'c', header: 'Payable in cash', align: 'right', render: (r) => <span className="font-semibold">{fmtAmt(r.cash, false)}</span> },
-              { key: 'f', header: 'Credit carried forward', align: 'right', render: (r) => fmtAmt(r.cf, false) },
+              { key: 'u', header: 'Via credit', align: 'right', render: (r) => fmtAmt(r.liab - r.cash - r.led, false) },
+              { key: 'k', header: 'Via cash ledger', align: 'right', render: (r) => <span title={`Balance ${fmtAmt(r.ledBf, false)} → ${fmtAmt(r.ledCf, false)}`}>{fmtAmt(r.led, false)}</span> },
+              { key: 'c', header: 'Cash to deposit', align: 'right', render: (r) => <span className="font-semibold">{fmtAmt(r.cash, false)}</span> },
+              { key: 'f', header: 'Credit c/f', align: 'right', render: (r) => fmtAmt(r.cf, false) },
+              { key: 'kf', header: 'Cash ledger c/f', align: 'right', render: (r) => fmtAmt(r.ledCf, false) },
             ]} />
+          </Card>
+          <Card className="lg:col-span-2" title="ITC reversals" description="Credit reversed in table 4(B) month by month. Rule 37 reversals (supplier unpaid after 180 days) come back when the supplier is paid." padded={false}>
+            <ReversalList bookId={bookId} />
           </Card>
         </div>
       ) : tab === 'gstr1' ? (
@@ -243,10 +251,37 @@ export function GstPage() {
   );
 }
 
-function TaxGrid({ rows }: { rows: [string, Tot][] }) {
+function TaxGrid({ rows }: { rows: [string, Tot | Heads][] }) {
   return (
     <table className="w-full text-[13px]"><thead><tr className="text-left text-[11.5px] text-slate-500 uppercase"><th className="py-1 font-semibold">Nature</th>{['Taxable', 'IGST', 'CGST', 'SGST'].map((h) => <th key={h} className="py-1 pl-4 text-right font-semibold">{h}</th>)}</tr></thead>
-      <tbody>{rows.map(([l, t]) => <tr key={l} className="border-t border-slate-100"><td className="py-2 pr-3">{l}</td>{[t.taxable, t.igst, t.cgst, t.sgst].map((v, i) => <td key={i} className="py-2 pl-4 text-right whitespace-nowrap tabular">{fmtAmt(v, false)}</td>)}</tr>)}</tbody></table>
+      <tbody>{rows.map(([l, t]) => <tr key={l} className="border-t border-slate-100"><td className="py-2 pr-3">{l}</td>{['taxable' in t ? t.taxable : null, t.igst, t.cgst, t.sgst].map((v, i) => <td key={i} className="py-2 pl-4 text-right whitespace-nowrap tabular">{v === null ? <span className="text-slate-400">—</span> : fmtAmt(v, false)}</td>)}</tr>)}</tbody></table>
+  );
+}
+const hasAny = (h: Heads) => h.igst + h.cgst + h.sgst > 0;
+
+interface Reversal { id: string; gstin: string; supplier_name: string; doc_no: string; doc_date: string; reason: string; period: string; reclaim_period: string | null; igst: number; cgst: number; sgst: number; status: string; voucher_number: string | null; reclaim_voucher_number: string | null }
+function ReversalList({ bookId }: { bookId: string }) {
+  const { can } = useAuth();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ['fin-itc-rev', bookId], queryFn: () => api.get<Reversal[]>(`/finance/gst/itc-reversals?book=${bookId}`), enabled: !!bookId });
+  const [sel, setSel] = useState<Reversal | null>(null);
+  const [period, setPeriod] = useState(thisMonth());
+  if (!q.data) return <Skeleton className="m-5 h-24" />;
+  return (
+    <>
+      <SimpleTable rows={q.data} rowKey={(r) => r.id} empty={<EmptyState title="No ITC reversals" />} columns={[
+        { key: 'b', header: 'Bill', render: (r) => <div><p className="font-mono text-[12.5px]">{r.doc_no}</p><p className="text-[11.5px] text-slate-500">{r.supplier_name} · {fmtDate(r.doc_date)}</p></div> },
+        { key: 'r', header: 'Reason', render: (r) => r.reason === 'rule_37' ? 'Rule 37 (unpaid)' : r.reason === 'rule_42_43' ? 'Rule 42/43' : 'Other' },
+        { key: 'p', header: 'Reversed in', render: (r) => <div><p>{r.period.slice(0, 7)}</p><p className="font-mono text-[11.5px] text-slate-500">{r.voucher_number}</p></div> },
+        { key: 't', header: 'Credit', align: 'right', render: (r) => fmtAmt(r.igst + r.cgst + r.sgst, false) },
+        { key: 's', header: 'Status', render: (r) => r.status === 'reclaimed' ? <Badge tone="success">Reclaimed {r.reclaim_period?.slice(0, 7)}</Badge> : r.reason === 'rule_37' && can('finance.gst.manage') ? <Button size="sm" onClick={() => { setSel(r); setPeriod(thisMonth()); }}>Reclaim</Button> : <Badge tone="neutral">Reversed</Badge> },
+      ]} />
+      <Modal open={!!sel} onClose={() => setSel(null)} title={`Reclaim credit on ${sel?.doc_no ?? ''}`} description="Use this once the supplier has been paid. The credit comes back in the month of payment."
+        footer={<><Button onClick={() => setSel(null)}>Cancel</Button><Button variant="primary" onClick={async () => { try { await api.post(`/finance/gst/itc-reversals/${sel!.id}/reclaim`, { period }); setSel(null); invalidatePrefix(qc, 'fin-'); } catch (e) { toast({ tone: 'error', title: 'Not reclaimed', body: errMsg(e) }); } }}>Reclaim</Button></>}>
+        <Input label="Month the supplier was paid" type="month" value={period} onChange={(e) => setPeriod(e.target.value)} />
+      </Modal>
+    </>
   );
 }
 

@@ -131,6 +131,10 @@ Make synchronous calls first, then audit and publish.
   mill has already acknowledged (jobwork `POST /orders/opening`); the statutory due date counts from the original
   challan date. **GST credit carried forward** is one row per GSTIN (finance `POST /gst/opening-credit`): it posts
   Dr Input IGST/CGST/SGST, Cr Opening difference, and GSTR-3B rolls it forward through every month from its month on.
+  The **cash ledger** balance (`POST /gst/opening-cash`) posts to *GST electronic cash ledger*; 3B uses it after
+  credit, each head only from its own balance. **ITC reversals** (`POST /gst/itc-reversals`) post out of Input GST in
+  their month (Rule 37 to *ITC reversed — reclaimable*, others to expense) and appear in 4(B); a Rule 37 reclaim posts
+  the credit back and shows in 4(A)(5)/4(D)(1) of the month of payment.
 - **Reconciliation reads back.** After loading, golive reads the created records (parties, opening vouchers by
   number, inwards by source reference and weighed kg) and compares them with the file’s control totals. Sign-off must
   come from a different user from the one who loaded the batch.
