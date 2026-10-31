@@ -152,6 +152,12 @@ Make synchronous calls first, then audit and publish.
   the portal puts it) and settled later. The portal's figure can replace the calculation, with a reason.
 - Unpaid months past their due date show interest so far on the GST screen, and an hourly check raises a critical
   alert, from the month tracking starts (the first recorded payment or the GST carry-over month).
+- **Late fee** (Section 47; caps from Notifications 19 and 20/2021-CT) for GSTR-3B and GSTR-1: ₹25 CGST + ₹25 SGST a day
+  (₹10 + ₹10 for a nil return), capped per return at ₹500 (nil), ₹2,000 (previous-year aggregate turnover up to
+  ₹1.5 crore), ₹5,000 (up to ₹5 crore) or ₹10,000; none under IGST. Turnover comes from
+  `finance.aggregate_turnover_prev_fy`, or from ERP sales across all GSTINs when that is 0. GSTR-3B's fee is paid with
+  that return (settled when the filing is recorded); GSTR-1's (`POST /gst/gstr1-filings`, due on `finance.gstr1_due_day`)
+  is placed in the next GSTR-3B not yet filed. Both post Dr *Late fee for GST returns*; overdue GSTR-1 raises an alert.
 - **Reconciliation reads back.** After loading, golive reads the created records (parties, opening vouchers by
   number, inwards by source reference and weighed kg) and compares them with the file’s control totals. Sign-off must
   come from a different user from the one who loaded the batch.

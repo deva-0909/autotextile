@@ -173,7 +173,7 @@ interface GstRet { book: { id: string; gstin: string; code: string }; month: str
   gstr1: { b2b: (Tot & { doc_no: string; doc_date: string; party_name: string; party_gstin: string; place_of_supply: string; transfer: boolean; value: number })[]; b2cs: (Tot & { place_of_supply: string; rate: number })[]; cdnr: (Tot & { doc_no: string; doc_date: string; party_name: string; party_gstin: string | null })[]; hsn: (Tot & { hsn: string; rate: number; qty: number })[] };
   gstr3b: { outward_3_1_a: Tot; reverse_charge_3_1_d: Tot; itc_4a: Tot; itc_reclaimed: Heads; itc_reversed_4b1: Heads; itc_reversed_4b2: Heads; net_itc_4c: Heads; liability: Heads; cash_payable: Heads; credit_brought_forward: Heads; credit_carried_forward: Heads;
     cash_ledger_brought_forward: Heads; paid_from_cash_ledger: Heads; cash_ledger_carried_forward: Heads; interest_5_1: Heads; late_fee_5_1: Heads };
-  payment: Payment;
+  payment: Payment; gstr1_filing: Gstr1Filing;
   inward: (Tot & { id: number; doc_no: string; doc_date: string; party_name: string; party_gstin: string | null; doc_type: string })[]; itc_reconciliation: { lines: number; matched: number; issues: number } }
 const taxCols = <T extends Tot>() => [
   { key: 't', header: 'Taxable', align: 'right' as const, render: (r: T) => fmtAmt(r.taxable) },
@@ -218,7 +218,7 @@ export function GstPage() {
               { key: 'kf', header: 'Cash ledger c/f', align: 'right', render: (r) => fmtAmt(r.ledCf, false) },
             ]} />
           </Card>
-          <PaymentCard bookId={bookId} month={month} p={g.payment} cashDue={g.gstr3b.cash_payable} />
+          <PaymentCard bookId={bookId} month={month} p={g.payment} g1={g.gstr1_filing} cashDue={g.gstr3b.cash_payable} />
           <Card className="lg:col-span-2" title="ITC reversals" description="Credit reversed in table 4(B) month by month. Rule 37 reversals (supplier unpaid after 180 days) come back when the supplier is paid." padded={false}>
             <ReversalList bookId={bookId} />
           </Card>
@@ -269,47 +269,80 @@ function TaxGrid({ rows }: { rows: [string, Tot | Heads][] }) {
 }
 const hasAny = (h: Heads) => h.igst + h.cgst + h.sgst > 0;
 
-interface Payment { status: 'paid' | 'not_due' | 'overdue' | 'untracked'; due_date: string; days_late?: number; interest_so_far?: Heads; rate_pct?: number; paid_on?: string; arn?: string | null;
+interface LateFee { late_fee_so_far?: Heads; late_fee_cap?: number; late_fee_per_day?: number; nil_return?: boolean; late_fee_cgst?: number; late_fee_sgst?: number; late_fee_overridden?: boolean; late_fee_reason?: string | null; late_fee_status?: string | null }
+interface Payment extends LateFee { status: 'paid' | 'not_due' | 'overdue' | 'untracked'; due_date: string; days_late?: number; interest_so_far?: Heads; rate_pct?: number; paid_on?: string; filed_on?: string; filing_days_late?: number; arn?: string | null;
   interest_igst?: number; interest_cgst?: number; interest_sgst?: number; interest_overridden?: boolean; override_reason?: string | null; interest_with_return?: boolean; interest_status?: string | null }
-function PaymentCard({ bookId, month, p, cashDue }: { bookId: string; month: string; p: Payment; cashDue: Heads }) {
+interface Gstr1Filing extends LateFee { status: 'filed' | 'not_due' | 'overdue' | 'untracked'; due_date: string; days_late?: number; filed_on?: string; arn?: string | null; late_fee_in?: string | null }
+const sumH = (h: Heads) => h.igst + h.cgst + h.sgst;
+const feeOf = (x: LateFee) => (x.late_fee_cgst ?? 0) + (x.late_fee_sgst ?? 0);
+
+function PaymentCard({ bookId, month, p, g1, cashDue }: { bookId: string; month: string; p: Payment; g1: Gstr1Filing; cashDue: Heads }) {
   const { can } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
-  const [open, setOpen] = useState(false);
-  const [v, setV] = useState({ paid_on: new Date().toISOString().slice(0, 10), arn: '', challan: '', withReturn: true, override: false, igst: '', cgst: '', sgst: '', reason: '' });
-  const sum = (h: Heads) => h.igst + h.cgst + h.sgst;
-  const interest = p.status === 'paid' ? (p.interest_igst ?? 0) + (p.interest_cgst ?? 0) + (p.interest_sgst ?? 0) : 0;
+  const [open, setOpen] = useState<'3b' | 'r1' | null>(null);
+  const blank = { paid_on: new Date().toISOString().slice(0, 10), filed_on: '', arn: '', challan: '', withReturn: true, override: false, igst: '', cgst: '', sgst: '', reason: '', feeOverride: false, feeCgst: '', feeSgst: '', feeReason: '' };
+  const [v, setV] = useState(blank);
+  const past = month < new Date().toISOString().slice(0, 7);
+  const manage = can('finance.gst.manage') && past;
+  const interest = (p.interest_igst ?? 0) + (p.interest_cgst ?? 0) + (p.interest_sgst ?? 0);
+  const feeOverride = v.feeOverride ? { late_fee_override: { cgst: Number(v.feeCgst || 0), sgst: Number(v.feeSgst || 0) }, late_fee_reason: v.feeReason } : {};
+  const submit = async () => {
+    try {
+      if (open === '3b') {
+        const r = await api.post<{ days_late: number; filing_days_late: number; interest: Heads; late_fee: Heads }>('/finance/gst/payments', { book_id: bookId, period: month, paid_on: v.paid_on, filed_on: v.filed_on || undefined, arn: v.arn || null, challan_ref: v.challan || null, interest_with_return: v.withReturn,
+          interest_override: v.override ? { igst: Number(v.igst || 0), cgst: Number(v.cgst || 0), sgst: Number(v.sgst || 0) } : undefined, override_reason: v.override ? v.reason : null, ...feeOverride });
+        toast({ tone: 'success', title: r.filing_days_late ? `Recorded · filed ${r.filing_days_late} days late` : 'Recorded · on time', body: [sumH(r.interest) ? `Interest ${fmtAmt(sumH(r.interest), false)}` : '', sumH(r.late_fee) ? `Late fee ${fmtAmt(sumH(r.late_fee), false)}` : ''].filter(Boolean).join(' · ') || undefined });
+      } else {
+        const r = await api.post<{ days_late: number; late_fee: Heads; pay_in_month: string }>('/finance/gst/gstr1-filings', { book_id: bookId, period: month, filed_on: v.paid_on, arn: v.arn || null, ...feeOverride });
+        toast({ tone: 'success', title: r.days_late ? `Recorded · ${r.days_late} days late` : 'Recorded · on time', body: sumH(r.late_fee) ? `Late fee ${fmtAmt(sumH(r.late_fee), false)}, payable with GSTR-3B ${r.pay_in_month.slice(0, 7)}` : undefined });
+      }
+      setOpen(null); invalidatePrefix(qc, 'fin-');
+    } catch (e) { toast({ tone: 'error', title: 'Not recorded', body: errMsg(e) }); }
+  };
+  const feeLine = (x: LateFee, where: string) => feeOf(x) > 0 ? <p>Late fee {fmtAmt(feeOf(x), false)}{x.nil_return ? ' (nil return)' : ''} {x.late_fee_overridden ? `(${x.late_fee_reason})` : ''} — {x.late_fee_status === 'settled' ? 'paid' : where}</p> : null;
+  const overdueFee = (x: LateFee) => x.late_fee_so_far ? <>Late fee so far {fmtAmt(sumH(x.late_fee_so_far), false)} ({fmtAmt(x.late_fee_per_day ?? 0, false)} a day{x.nil_return ? ', nil return' : ''}, capped at {fmtAmt(x.late_fee_cap ?? 0, false)}).</> : null;
   return (
-    <Card className="lg:col-span-2" title="Payment and interest" description={`Due by ${fmtDate(p.due_date)}. Paid later, interest at 18% a year runs on the tax paid in cash (cash already in the cash ledger is not charged).`}
-      actions={p.status !== 'paid' && month < new Date().toISOString().slice(0, 7) && can('finance.gst.manage') ? <Button size="sm" variant="primary" onClick={() => setOpen(true)}>Record payment</Button> : undefined}>
-      {p.status === 'paid' ? (
-        <div className="space-y-1 text-[13px]">
-          <p>Paid on <b>{fmtDate(p.paid_on!)}</b>{p.arn ? <> · ARN <span className="font-mono">{p.arn}</span></> : null}{p.days_late ? <> · <span className="text-rose-700">{p.days_late} days late</span></> : <> · on time</>}</p>
-          {interest > 0 && <p>Interest {fmtAmt(interest, false)} {p.interest_overridden ? `(as on the GST portal: ${p.override_reason})` : ''} — {p.interest_status === 'settled' ? 'paid' : p.interest_with_return ? 'paid with this return' : 'owed; it appears in the next return’s table 5.1 and in the list below'}</p>}
+    <Card className="lg:col-span-2" title="Filing, payment, interest and late fee" description={`GSTR-1 due by ${fmtDate(g1.due_date)}; GSTR-3B due by ${fmtDate(p.due_date)}. Late filing costs a late fee per day (CGST and SGST, capped by turnover); late payment costs interest at 18% a year on the tax paid in cash.`}>
+      <div className="space-y-4 text-[13px]">
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-3"><p className="font-semibold">GSTR-1</p>{g1.status !== 'filed' && manage && <Button size="sm" onClick={() => { setV(blank); setOpen('r1'); }}>Record GSTR-1 filing</Button>}</div>
+          {g1.status === 'filed' ? <div className="space-y-0.5"><p>Filed on <b>{fmtDate(g1.filed_on!)}</b>{g1.arn ? <> · ARN <span className="font-mono">{g1.arn}</span></> : null}{g1.days_late ? <> · <span className="text-rose-700">{g1.days_late} days late</span></> : <> · on time</>}</p>{feeLine(g1, `owed; levied in GSTR-3B ${g1.late_fee_in?.slice(0, 7) ?? ''} (table 5.1)`)}</div>
+            : g1.status === 'overdue' ? <Notice tone="warning" title={`${g1.days_late} days late — not recorded as filed`}>{overdueFee(g1)}</Notice>
+            : g1.status === 'untracked' ? <p className="text-slate-600">No filing recorded (before tracking starts).</p> : <p className="text-slate-600">Not due yet.</p>}
         </div>
-      ) : p.status === 'overdue' && sum(cashDue) === 0 ? (
-        <Notice tone="warning" title={`Due ${p.days_late} days ago — not recorded as filed`}>Nothing is payable in cash this month, so no interest runs; a late fee still applies if the return itself is filed late.</Notice>
-      ) : p.status === 'overdue' ? (
-        <Notice tone="danger" title={`${p.days_late} days late — interest so far ${fmtAmt(sum(p.interest_so_far!), false)}`}>Cash due {fmtAmt(sum(cashDue), false)}. Interest grows by about {fmtAmt(Math.round((sum(cashDue) * (p.rate_pct ?? 18)) / 100 / 365), false)} a day until the tax is paid.</Notice>
-      ) : p.status === 'untracked' ? <p className="text-[13px] text-slate-600">No payment recorded. Payments are tracked from the GST carry-over month or the first payment you record; record this one if it was paid late, to work out the interest.</p>
-      : <p className="text-[13px] text-slate-600">Not due yet. Cash to deposit so far: {fmtAmt(sum(cashDue), false)}.</p>}
-      <Modal open={open} onClose={() => setOpen(false)} title={`Record payment of GSTR-3B ${month}`} description="Interest is worked out from the payment date. If the GST portal shows a different figure, enter the portal’s amount."
-        footer={<><Button onClick={() => setOpen(false)}>Cancel</Button><Button variant="primary" onClick={async () => {
-          try {
-            const r = await api.post<{ days_late: number; interest: Heads }>('/finance/gst/payments', { book_id: bookId, period: month, paid_on: v.paid_on, arn: v.arn || null, challan_ref: v.challan || null, interest_with_return: v.withReturn,
-              interest_override: v.override ? { igst: Number(v.igst || 0), cgst: Number(v.cgst || 0), sgst: Number(v.sgst || 0) } : undefined, override_reason: v.override ? v.reason : null });
-            setOpen(false); invalidatePrefix(qc, 'fin-');
-            toast({ tone: 'success', title: r.days_late ? `Recorded · ${r.days_late} days late` : 'Recorded · paid on time', body: sum(r.interest) ? `Interest ${fmtAmt(sum(r.interest), false)}` : undefined });
-          } catch (e) { toast({ tone: 'error', title: 'Not recorded', body: errMsg(e) }); }
-        }}>Record</Button></>}>
+        <div className="border-t border-slate-100 pt-3">
+          <div className="mb-1 flex items-center justify-between gap-3"><p className="font-semibold">GSTR-3B</p>{p.status !== 'paid' && manage && <Button size="sm" variant="primary" onClick={() => { setV(blank); setOpen('3b'); }}>Record filing and payment</Button>}</div>
+          {p.status === 'paid' ? (
+            <div className="space-y-0.5">
+              <p>Paid on <b>{fmtDate(p.paid_on!)}</b>{p.filed_on && p.filed_on !== p.paid_on ? <>, filed on <b>{fmtDate(p.filed_on)}</b></> : null}{p.arn ? <> · ARN <span className="font-mono">{p.arn}</span></> : null}{p.filing_days_late || p.days_late ? <> · <span className="text-rose-700">{Math.max(p.filing_days_late ?? 0, p.days_late ?? 0)} days late</span></> : <> · on time</>}</p>
+              {interest > 0 && <p>Interest {fmtAmt(interest, false)} {p.interest_overridden ? `(as on the GST portal: ${p.override_reason})` : ''} — {p.interest_status === 'settled' ? 'paid' : p.interest_with_return ? 'paid with this return' : 'owed; it appears in the next return’s table 5.1 and in the list below'}</p>}
+              {feeLine(p, 'owed with this return')}
+            </div>
+          ) : p.status === 'overdue' && sumH(cashDue) === 0 ? (
+            <Notice tone="warning" title={`Due ${p.days_late} days ago — not recorded as filed`}>Nothing is payable in cash this month, so no interest runs. {overdueFee(p)}</Notice>
+          ) : p.status === 'overdue' ? (
+            <Notice tone="danger" title={`${p.days_late} days late — interest so far ${fmtAmt(sumH(p.interest_so_far!), false)}`}>Cash due {fmtAmt(sumH(cashDue), false)}. Interest grows by about {fmtAmt(Math.round((sumH(cashDue) * (p.rate_pct ?? 18)) / 100 / 365), false)} a day until the tax is paid. {overdueFee(p)}</Notice>
+          ) : p.status === 'untracked' ? <p className="text-slate-600">No payment recorded. Payments are tracked from the GST carry-over month or the first payment you record; record this one if it was paid late, to work out the interest and late fee.</p>
+          : <p className="text-slate-600">Not due yet. Cash to deposit so far: {fmtAmt(sumH(cashDue), false)}.</p>}
+        </div>
+      </div>
+      <Modal open={!!open} onClose={() => setOpen(null)} title={open === '3b' ? `Record filing and payment of GSTR-3B ${month}` : `Record filing of GSTR-1 ${month}`} description="Interest and late fee are worked out from the dates. If the GST portal shows a different figure (for example after a waiver), enter the portal’s amount."
+        footer={<><Button onClick={() => setOpen(null)}>Cancel</Button><Button variant="primary" onClick={submit}>Record</Button></>}>
         <div className="space-y-3">
-          <Input label="Tax paid on" type="date" value={v.paid_on} onChange={(e) => setV({ ...v, paid_on: e.target.value })} />
+          <Input label={open === '3b' ? 'Tax paid on' : 'Filed on'} type="date" value={v.paid_on} onChange={(e) => setV({ ...v, paid_on: e.target.value })} />
+          {open === '3b' && <Input label="Filed on (if later than the payment)" type="date" value={v.filed_on} onChange={(e) => setV({ ...v, filed_on: e.target.value })} />}
           <Input label="ARN of the filed return" value={v.arn} onChange={(e) => setV({ ...v, arn: e.target.value })} />
-          <Checkbox label="Interest was paid with this return (table 5.1)" checked={v.withReturn} onChange={(e) => setV({ ...v, withReturn: e.target.checked })} />
-          {v.withReturn && <Input label="Challan (CPIN/CIN) the interest was paid with" hint="Needed for interest not covered by cash already in the interest head" value={v.challan} onChange={(e) => setV({ ...v, challan: e.target.value })} />}
-          <Checkbox label="Use the interest shown on the GST portal instead" checked={v.override} onChange={(e) => setV({ ...v, override: e.target.checked })} />
-          {v.override && <div className="grid grid-cols-3 gap-2"><Input label="IGST" type="number" value={v.igst} onChange={(e) => setV({ ...v, igst: e.target.value })} /><Input label="CGST" type="number" value={v.cgst} onChange={(e) => setV({ ...v, cgst: e.target.value })} /><Input label="SGST" type="number" value={v.sgst} onChange={(e) => setV({ ...v, sgst: e.target.value })} /></div>}
-          {v.override && <Input label="Why it differs" value={v.reason} onChange={(e) => setV({ ...v, reason: e.target.value })} />}
+          {open === '3b' && <>
+            <Checkbox label="Interest was paid with this return (table 5.1)" checked={v.withReturn} onChange={(e) => setV({ ...v, withReturn: e.target.checked })} />
+            <Input label="Challan (CPIN/CIN) for interest and late fee" hint="Needed for amounts not covered by cash already in those heads of the cash ledger; the ARN is used if left empty" value={v.challan} onChange={(e) => setV({ ...v, challan: e.target.value })} />
+            <Checkbox label="Use the interest shown on the GST portal instead" checked={v.override} onChange={(e) => setV({ ...v, override: e.target.checked })} />
+            {v.override && <div className="grid grid-cols-3 gap-2"><Input label="IGST" type="number" value={v.igst} onChange={(e) => setV({ ...v, igst: e.target.value })} /><Input label="CGST" type="number" value={v.cgst} onChange={(e) => setV({ ...v, cgst: e.target.value })} /><Input label="SGST" type="number" value={v.sgst} onChange={(e) => setV({ ...v, sgst: e.target.value })} /></div>}
+            {v.override && <Input label="Why the interest differs" value={v.reason} onChange={(e) => setV({ ...v, reason: e.target.value })} />}
+          </>}
+          <Checkbox label="Use the late fee shown on the GST portal instead" checked={v.feeOverride} onChange={(e) => setV({ ...v, feeOverride: e.target.checked })} />
+          {v.feeOverride && <div className="grid grid-cols-2 gap-2"><Input label="CGST late fee" type="number" value={v.feeCgst} onChange={(e) => setV({ ...v, feeCgst: e.target.value })} /><Input label="SGST late fee" type="number" value={v.feeSgst} onChange={(e) => setV({ ...v, feeSgst: e.target.value })} /></div>}
+          {v.feeOverride && <Input label="Why the late fee differs (e.g. waiver notification)" value={v.feeReason} onChange={(e) => setV({ ...v, feeReason: e.target.value })} />}
         </div>
       </Modal>
     </Card>

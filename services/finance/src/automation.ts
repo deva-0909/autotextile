@@ -29,9 +29,12 @@ export async function runFinanceChecks(pool: Pool) {
       const due = tdsDueDate(t.month);
       if (due < today()) raised += Number(await raiseAnomaly(c, { kind: 'tds_overdue', severity: 'critical', ref_type: 'tds', ref_id: `${t.month}:${t.section}`, ref_label: `TDS ${t.section} · ${t.month.slice(0, 7)}`, message: `TDS ${t.section} of ₹${round2(t.pending).toLocaleString('en-IN')} deducted in ${t.month.slice(0, 7)} was due by ${due} and is not deposited (interest runs at 1.5% a month)`, amount: t.pending }));
     }
-    for (const g of late3b)
+    for (const g of late3b.filter((x) => x.return_type === 'gstr3b'))
       raised += Number(await raiseAnomaly(c, { kind: 'gstr3b_overdue', severity: g.cash_due > 0 ? 'critical' : 'warning', ref_type: 'gstr3b', ref_id: `${g.book_id}:${g.period}`, ref_label: `GSTR-3B ${g.period.slice(0, 7)} · ${g.gstin}`,
-        message: `GSTR-3B ${g.period.slice(0, 7)} for ${g.gstin} was due on ${g.due_date} and no payment is recorded (${g.days_late} days late; cash due ₹${g.cash_due.toLocaleString('en-IN')}, interest so far ₹${g.interest_so_far.toLocaleString('en-IN')}, growing daily)`, amount: g.cash_due }));
+        message: `GSTR-3B ${g.period.slice(0, 7)} for ${g.gstin} was due on ${g.due_date} and no payment is recorded (${g.days_late} days late; cash due ₹${g.cash_due.toLocaleString('en-IN')}, interest so far ₹${g.interest_so_far.toLocaleString('en-IN')}, late fee so far ₹${g.late_fee_so_far.toLocaleString('en-IN')}, both growing daily)`, amount: g.cash_due }));
+    for (const g of late3b.filter((x) => x.return_type === 'gstr1'))
+      raised += Number(await raiseAnomaly(c, { kind: 'gstr1_overdue', severity: 'warning', ref_type: 'gstr1', ref_id: `${g.book_id}:${g.period}`, ref_label: `GSTR-1 ${g.period.slice(0, 7)} · ${g.gstin}`,
+        message: `GSTR-1 ${g.period.slice(0, 7)} for ${g.gstin} was due on ${g.due_date} and is not recorded as filed (${g.days_late} days late; late fee so far ₹${g.late_fee_so_far.toLocaleString('en-IN')}, growing daily up to its cap)`, amount: g.late_fee_so_far }));
     // Payment reminders at 1, 7, 15 and 30 days overdue; communications and follow-up tasks come from this event.
     for (const b of ar.bills.filter((x) => days(x.due_date) >= 1)) {
       const d = days(b.due_date);

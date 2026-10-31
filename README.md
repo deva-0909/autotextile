@@ -260,7 +260,7 @@ A good first tour:
 
 ### GST payments and interest
 
-On *Finance → GST*, record each month's GSTR-3B payment date. Paid after the due date (*Configuration*: `GSTR-3B due day`, 20 by default; 22 or 24 for quarterly filers), the ERP charges interest at 18% a year on the tax paid in cash and books it as interest owed; unpaid months past their due date raise an alert with the interest so far. Have the CA confirm both settings.
+On *Finance → GST*, record each month's GSTR-3B payment date. Paid after the due date (*Configuration*: `GSTR-3B due day`, 20 by default; 22 or 24 for quarterly filers), the ERP charges interest at 18% a year on the tax paid in cash and books it as interest owed; unpaid months past their due date raise an alert with the interest so far. Record GSTR-1 filings too: filed late, either return costs a late fee per day (₹50, or ₹20 for a nil return), capped by the previous year's turnover (set it in *Configuration*). Have the CA confirm these settings.
 
 ### Backups
 
