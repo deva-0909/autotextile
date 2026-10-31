@@ -258,6 +258,10 @@ A good first tour:
 
 `MESSAGING_PROVIDER=sandbox` (default) records and “delivers” WhatsApp, SMS and email inside the ERP so the whole flow can be tested. Set `MESSAGING_PROVIDER=live` with `WHATSAPP_TOKEN` and `WHATSAPP_PHONE_NUMBER_ID` to send WhatsApp through Meta’s Cloud API; SMS and email providers are not connected yet (those messages fail and show in the log). `APP_PUBLIC_URL` is the address used in links sent to customers.
 
+### GST payments and interest
+
+On *Finance → GST*, record each month's GSTR-3B payment date. Paid after the due date (*Configuration*: `GSTR-3B due day`, 20 by default; 22 or 24 for quarterly filers), the ERP charges interest at 18% a year on the tax paid in cash and books it as interest owed; unpaid months past their due date raise an alert with the interest so far. Have the CA confirm both settings.
+
 ### Backups
 
 Schedule `npm run backup -- --verify` nightly (Windows Task Scheduler) with the PostgreSQL `bin` folder on `PATH`, and copy `BACKUP_DIR` off the machine. See [docs/continuity.md](docs/continuity.md).

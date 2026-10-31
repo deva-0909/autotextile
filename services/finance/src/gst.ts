@@ -1,8 +1,8 @@
-import type { Router } from 'express';
+import type { Request, Router } from 'express';
 import { z } from 'zod';
 import { type ServiceContext, badRequest, conflict, many, notFound, one, optText, parse, requirePermission, tx } from '@erp/platform';
 import { post } from './ledger.ts';
-import { auditReq, books, monthEnd, round2 } from './common.ts';
+import { auditReq, books, monthEnd, round2, setting, today } from './common.ts';
 
 const month = z.string().regex(/^\d{4}-\d{2}(-01)?$/).transform((m) => `${m.slice(0, 7)}-01`);
 interface TL { id: number; direction: string; doc_type: string; doc_no: string; doc_date: string; party_name: string | null; party_gstin: string | null; place_of_supply: string | null; hsn: string | null; rate: number; taxable: number; cgst: number; sgst: number; igst: number; reverse_charge: boolean; itc_eligible: boolean; qty_kg: number | null; status: string }
@@ -92,6 +92,52 @@ async function minorCash(c: ServiceContext['pool'] | Parameters<typeof post>[0],
   return out;
 }
 
+type Tx = Parameters<typeof post>[0];
+/** Pay an amount owed: cash in the same minor and tax head first, the rest by challan from the bank. */
+async function settleDue(c: Tx, req: Request, id: string, date: string, challanRef: string | null) {
+  const d = await one<{ id: string; book_id: string; kind: string; minor_head: string; status: string; reference: string; igst: number; cgst: number; sgst: number }>(c, `SELECT *, igst::float, cgst::float, sgst::float FROM gst_dues WHERE id = $1 FOR UPDATE`, [id]);
+  if (!d) throw notFound('GST due');
+  if (d.kind !== 'outstanding' || d.status !== 'open') throw conflict('Only open amounts owed can be settled');
+  await c.query('SELECT 1 FROM gst_dues WHERE book_id = $1 FOR UPDATE', [d.book_id]);
+  const avail = (await minorCash(c, d.book_id))[d.minor_head]!;
+  const fromCash = Object.fromEntries(HEADS.map((h) => [h, round2(Math.max(0, Math.min(avail[h], d[h])))])) as Credit;
+  const cashTotal = round2(fromCash.igst + fromCash.cgst + fromCash.sgst);
+  const challan = round2(d.igst + d.cgst + d.sgst - cashTotal);
+  if (challan > 0 && !challanRef) throw badRequest(`₹${challan.toLocaleString('en-IN')} is not covered by the cash ledger; give the challan (CPIN/CIN) it was paid with`);
+  const v = await post(c, { type: 'payment', book_id: d.book_id, date, by: req.user!.name, approved_by: req.user!.name,
+    narration: `GST ${d.minor_head.replace('_', ' ')} for ${d.reference} paid${cashTotal ? ` · ₹${cashTotal.toLocaleString('en-IN')} from the cash ledger` : ''}${challan ? ` · ₹${challan.toLocaleString('en-IN')} by challan ${challanRef}` : ''}`,
+    source: { service: 'finance', type: 'gst_due_settlement', id: d.id },
+    lines: [{ account: 'gst_dues_payable', debit: round2(d.igst + d.cgst + d.sgst) }, { account: 'gst_cash_ledger', credit: cashTotal }, { account: 'bank_main', credit: challan }] });
+  await c.query(`UPDATE gst_dues SET status = 'settled', settled_on = $2, settle_voucher_id = $3, from_cash_igst = $4, from_cash_cgst = $5, from_cash_sgst = $6, from_challan = $7, challan_ref = $8 WHERE id = $1`,
+    [d.id, date, v.id, fromCash.igst, fromCash.cgst, fromCash.sgst, challan, challanRef]);
+  await auditReq(c, req, 'gst_due', d.id, 'settled', { after: { date, challan_ref: challanRef, from_cash: fromCash, challan } });
+  return { number: v.number, from_cash: fromCash, from_challan: challan };
+}
+
+/** GSTR-3B for a month with everything brought forward. */
+async function returnFor(pool: ServiceContext['pool'], bookId: string, m: string) {
+  const all = await lines(pool, bookId, m);
+  return gstr3b(all.filter((t) => t.direction === 'outward'), all.filter((t) => t.direction === 'inward'), await broughtForward(pool, bookId, m), await reversalsFor(pool, bookId, m), await duesFor(pool, bookId, m));
+}
+
+/** Due date of a month's GSTR-3B: the configured day of the following month. */
+export async function gstr3bDueDate(m: string) {
+  const day = Math.min(28, Math.max(1, Number(await setting('finance.gstr3b_due_day', 20))));
+  return `${nextMonth(m).slice(0, 8)}${String(day).padStart(2, '0')}`;
+}
+const daysBetween = (from: string, to: string) => Math.max(0, Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000));
+
+/**
+ * Interest on late payment (Section 50(1)): the yearly rate on tax paid in cash, for each day after the due date.
+ * Under Rule 88B(1) only the cash deposited for the return counts; cash already in the cash ledger is left out.
+ * Rounded to the rupee per head, as the GST portal does.
+ */
+export async function lateInterest(base: Credit, dueDate: string, paidOn: string) {
+  const rate = Number(await setting('finance.gst_interest_rate_pct', 18)) / 100;
+  const days = daysBetween(dueDate, paidOn);
+  return { days, rate_pct: rate * 100, interest: Object.fromEntries(HEADS.map((h) => [h, Math.round((base[h] * rate * days) / 365)])) as Credit };
+}
+
 /** Credit and cash ledger balances at the start of a month: the legacy carry-forwards, rolled through every month since. */
 async function broughtForward(pool: ServiceContext['pool'], bookId: string, m: string): Promise<Ledgers> {
   const get = (t: string) => one<{ as_of: string; igst: number; cgst: number; sgst: number }>(pool, `SELECT as_of::text, igst::float, cgst::float, sgst::float FROM ${t} WHERE book_id = $1`, [bookId]);
@@ -110,7 +156,89 @@ async function broughtForward(pool: ServiceContext['pool'], bookId: string, m: s
 }
 const nextMonth = (m: string) => { const d = new Date(`${m}T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + 1); return d.toISOString().slice(0, 10); };
 
+const trackingStart = (pool: ServiceContext['pool'], bookId: string) => one<{ m: string | null }>(pool, `SELECT least((SELECT min(period) FROM gst_return_payments WHERE book_id = $1), (SELECT as_of FROM gst_opening_credit WHERE book_id = $1), (SELECT as_of FROM gst_opening_cash WHERE book_id = $1))::text AS m`, [bookId]);
+/** Paid (with the interest charged), or not yet: the due date and, once it has passed, the interest so far. */
+async function paymentStatus(pool: ServiceContext['pool'], bookId: string, m: string, cashDue: Credit) {
+  const due = await gstr3bDueDate(m);
+  const p = await one<Record<string, unknown>>(pool, `SELECT p.paid_on::text, p.arn, p.days_late, p.due_date::text, p.base_igst::float, p.base_cgst::float, p.base_sgst::float, p.interest_igst::float, p.interest_cgst::float, p.interest_sgst::float,
+    p.interest_overridden, p.override_reason, p.interest_with_return, p.created_by_name, d.status AS interest_status, d.id AS interest_due_id
+    FROM gst_return_payments p LEFT JOIN gst_dues d ON d.id = p.due_id WHERE p.book_id = $1 AND p.period = $2`, [bookId, m]);
+  if (p) return { status: 'paid', ...p };
+  // Before tracking starts (the first recorded payment or the GST carry-over month) nothing is known, so nothing is charged.
+  const start = await trackingStart(pool, bookId);
+  if (!start?.m || m < start.m) return { status: 'untracked', due_date: due };
+  const t = today();
+  if (t <= due) return { status: 'not_due', due_date: due };
+  const est = await lateInterest(cashDue, due, t);
+  return { status: 'overdue', due_date: due, days_late: est.days, interest_so_far: est.interest, rate_pct: est.rate_pct };
+}
+
+/**
+ * Months whose GSTR-3B is past its due date with no payment recorded, from the month tracking starts (the first
+ * recorded payment or the GST carry-over month) — so years of history before go-live are not flagged.
+ */
+export async function overdueReturns(pool: ServiceContext['pool']) {
+  const out: { book_id: string; gstin: string; period: string; due_date: string; days_late: number; cash_due: number; interest_so_far: number }[] = [];
+  for (const b of await books(pool)) {
+    const start = await trackingStart(pool, b.id);
+    if (!start?.m) continue;
+    for (let m = start.m; nextMonth(m) <= today(); m = nextMonth(m)) {
+      const ret = await returnFor(pool, b.id, m);
+      const st = await paymentStatus(pool, b.id, m, ret.cash_payable) as { status: string; due_date: string; days_late?: number; interest_so_far?: Credit };
+      if (st.status !== 'overdue') continue;
+      const i = st.interest_so_far!;
+      out.push({ book_id: b.id, gstin: b.gstin, period: m, due_date: st.due_date, days_late: st.days_late!, cash_due: round2(ret.cash_payable.igst + ret.cash_payable.cgst + ret.cash_payable.sgst), interest_so_far: i.igst + i.cgst + i.sgst });
+    }
+  }
+  return out;
+}
+
 export function gstRoutes(r: Router, { pool }: ServiceContext) {
+  /**
+   * Record that a month's GSTR-3B tax was paid. Paid after the due date, interest is worked out on the cash deposited
+   * and booked as interest owed (Dr Interest on late GST payment): settled now if it was paid with the return, otherwise
+   * left for the next return's table 5.1, where the GST portal puts it.
+   */
+  r.post('/gst/payments', requirePermission('finance.gst.manage'), async (req, res) => {
+    const amt = z.number().min(0).max(1e10);
+    const b = parse(z.object({ book_id: z.uuid(), period: month, paid_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), arn: optText(40), interest_with_return: z.boolean().default(false), challan_ref: optText(60),
+      interest_override: z.object({ igst: amt, cgst: amt, sgst: amt }).optional(), override_reason: optText(300) }), req.body);
+    const book = (await books(pool)).find((x) => x.id === b.book_id);
+    if (!book) throw notFound('Book');
+    if (b.paid_on < nextMonth(b.period)) throw badRequest('A month’s tax is paid after the month ends');
+    if (b.paid_on > today()) throw badRequest('The payment date is in the future');
+    if (b.interest_override && !b.override_reason) throw badRequest('Explain why the interest differs from the calculation (for example, the amount shown on the GST portal)');
+    const ret = await returnFor(pool, book.id, b.period);
+    const due = await gstr3bDueDate(b.period);
+    const calc = await lateInterest(ret.cash_payable, due, b.paid_on);
+    const interest = b.interest_override ?? calc.interest;
+    const total = round2(interest.igst + interest.cgst + interest.sgst);
+    const out = await tx(pool, async (c) => {
+      const ex = await one<{ paid_on: string }>(c, 'SELECT paid_on::text FROM gst_return_payments WHERE book_id = $1 AND period = $2 FOR UPDATE', [book.id, b.period]);
+      if (ex) throw conflict(`GSTR-3B ${b.period.slice(0, 7)} for ${book.gstin} is already recorded as paid on ${ex.paid_on}`);
+      let dueId: string | null = null, voucher: string | null = null, settled: unknown = null;
+      if (total > 0) {
+        const label = `Late payment of GSTR-3B ${b.period.slice(0, 7)} (${calc.days} day${calc.days === 1 ? '' : 's'} after ${due})`;
+        const v = await post(c, { type: 'journal', book_id: book.id, date: b.paid_on, by: req.user!.name, approved_by: req.user!.name,
+          narration: `Interest at ${calc.rate_pct}% a year on tax paid in cash — ${label}${b.interest_override ? ` (as on the GST portal: ${b.override_reason})` : ''}`,
+          source: { service: 'finance', type: 'gst_late_interest', id: `${book.id}:${b.period}` },
+          lines: [{ account: 'gst_interest', debit: total }, { account: 'gst_dues_payable', credit: total }] });
+        voucher = v.number;
+        dueId = (await one<{ id: string }>(c, `INSERT INTO gst_dues (book_id, kind, minor_head, as_of, reference, pay_in_month, igst, cgst, sgst, status, voucher_id, created_by_name) VALUES ($1,'outstanding','interest',$2,$3,$4,$5,$6,$7,'open',$8,$9) RETURNING id`,
+          [book.id, `${b.paid_on.slice(0, 7)}-01`, label, b.interest_with_return ? b.period : nextMonth(b.period), interest.igst, interest.cgst, interest.sgst, v.id, req.user!.name]))!.id;
+      }
+      await c.query(`INSERT INTO gst_return_payments (book_id, period, due_date, paid_on, arn, days_late, base_igst, base_cgst, base_sgst, interest_igst, interest_cgst, interest_sgst, interest_overridden, override_reason, interest_with_return, due_id, created_by_name)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+        [book.id, b.period, due, b.paid_on, b.arn ?? null, calc.days, ret.cash_payable.igst, ret.cash_payable.cgst, ret.cash_payable.sgst, interest.igst, interest.cgst, interest.sgst, !!b.interest_override, b.override_reason ?? null, b.interest_with_return, dueId, req.user!.name]);
+      if (dueId && b.interest_with_return) settled = await settleDue(c, req, dueId, b.paid_on, b.challan_ref ?? b.arn ?? null);
+      await c.query(`UPDATE anomalies SET status = 'resolved', resolution = $2, resolved_by_name = $3, resolved_at = now() WHERE kind = 'gstr3b_overdue' AND ref_id = $1 AND status = 'open'`,
+        [`${book.id}:${b.period}`, `Paid on ${b.paid_on}${total ? `; interest ₹${total.toLocaleString('en-IN')}` : ''}`, req.user!.name]);
+      await auditReq(c, req, 'gstr3b_payment', `${book.id}:${b.period}`, 'recorded', { after: { ...b, days_late: calc.days, calculated: calc.interest, interest } });
+      return { due_date: due, days_late: calc.days, base: ret.cash_payable, calculated: calc.interest, interest, voucher, settled };
+    });
+    res.status(201).json(out);
+  });
+
   r.get('/gst/returns', requirePermission('finance.read'), async (req, res) => {
     const m = parse(month, req.query.month ?? new Date().toISOString().slice(0, 7));
     const b = (await books(pool)).find((x) => x.id === req.query.book) ?? (await books(pool))[0];
@@ -118,7 +246,8 @@ export function gstRoutes(r: Router, { pool }: ServiceContext) {
     const all = await lines(pool, b.id, m);
     const out = all.filter((t) => t.direction === 'outward'), inw = all.filter((t) => t.direction === 'inward');
     const recon = await one(pool, `SELECT count(*)::int AS lines, count(*) FILTER (WHERE status = 'matched')::int AS matched, count(*) FILTER (WHERE status <> 'matched')::int AS issues FROM gstr2b_lines WHERE book_id = $1 AND period = $2`, [b.id, m]);
-    res.json({ book: b, month: m, gstr1: gstr1(out), gstr3b: gstr3b(out, inw, await broughtForward(pool, b.id, m), await reversalsFor(pool, b.id, m), await duesFor(pool, b.id, m)), inward: inw, itc_reconciliation: recon });
+    const g3 = gstr3b(out, inw, await broughtForward(pool, b.id, m), await reversalsFor(pool, b.id, m), await duesFor(pool, b.id, m));
+    res.json({ book: b, month: m, gstr1: gstr1(out), gstr3b: g3, payment: await paymentStatus(pool, b.id, m, g3.cash_payable), inward: inw, itc_reconciliation: recon });
   });
 
   /**
@@ -209,26 +338,7 @@ export function gstRoutes(r: Router, { pool }: ServiceContext) {
   });
   r.post('/gst/dues/:id/settle', requirePermission('finance.gst.manage'), async (req, res) => {
     const b = parse(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), challan_ref: optText(60) }), req.body);
-    const out = await tx(pool, async (c) => {
-      const d = await one<{ id: string; book_id: string; kind: string; minor_head: string; status: string; reference: string; igst: number; cgst: number; sgst: number }>(c, `SELECT *, igst::float, cgst::float, sgst::float FROM gst_dues WHERE id = $1 FOR UPDATE`, [req.params.id]);
-      if (!d) throw notFound('GST due');
-      if (d.kind !== 'outstanding' || d.status !== 'open') throw conflict('Only open amounts owed can be settled');
-      await c.query('SELECT 1 FROM gst_dues WHERE book_id = $1 FOR UPDATE', [d.book_id]);
-      const avail = (await minorCash(c, d.book_id))[d.minor_head]!;
-      const fromCash = Object.fromEntries(HEADS.map((h) => [h, round2(Math.max(0, Math.min(avail[h], d[h])))])) as Credit;
-      const cashTotal = round2(fromCash.igst + fromCash.cgst + fromCash.sgst);
-      const challan = round2(d.igst + d.cgst + d.sgst - cashTotal);
-      if (challan > 0 && !b.challan_ref) throw badRequest(`₹${challan.toLocaleString('en-IN')} is not covered by the cash ledger; give the challan (CPIN/CIN) it was paid with`);
-      const v = await post(c, { type: 'payment', book_id: d.book_id, date: b.date, by: req.user!.name, approved_by: req.user!.name,
-        narration: `GST ${d.minor_head.replace('_', ' ')} for ${d.reference} paid${cashTotal ? ` · ₹${cashTotal.toLocaleString('en-IN')} from the cash ledger` : ''}${challan ? ` · ₹${challan.toLocaleString('en-IN')} by challan ${b.challan_ref}` : ''}`,
-        source: { service: 'finance', type: 'gst_due_settlement', id: d.id },
-        lines: [{ account: 'gst_dues_payable', debit: round2(d.igst + d.cgst + d.sgst) }, { account: 'gst_cash_ledger', credit: cashTotal }, { account: 'bank_main', credit: challan }] });
-      await c.query(`UPDATE gst_dues SET status = 'settled', settled_on = $2, settle_voucher_id = $3, from_cash_igst = $4, from_cash_cgst = $5, from_cash_sgst = $6, from_challan = $7, challan_ref = $8 WHERE id = $1`,
-        [d.id, b.date, v.id, fromCash.igst, fromCash.cgst, fromCash.sgst, challan, b.challan_ref ?? null]);
-      await auditReq(c, req, 'gst_due', d.id, 'settled', { after: { ...b, from_cash: fromCash, challan } });
-      return { number: v.number, from_cash: fromCash, from_challan: challan };
-    });
-    res.json(out);
+    res.json(await tx(pool, (c) => settleDue(c, req, String(req.params.id), b.date, b.challan_ref ?? null)));
   });
 
   r.get('/gst/itc-reversals', requirePermission('finance.read'), async (req, res) => {

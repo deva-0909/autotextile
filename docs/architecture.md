@@ -139,6 +139,19 @@ Make synchronous calls first, then audit and publish.
   ledger) or an amount owed (Cr *GST interest, late fee and penalty payable*). Owed interest and late fee can be placed
   in a month's table 5.1. Settling (`POST /gst/dues/:id/settle`) uses cash in the same minor and tax head first, as the
   cash ledger rules require, and the rest is a challan payment from the bank.
+
+## Interest on late GST payment
+
+- Each month's GSTR-3B payment is recorded (`POST /gst/payments`) with the date the tax was paid. The due date is the
+  `finance.gstr3b_due_day` of the following month (20 for monthly filers; 22 or 24 under QRMP).
+- Interest follows Section 50(1): `finance.gst_interest_rate_pct` (18%) a year on the **cash** paid for the return,
+  for each day after the due date, rounded to the rupee per head. Per Rule 88B(1), cash already in the cash ledger is
+  not charged, so the base is the 3B "cash to deposit", not the tax paid from the ledger.
+- The interest posts Dr *Interest on late GST payment*, Cr *GST interest, late fee and penalty payable* and becomes an
+  amount owed: settled at once if it was paid with the return, otherwise placed in the next return's table 5.1 (where
+  the portal puts it) and settled later. The portal's figure can replace the calculation, with a reason.
+- Unpaid months past their due date show interest so far on the GST screen, and an hourly check raises a critical
+  alert, from the month tracking starts (the first recorded payment or the GST carry-over month).
 - **Reconciliation reads back.** After loading, golive reads the created records (parties, opening vouchers by
   number, inwards by source reference and weighed kg) and compares them with the file’s control totals. Sign-off must
   come from a different user from the one who loaded the batch.
