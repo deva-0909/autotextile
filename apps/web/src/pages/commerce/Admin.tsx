@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BadgeIndianRupee, Check, ClipboardCopy, FileText, Link2, MessageSquareWarning, Plus, RotateCcw, ShieldAlert, UserPlus, Wallet } from 'lucide-react';
+import { BadgeIndianRupee, Landmark, Check, ClipboardCopy, FileText, Link2, MessageSquareWarning, Plus, RotateCcw, ShieldAlert, UserPlus, Wallet } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, invalidatePrefix } from '../../lib/api';
@@ -231,6 +231,46 @@ function ExtendModal({ open, onClose, orderId, onDone }: { open: boolean; onClos
   );
 }
 
+/** Money received outside the gateway (bank transfer, cheque, cash): same effect as a confirmed gateway payment. */
+function OfflinePaymentModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const customers = useParties('customer');
+  const qc = useQueryClient();
+  const today = new Date().toISOString().slice(0, 10);
+  const blank = { cust: '', amount: '', mode: 'neft', reference: '', received_on: today, purpose: 'advance', order: '', ref: '' };
+  const [v, setV] = useState(blank);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const orders = useQuery({ queryKey: ['com-orders-pending', v.cust], queryFn: () => api.get<{ id: string; number: string; status: string; token_amount: number }[]>(`/commerce/orders?customer=${v.cust}&status=pending_payment`), enabled: open && !!v.cust && v.purpose === 'token' });
+  const close = () => { setV(blank); setErr(null); setDone(null); onClose(); };
+  return (
+    <Modal open={open} onClose={close} title="Record an offline payment" description="Money received by NEFT/RTGS/IMPS, UPI to the bank, cheque or cash. It credits the customer’s advance, books a token order and posts the receipt to the bank (or cash) in the books."
+      footer={done ? <Button variant="primary" onClick={close}>Done</Button> : <><Button onClick={close}>Cancel</Button><Button variant="primary" loading={busy} disabled={!v.cust || !(Number(v.amount) > 0) || v.reference.trim().length < 3 || (v.purpose === 'token' && !v.order)} onClick={async () => {
+        setBusy(true); setErr(null);
+        try {
+          const r = await api.post<{ number: string }>('/commerce/payments/offline', { customer_id: v.cust, amount: Number(v.amount), mode: v.mode, reference: v.reference.trim(), received_on: v.received_on, purpose: v.purpose, order_id: v.purpose === 'token' ? v.order : null, ref_no: v.ref || null });
+          setDone(r.number); invalidatePrefix(qc, 'com-');
+        } catch (e) { setErr(errMsg(e)); } finally { setBusy(false); }
+      }}>Record payment</Button></>}>
+      {done ? <Notice tone="success" title={`Recorded as ${done}`}>The customer’s advance and the books are updated.</Notice> : (
+        <div className="space-y-3">
+          {err && <Notice tone="danger">{err}</Notice>}
+          <Select label="Customer" required value={v.cust} onChange={(e) => setV({ ...v, cust: e.target.value, order: '' })} placeholder="Choose a customer" options={(customers.data ?? []).map((p) => ({ value: p.id, label: p.legal_name }))} />
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Amount" type="number" prefix="₹" required value={v.amount} onChange={(e) => setV({ ...v, amount: e.target.value })} />
+            <Input label="Received on" type="date" required max={today} value={v.received_on} onChange={(e) => setV({ ...v, received_on: e.target.value })} />
+            <Select label="Mode" value={v.mode} onChange={(e) => setV({ ...v, mode: e.target.value })} options={[{ value: 'neft', label: 'NEFT' }, { value: 'rtgs', label: 'RTGS' }, { value: 'imps', label: 'IMPS' }, { value: 'upi', label: 'UPI to bank' }, { value: 'cheque', label: 'Cheque' }, { value: 'cash', label: 'Cash' }]} />
+            <Input label={v.mode === 'cheque' ? 'Cheque number' : v.mode === 'cash' ? 'Receipt number' : 'UTR / reference'} required value={v.reference} onChange={(e) => setV({ ...v, reference: e.target.value })} />
+          </div>
+          <Select label="For" value={v.purpose} onChange={(e) => setV({ ...v, purpose: e.target.value })} options={[{ value: 'advance', label: 'Advance payment' }, { value: 'invoice', label: 'Against an invoice' }, { value: 'token', label: 'Booking token for an order' }]} />
+          {v.purpose === 'token' && <Select label="Order waiting for its token" required value={v.order} onChange={(e) => setV({ ...v, order: e.target.value })} placeholder={orders.data?.length === 0 ? 'No orders waiting for a token' : 'Choose an order'} options={(orders.data ?? []).map((o) => ({ value: o.id, label: `${o.number} · token ${fmtINR(Number(o.token_amount))}` }))} />}
+          {v.purpose === 'invoice' && <Input label="Invoice number" value={v.ref} onChange={(e) => setV({ ...v, ref: e.target.value })} />}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function PaymentLinkModal({ open, onClose, customerId, orderId, onDone }: { open: boolean; onClose: () => void; customerId?: string; orderId?: string; onDone?: () => void }) {
   const customers = useParties('customer');
   const [cust, setCust] = useState(customerId ?? '');
@@ -419,12 +459,13 @@ export function PaymentsPage() {
   const [status, setStatus] = useState('');
   const [sel, setSel] = useState<string | null>(null);
   const [link, setLink] = useState(false);
+  const [offline, setOffline] = useState(false);
   const q = useQuery({ queryKey: ['com-payments', status], queryFn: () => api.get<PRow[]>(`/commerce/payments${status ? `?status=${status}` : ''}`), enabled: tab === 'payments' });
   const r = useQuery({ queryKey: ['com-recon'], queryFn: () => api.get<Recon>('/commerce/payments-reconciliation'), enabled: tab === 'recon' });
   return (
     <>
-      <PageHeader title="Payments" description="Online payments through the bank gateway. A payment counts only when the bank’s signed callback and a separate status check with the bank agree."
-        breadcrumbs={[{ label: 'B2B commerce' }, { label: 'Payments' }]} actions={can('commerce.payment.manage') && <Button variant="primary" icon={<Link2 className="size-4" />} onClick={() => setLink(true)}>New payment link</Button>} />
+      <PageHeader title="Payments" description="Gateway payments count only when the bank’s signed callback and a separate status check agree. Money received by bank transfer, cheque or cash is recorded here as an offline payment."
+        breadcrumbs={[{ label: 'B2B commerce' }, { label: 'Payments' }]} actions={can('commerce.payment.manage') && <div className="flex gap-2"><Button icon={<Landmark className="size-4" />} onClick={() => setOffline(true)}>Record offline payment</Button><Button variant="primary" icon={<Link2 className="size-4" />} onClick={() => setLink(true)}>New payment link</Button></div>} />
       <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ value: 'payments', label: 'Payments' }, { value: 'recon', label: 'Reconciliation' }]} />
       {tab === 'payments' ? (
         <>
@@ -464,6 +505,7 @@ export function PaymentsPage() {
       )}
       <PaymentDrawer id={sel} onClose={() => setSel(null)} />
       <PaymentLinkModal open={link} onClose={() => setLink(false)} />
+      <OfflinePaymentModal open={offline} onClose={() => setOffline(false)} />
     </>
   );
 }
@@ -484,7 +526,7 @@ function PaymentDrawer({ id, onClose }: { id: string | null; onClose: () => void
         <div className="space-y-5">
           <KeyValue items={[
             { label: 'Status', value: <StatusBadge status={p.status} /> },
-            { label: 'Gateway', value: p.gateway },
+            { label: 'Received by', value: p.gateway === 'offline' ? `Offline · ${(p.gateway_txn_id ?? '').split(':')[0].toUpperCase()}` : p.gateway },
             { label: 'Gateway order', value: p.gateway_order_id, mono: true },
             { label: 'Transaction', value: p.gateway_txn_id ?? '—', mono: true },
             { label: 'UTR', value: p.utr ?? '—', mono: true },
@@ -498,7 +540,7 @@ function PaymentDrawer({ id, onClose }: { id: string | null; onClose: () => void
             <ul className="space-y-1.5 text-[12.5px]">{p.events.map((e) => <li key={e.id} className="flex gap-2"><span className="w-36 shrink-0 text-slate-500">{fmtDateTime(e.at)}</span><span className="font-medium">{humanize(e.kind)}</span>{e.signature_ok === false && <Badge tone="danger">bad signature</Badge>}{e.signature_ok === true && <Badge tone="success">signed</Badge>}</li>)}</ul>
           </div>
           {p.refunds.length > 0 && <div><p className="mb-2 text-[13px] font-semibold">Refunds</p><ul className="space-y-1 text-[12.5px]">{p.refunds.map((x) => <li key={x.id}>{fmtINR(Number(x.amount))} · {x.reason} · {x.created_by_name} · <StatusBadge status={x.status} /></li>)}</ul></div>}
-          {can('commerce.payment.manage') && ['success', 'partially_refunded'].includes(p.status) && left > 0 && (
+          {can('commerce.payment.manage') && p.gateway !== 'offline' && ['success', 'partially_refunded'].includes(p.status) && left > 0 && (
             <Card title="Refund" description="Only money not yet set against an invoice can be refunded.">
               <div className="space-y-3">
                 {err && <Notice tone="danger">{err}</Notice>}

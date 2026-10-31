@@ -17,5 +17,12 @@ export const procurementService: ServiceDefinition = {
     supplierRoutes(r, ctx);
     portalRoutes(r, ctx);
   },
-  consumers: () => ({ 'approval.decided': approvalHandler() }),
+  consumers: () => ({
+    'approval.decided': approvalHandler(),
+    // Finance posted the payment: the invoice is paid once nothing is owed on it.
+    'finance.supplier.paid': async (ev, c) => {
+      const p = ev.payload as { party_id: string; invoice_number: string; fully_paid: boolean };
+      if (p.fully_paid) await c.query(`UPDATE supplier_invoices SET payment_status = 'paid', updated_at = now() WHERE supplier_id = $1 AND invoice_number = $2 AND status = 'posted'`, [p.party_id, p.invoice_number]);
+    },
+  }),
 };

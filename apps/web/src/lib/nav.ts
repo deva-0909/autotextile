@@ -6,11 +6,12 @@ import {
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon; perms?: string[]; phase?: string }
-export interface NavGroup { label: string; items: NavItem[] }
+export interface NavGroup { label: string; icon?: LucideIcon; items: NavItem[] }
 
 export const NAV: NavGroup[] = [
   {
     label: 'Overview',
+    icon: LayoutDashboard,
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard },
       { to: '/approvals', label: 'Approvals', icon: ClipboardCheck },
@@ -20,6 +21,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'Insights & AI',
+    icon: Radar,
     items: [
       { to: '/insights', label: 'Control tower', icon: Radar, perms: ['insights.read'] },
       { to: '/insights/assistant', label: 'Assistant', icon: Bot, perms: ['insights.ai.use'] },
@@ -30,6 +32,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'Organisation',
+    icon: Building2,
     items: [
       { to: '/organisation/entities', label: 'Entities & GST', icon: Building2, perms: ['org.entity.read'] },
       { to: '/organisation/warehouses', label: 'Warehouses', icon: Warehouse, perms: ['org.warehouse.read'] },
@@ -38,6 +41,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'Master data',
+    icon: BookMarked,
     items: [
       { to: '/partners/customer', label: 'Business partners', icon: Users, perms: ['masters.party.read'] },
       { to: '/catalogue/products', label: 'Fabric catalogue', icon: Package, perms: ['masters.product.read'] },
@@ -46,6 +50,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'Procurement',
+    icon: ShoppingCart,
     items: [
       { to: '/procurement', label: 'Overview', icon: Gauge, perms: ['procurement.read', 'procurement.invoice.read'] },
       { to: '/procurement/requisitions', label: 'Requisitions', icon: ClipboardList, perms: ['procurement.read'] },
@@ -59,6 +64,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'Mill job work',
+    icon: Factory,
     items: [
       { to: '/jobwork', label: 'Deadline cockpit', icon: AlarmClock, perms: ['jobwork.read'] },
       { to: '/jobwork/orders', label: 'Job-work orders', icon: Factory, perms: ['jobwork.read'] },
@@ -68,6 +74,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'Inventory & warehouse',
+    icon: Warehouse,
     items: [
       { to: '/inventory', label: 'Overview', icon: Boxes, perms: ['inventory.read'] },
       { to: '/inventory/scan', label: 'Scan station', icon: ScanLine, perms: ['inventory.read'] },
@@ -85,6 +92,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'Sales & CRM',
+    icon: Target,
     items: [
       { to: '/crm', label: 'Sales overview', icon: LineChart, perms: ['crm.read'] },
       { to: '/crm/leads', label: 'Lead inbox', icon: Inbox, perms: ['crm.read'] },
@@ -98,6 +106,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'B2B commerce',
+    icon: Store,
     items: [
       { to: '/commerce/orders', label: 'Sales orders', icon: Store, perms: ['commerce.read'] },
       { to: '/commerce/payments', label: 'Payments', icon: CreditCard, perms: ['commerce.read'] },
@@ -109,6 +118,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'Fulfilment',
+    icon: Truck,
     items: [
       { to: '/fulfilment', label: 'Dispatch cockpit', icon: Gauge, perms: ['fulfilment.read'] },
       { to: '/fulfilment/allocation', label: 'Warehouse allocation', icon: Shuffle, perms: ['fulfilment.read'] },
@@ -118,6 +128,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'Finance',
+    icon: Landmark,
     items: [
       { to: '/finance', label: 'Overview', icon: Gauge, perms: ['finance.read'] },
       { to: '/finance/vouchers', label: 'Vouchers', icon: ScrollText, perms: ['finance.read'] },
@@ -134,6 +145,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'Workflow',
+    icon: Workflow,
     items: [
       { to: '/workflow/communications', label: 'Communications', icon: MessagesSquare, perms: ['workflow.read'] },
       { to: '/workflow/rules', label: 'Workflow rules', icon: Workflow, perms: ['workflow.read'] },
@@ -144,6 +156,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'HR & payroll',
+    icon: Users2,
     items: [
       { to: '/hr', label: 'People', icon: Users2, perms: ['hrms.read'] },
       { to: '/hr/employees', label: 'Employees', icon: Briefcase, perms: ['hrms.read'] },
@@ -155,6 +168,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'Security & governance',
+    icon: ShieldCheck,
     items: [
       { to: '/security/users', label: 'Users', icon: UserCog, perms: ['identity.user.read'] },
       { to: '/security/roles', label: 'Roles & permissions', icon: KeyRound, perms: ['identity.role.read'] },
@@ -166,6 +180,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'Go-live',
+    icon: Rocket,
     items: [
       { to: '/golive', label: 'Readiness', icon: Rocket, perms: ['golive.read'] },
       { to: '/golive/migration', label: 'Data migration', icon: FileSpreadsheet, perms: ['golive.read'] },

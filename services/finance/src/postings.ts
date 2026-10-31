@@ -147,15 +147,18 @@ export function creditNoteConsumer() {
 /** Gateway receipts → money in the gateway clearing account, credited to the customer. */
 export function paymentReceivedConsumer() {
   return async (ev: BusEvent, c: Client) => {
-    const p = ev.payload as { payment_id: string; number?: string; utr?: string | null; customer_id: string; customer_name?: string; purpose: string; ref_no: string | null; amount: number };
+    const p = ev.payload as { payment_id: string; number?: string; utr?: string | null; customer_id: string; customer_name?: string; purpose: string; ref_no: string | null; amount: number; mode?: string; received_on?: string | null };
+    // Gateway money waits in clearing until settlement; money received offline is already in the bank (or cash).
+    const offline = !!p.mode && p.mode !== 'gateway';
+    const into = !offline ? 'gateway_clearing' : p.mode === 'cash' ? 'cash' : 'bank_main';
     const party = p.customer_name ? null : await getParty(p.customer_id);
     const name = p.customer_name ?? party!.legal_name;
     const book = await primaryBook(c);
     await post(c, {
-      type: 'receipt', book_id: book.id, date: new Date().toISOString().slice(0, 10), auto: true, by: SYSTEM, approved_by: 'gateway verified',
-      narration: `${p.purpose === 'token' ? 'Booking token' : p.purpose === 'invoice' ? `Payment against ${p.ref_no}` : 'Advance'} from ${name} via payment gateway${p.utr ? ` · UTR ${p.utr}` : ''}`, party_id: p.customer_id, party_name: name,
+      type: 'receipt', book_id: book.id, date: p.received_on ?? new Date().toISOString().slice(0, 10), auto: true, by: SYSTEM, approved_by: offline ? 'recorded by accounts' : 'gateway verified',
+      narration: `${p.purpose === 'token' ? 'Booking token' : p.purpose === 'invoice' ? `Payment against ${p.ref_no}` : 'Advance'} from ${name} ${offline ? `by ${p.mode!.toUpperCase()}` : 'via payment gateway'}${p.utr ? ` · ${offline ? 'ref' : 'UTR'} ${p.utr}` : ''}`, party_id: p.customer_id, party_name: name,
       source: { service: 'commerce', type: 'payment', id: p.payment_id, ref: p.utr ?? p.number ?? null },
-      lines: [{ account: 'gateway_clearing', debit: Number(p.amount) }, { account: 'receivables', credit: Number(p.amount), party_id: p.customer_id, party_name: name, bill_ref: p.number ?? null }],
+      lines: [{ account: into, debit: Number(p.amount) }, { account: 'receivables', credit: Number(p.amount), party_id: p.customer_id, party_name: name, bill_ref: p.number ?? null }],
     });
   };
 }

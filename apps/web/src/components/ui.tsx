@@ -198,7 +198,7 @@ export function Card({ title, description, actions, children, className, padded 
   return (
     <section className={clsx('card', className)}>
       {(title || actions) && (
-        <header className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-3.5">
+        <header className="flex items-start justify-between gap-4 border-b border-slate-100 px-4 py-2.5">
           <div className="min-w-0">
             {title && <h2 className="text-[14px] font-semibold text-slate-900">{title}</h2>}
             {description && <p className="mt-0.5 text-[12.5px] text-slate-500">{description}</p>}
@@ -206,8 +206,8 @@ export function Card({ title, description, actions, children, className, padded 
           {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
         </header>
       )}
-      <div className={padded ? 'p-5' : undefined}>{children}</div>
-      {footer && <footer className="border-t border-slate-100 bg-slate-50/60 px-5 py-3 rounded-b-xl">{footer}</footer>}
+      <div className={padded ? 'p-4' : undefined}>{children}</div>
+      {footer && <footer className="border-t border-slate-100 bg-slate-50/60 px-4 py-2 rounded-b-xl">{footer}</footer>}
     </section>
   );
 }
@@ -216,9 +216,9 @@ export function PageHeader({ title, description, actions, breadcrumbs, meta }: {
   title: ReactNode; description?: ReactNode; actions?: ReactNode; breadcrumbs?: { label: string; to?: string }[]; meta?: ReactNode;
 }) {
   return (
-    <div className="mb-6">
+    <div className="mb-4">
       {breadcrumbs && (
-        <nav className="mb-2 flex items-center gap-1.5 text-[12.5px] text-slate-500" aria-label="Breadcrumb">
+        <nav className="mb-1 flex items-center gap-1.5 text-[12.5px] text-slate-500" aria-label="Breadcrumb">
           {breadcrumbs.map((b, i) => (
             <span key={i} className="flex items-center gap-1.5">
               {i > 0 && <span className="text-slate-300">/</span>}
@@ -229,9 +229,9 @@ export function PageHeader({ title, description, actions, breadcrumbs, meta }: {
       )}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="flex flex-wrap items-center gap-3 text-[22px] font-semibold tracking-[-0.01em] text-slate-900">{title}</h1>
-          {description && <p className="mt-1 max-w-3xl text-[13.5px] text-slate-500">{description}</p>}
-          {meta && <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12.5px] text-slate-600">{meta}</div>}
+          <h1 className="flex flex-wrap items-center gap-3 text-[20px] font-semibold tracking-[-0.01em] text-slate-900">{title}</h1>
+          {description && <p className="mt-0.5 max-w-4xl text-[13px] text-slate-500">{description}</p>}
+          {meta && <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12.5px] text-slate-600">{meta}</div>}
         </div>
         {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>
@@ -377,9 +377,9 @@ export function Progress({ value, max, tone = 'brand', label }: { value: number;
 export function Stat({ label, value, sub, tone }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: 'danger' | 'warning' | 'success' }) {
   const t = tone === 'danger' ? 'text-rose-600' : tone === 'warning' ? 'text-amber-600' : tone === 'success' ? 'text-emerald-600' : 'text-slate-900';
   return (
-    <div className="card px-4 py-3.5">
+    <div className="card px-4 py-2.5">
       <p className="text-[12px] font-medium text-slate-500">{label}</p>
-      <p className={clsx('mt-1 text-[22px] leading-tight font-semibold tracking-tight tabular', t)}>{value}</p>
+      <p className={clsx('mt-0.5 text-[20px] leading-tight font-semibold tracking-tight tabular', t)}>{value}</p>
       {sub && <p className="mt-0.5 text-[12px] text-slate-500">{sub}</p>}
     </div>
   );

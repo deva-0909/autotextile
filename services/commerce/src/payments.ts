@@ -66,17 +66,17 @@ export async function handleCallback(pool: Pool, raw: string, signature: string 
 }
 
 /** Money received goes to the customer's advance; a token payment also books its order. */
-async function onPaid(c: Client, pay: Payment, utr: string | null) {
+async function onPaid(c: Client, pay: Payment, utr: string | null, offline?: { mode: string; received_on: string; by: string }) {
   const type = pay.purpose === 'token' ? 'token_received' : pay.purpose === 'invoice' ? 'invoice_payment_received' : 'advance_received';
-  await walletEntry(c, { customer_id: pay.customer_id, customer_name: pay.customer_name, entry_type: type, amount: Number(pay.amount), order_id: pay.order_id, ref_type: 'payment', ref_no: pay.number, narration: `${pay.purpose === 'token' ? 'Booking token' : pay.purpose === 'invoice' ? `Payment for ${pay.ref_no}` : 'Advance'} · UTR ${utr ?? '—'}`, by_name: 'gateway' });
+  await walletEntry(c, { customer_id: pay.customer_id, customer_name: pay.customer_name, entry_type: type, amount: Number(pay.amount), order_id: pay.order_id, ref_type: 'payment', ref_no: pay.number, narration: `${pay.purpose === 'token' ? 'Booking token' : pay.purpose === 'invoice' ? `Payment for ${pay.ref_no}` : 'Advance'} · ${offline ? `${offline.mode.toUpperCase()} ${utr}` : `UTR ${utr ?? '—'}`}`, by_name: offline?.by ?? 'gateway' });
   if (pay.purpose === 'token' && pay.order_id) {
     const o = await one<{ status: string }>(c, 'SELECT status FROM orders WHERE id = $1 FOR UPDATE', [pay.order_id]);
     if (o?.status === 'pending_payment') {
       const { bookOrder } = await import('./orders.ts');
-      await bookOrder(c, pay.order_id, Number(await setting('commerce.token_validity_days', 7)), 'gateway');
+      await bookOrder(c, pay.order_id, Number(await setting('commerce.token_validity_days', 7)), offline?.by ?? 'gateway');
     }
   }
-  await publish(c, S, 'commerce.payment.received', { payment_id: pay.id, number: pay.number, utr, customer_name: pay.customer_name, customer_id: pay.customer_id, order_id: pay.order_id, purpose: pay.purpose, ref_no: pay.ref_no, amount: Number(pay.amount) });
+  await publish(c, S, 'commerce.payment.received', { payment_id: pay.id, number: pay.number, utr, customer_name: pay.customer_name, customer_id: pay.customer_id, order_id: pay.order_id, purpose: pay.purpose, ref_no: pay.ref_no, amount: Number(pay.amount), mode: offline?.mode ?? 'gateway', received_on: offline?.received_on ?? null });
 }
 
 export function publicPaymentRoutes(r: Router, { pool }: ServiceContext) {
@@ -138,6 +138,38 @@ export function paymentRoutes(r: Router, { pool }: ServiceContext) {
     res.status(201).json(out);
   });
 
+  /**
+   * Money received outside the gateway (NEFT/RTGS/IMPS, UPI to the bank, cheque, cash), recorded by accounts with its
+   * bank reference. It takes the same path as a verified gateway payment: customer advance, booking a token order,
+   * and a receipt in the books (to the bank, or cash, instead of gateway clearing). The reference must be unique.
+   */
+  r.post('/payments/offline', requirePermission('commerce.payment.manage'), async (req, res) => {
+    const b = parse(z.object({ customer_id: z.uuid(), amount: z.number().positive(), mode: z.enum(['neft', 'rtgs', 'imps', 'upi', 'cheque', 'cash']),
+      reference: z.string().trim().min(3).max(60), received_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), purpose: z.enum(['advance', 'invoice', 'token']).default('advance'),
+      order_id: z.uuid().nullable().optional(), ref_no: optText(40) }), req.body);
+    if (b.received_on > new Date().toISOString().slice(0, 10)) throw badRequest('The money cannot be received in the future');
+    if (b.purpose === 'token' && !b.order_id) throw badRequest('Choose the order this booking token is for');
+    const cust = await getParty(b.customer_id);
+    const out = await tx(pool, async (c) => {
+      const dup = await one<{ number: string }>(c, `SELECT number FROM payments WHERE gateway = 'offline' AND gateway_txn_id = $1`, [`${b.mode}:${b.reference}`]);
+      if (dup) throw conflict(`This ${b.mode.toUpperCase()} reference is already recorded as ${dup.number}`);
+      if (b.order_id) {
+        const o = await one<{ customer_id: string }>(c, 'SELECT customer_id FROM orders WHERE id = $1', [b.order_id]);
+        if (!o || o.customer_id !== cust.id) throw badRequest('That order belongs to another customer');
+      }
+      const number = await localNumber(c, 'payment', 'PAY-');
+      const pay = await one<Payment>(c, `
+        INSERT INTO payments (number, customer_id, customer_name, order_id, purpose, ref_no, amount, gateway, gateway_order_id, gateway_txn_id, utr, link_token, link_expires_at, status, verified_at, created_by_name)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,'offline',$8,$9,$10,$11,now(),'success',$12::date,$13) RETURNING *`,
+        [number, cust.id, cust.legal_name, b.order_id ?? null, b.purpose, b.ref_no ?? null, round2(b.amount), `${number}-OFFLINE`, `${b.mode}:${b.reference}`, b.reference, newToken(), b.received_on, req.user!.name]);
+      await c.query(`INSERT INTO payment_events (payment_id, kind, detail) VALUES ($1, 'offline_recorded', $2)`, [pay!.id, JSON.stringify({ mode: b.mode, reference: b.reference, received_on: b.received_on, by: req.user!.name })]);
+      await onPaid(c, pay!, b.reference, { mode: b.mode, received_on: b.received_on, by: req.user!.name });
+      await auditReq(c, req, 'payment', pay!.id, 'offline_recorded', { after: b });
+      return { id: pay!.id, number };
+    });
+    res.status(201).json(out);
+  });
+
   /** Refund money still held as customer advance, back to the original payment. */
   r.post('/payments/:id/refund', requirePermission('commerce.payment.manage'), async (req, res) => {
     const b = parse(z.object({ amount: z.number().positive(), reason: reqText(300) }), req.body);
@@ -145,6 +177,7 @@ export function paymentRoutes(r: Router, { pool }: ServiceContext) {
       const p = await one<Payment>(c, 'SELECT * FROM payments WHERE id = $1 FOR UPDATE', [req.params.id]);
       if (!p) throw notFound('Payment');
       if (!['success', 'partially_refunded'].includes(p.status)) throw conflict('Only successful payments can be refunded');
+      if ((p as Payment & { gateway: string }).gateway === 'offline') throw conflict('This payment came in by bank or cash: refund it by bank transfer and record the payment voucher in Finance');
       const left = round2(Number(p.amount) - Number(p.refunded_amount));
       if (b.amount > left + 0.005) throw badRequest(`At most ₹${left.toLocaleString('en-IN')} can still be refunded on this payment`);
       const bal = await walletBalance(c, p.customer_id);

@@ -1,8 +1,8 @@
 import type { Router } from 'express';
 import { z } from 'zod';
-import { type Client, type ServiceContext, badRequest, conflict, many, notFound, one, optText, parse, reqText, requirePermission, tx } from '@erp/platform';
-import { auditReq, books, getParty, raiseAnomaly, requestApproval, round2, setting, syncBooks, today } from './common.ts';
-import { account, accounts, forgetAccounts, periodOpen, post, reverse } from './ledger.ts';
+import { type Client, type ServiceContext, badRequest, conflict, many, notFound, one, optText, parse, publish, reqText, requirePermission, tx } from '@erp/platform';
+import { S, auditReq, books, getParty, raiseAnomaly, requestApproval, round2, setting, syncBooks, today } from './common.ts';
+import { account, accounts, forgetAccounts, openBills, periodOpen, post, reverse } from './ledger.ts';
 import { recentBankChange } from './postings.ts';
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -153,6 +153,42 @@ export function voucherRoutes(r: Router, { pool }: ServiceContext) {
   });
 
   /** Opening customer and supplier bills from the previous system (migration): each becomes an opening voucher and a bill, so ageing continues. */
+  /**
+   * Pay a supplier's invoice: Dr Payables (against that bill), Cr Bank (or cash). The amount defaults to what is still
+   * owed on the bill (the invoice net of TDS already deducted). Large payments, and payments to a supplier whose bank
+   * details changed in the last 30 days, wait for a checker. Once posted, purchasing marks the invoice paid.
+   */
+  r.post('/supplier-payments', requirePermission('finance.voucher.post'), async (req, res) => {
+    const b = parse(z.object({ party_id: z.uuid(), invoice_number: reqText(60), amount: z.number().positive().optional(), date,
+      mode: z.enum(['neft', 'rtgs', 'imps', 'upi', 'cheque', 'cash']), reference: reqText(60) }), req.body);
+    if (b.date > today()) throw badRequest('A payment cannot be dated in the future');
+    const party = await getParty(b.party_id);
+    const limit = Number(await setting('finance.voucher_approval_limit', 100000));
+    const out = await tx(pool, async (c) => {
+      const bill = await one<{ book_id: string }>(c, `SELECT book_id FROM bills WHERE kind = 'payable' AND party_id = $1 AND doc_no = $2 LIMIT 1`, [party.id, b.invoice_number]);
+      if (!bill) throw notFound(`Bill ${b.invoice_number} of ${party.legal_name} (has the invoice been posted?)`);
+      const open = (await openBills(c, 'payable', party.id)).bills.find((x) => x.doc_no === b.invoice_number);
+      if (!open || open.outstanding <= 0.005) throw conflict(`Nothing is owed on ${b.invoice_number} any more`);
+      const amount = round2(b.amount ?? open.outstanding);
+      if (amount > open.outstanding + 0.005) throw badRequest(`Only ₹${open.outstanding.toLocaleString('en-IN')} is owed on ${b.invoice_number}`);
+      const bankChanged = await recentBankChange(c, party.id);
+      const needsApproval = amount > limit || !!bankChanged;
+      const v = await post(c, { type: 'payment', book_id: bill.book_id, date: b.date, by: req.user!.name, status: needsApproval ? 'pending_approval' : 'posted', approved_by: needsApproval ? null : req.user!.name,
+        narration: `Payment to ${party.legal_name} for invoice ${b.invoice_number} by ${b.mode.toUpperCase()} ${b.reference}`, party_id: party.id, party_name: party.legal_name,
+        source: { service: 'finance', type: 'supplier_payment', id: `${party.id}:${b.invoice_number}:${b.reference}`, ref: b.invoice_number },
+        lines: [{ account: 'payables', debit: amount, party_id: party.id, party_name: party.legal_name, bill_ref: b.invoice_number }, { account: b.mode === 'cash' ? 'cash' : 'bank_main', credit: amount }] });
+      if (v.existing) throw conflict(`Payment ${b.reference} for ${b.invoice_number} is already recorded as ${v.number}`);
+      const full = amount >= open.outstanding - 0.005;
+      if (bankChanged) await raiseAnomaly(c, { kind: 'payment_after_bank_change', severity: 'critical', ref_type: 'voucher', ref_id: v.id, ref_label: `${v.number} · ${party.legal_name}`, message: `${party.legal_name}'s bank details changed recently; payment ${v.number} needs a second check`, amount });
+      if (needsApproval) await requestApproval(c, req, { type: 'finance_voucher', refId: v.id, permission: 'finance.voucher.approve', title: `Supplier payment ${v.number} · ${party.legal_name} · ₹${amount.toLocaleString('en-IN')}`,
+        summary: `Invoice ${b.invoice_number}${bankChanged ? ' — payee bank details changed in the last 30 days' : ''}`, payload: { number: v.number, date: b.date, amount, invoice: b.invoice_number, supplier: party.legal_name } });
+      else await publish(c, S, 'finance.supplier.paid', { party_id: party.id, invoice_number: b.invoice_number, amount, fully_paid: full, voucher_number: v.number, paid_on: b.date });
+      await auditReq(c, req, 'voucher', v.id, needsApproval ? 'submitted' : 'posted', { after: { number: v.number, type: 'supplier_payment', amount, invoice: b.invoice_number } });
+      return { number: v.number, amount, status: needsApproval ? 'pending_approval' : 'posted', fully_paid: full };
+    });
+    res.status(201).json(out);
+  });
+
   r.post('/opening-bills', requirePermission('finance.voucher.post'), async (req, res) => {
     const b = parse(z.object({ kind: z.enum(['receivable', 'payable']), party_id: z.uuid(), doc_no: reqText(60), doc_date: date, due_date: date, amount: z.number().positive(), book_id: z.uuid().optional(), reference: optText(80) }), req.body);
     const party = await getParty(b.party_id);
@@ -197,6 +233,12 @@ export async function applyFinanceDecision(c: Client, p: { approval_type: string
       return;
     }
     await c.query(`UPDATE vouchers SET status = $2, approved_by_name = $3, posted_at = CASE WHEN $2 = 'posted' THEN now() END WHERE id = $1`, [p.ref_id, p.decision === 'approved' ? 'posted' : 'rejected', p.decided_by_name]);
+    // An approved supplier payment settles its invoice in purchasing too.
+    const sp = p.decision === 'approved' ? await one<{ party_id: string; source_ref: string; amount: number; number: string; voucher_date: string }>(c, `SELECT party_id, source_ref, amount::float, number, voucher_date::text FROM vouchers WHERE id = $1 AND source_type = 'supplier_payment'`, [p.ref_id]) : null;
+    if (sp) {
+      const left = (await openBills(c, 'payable', sp.party_id)).bills.find((x) => x.doc_no === sp.source_ref)?.outstanding ?? 0;
+      await publish(c, S, 'finance.supplier.paid', { party_id: sp.party_id, invoice_number: sp.source_ref, amount: sp.amount, fully_paid: left <= 0.005, voucher_number: sp.number, paid_on: sp.voucher_date });
+    }
   }
   if (p.approval_type === 'period_reopen' && p.decision === 'approved') {
     await c.query(`UPDATE periods SET status = 'open', note = coalesce(note, '') || $2 WHERE month = $1`, [p.ref_id, ` Reopened (approved by ${p.decided_by_name}).`]);

@@ -212,7 +212,7 @@ export function DataTable<T>({
                   className={clsx('group', onRowClick && 'cursor-pointer hover:bg-brand-50/40')}
                 >
                   {visible.map((c) => (
-                    <td key={c.key} className={clsx('px-4 py-2.5 align-middle text-[13.5px] text-slate-700', c.align === 'right' && 'text-right tabular', c.align === 'center' && 'text-center')}>
+                    <td key={c.key} className={clsx('px-4 py-2 align-middle text-[13px] text-slate-700', c.align === 'right' && 'text-right tabular', c.align === 'center' && 'text-center')}>
                       {c.render(row)}
                     </td>
                   ))}
@@ -269,7 +269,7 @@ export function SimpleTable<T>({ rows, columns, rowKey, onRowClick, empty }: {
           {body.map((r) => (
             <tr key={rowKey(r)} onClick={onRowClick ? () => onRowClick(r) : undefined} className={clsx(onRowClick && 'cursor-pointer hover:bg-brand-50/40')}>
               {columns.map((c) => (
-                <td key={c.key} className={clsx('px-4 py-2.5 text-[13.5px] text-slate-700', c.align === 'right' && 'text-right tabular')}>{c.render(r)}</td>
+                <td key={c.key} className={clsx('px-4 py-2 text-[13px] text-slate-700', c.align === 'right' && 'text-right tabular')}>{c.render(r)}</td>
               ))}
             </tr>
           ))}

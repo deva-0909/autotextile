@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { clsx } from 'clsx';
-import { Bell, ChevronDown, CornerDownLeft, KeyRound, LogOut, Menu as MenuIcon, Search, ShieldCheck, X } from 'lucide-react';
+import { Bell, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, CornerDownLeft, KeyRound, LogOut, Menu as MenuIcon, Search, ShieldCheck, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { api, qs, type Page } from '../lib/api';
@@ -13,47 +13,95 @@ import { Avatar, Badge } from './ui';
 interface Notification { id: string; kind: string; title: string; body: string | null; link: string | null; created_at: string; read: boolean }
 interface Structure { entities: { id: string; legal_name: string }[]; gstRegistrations: { id: string; gstin: string; state_name: string }[]; warehouses: { id: string; code: string; name: string }[] }
 
-function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+const store = {
+  get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+};
+
+/**
+ * The menu. Expanded: groups fold (the one holding the current page is always open; others open on click and stay
+ * as the user left them). Collapsed: a narrow strip with one icon per group; clicking one opens its pages beside it.
+ */
+function Sidebar({ collapsed = false, onToggle, onNavigate }: { collapsed?: boolean; onToggle?: () => void; onNavigate?: () => void }) {
   const { can } = useAuth();
+  const loc = useLocation();
   const summary = useQuery({ queryKey: ['governance-summary'], queryFn: () => api.get<{ approvalsToDecide: number }>('/governance/summary'), refetchInterval: 30_000 });
+  const groups = useMemo(() => NAV.map((g) => ({ ...g, items: g.items.filter((i) => !i.perms || can(...i.perms)) })).filter((g) => g.items.length), [can]);
+  const isActive = (to: string) => (to === '/' ? loc.pathname === '/' : loc.pathname === to || loc.pathname.startsWith(`${to}/`));
+  const activeGroup = groups.find((g) => g.items.some((i) => isActive(i.to)))?.label;
+  const [open, setOpen] = useState<string[]>(() => JSON.parse(store.get('nav.open') ?? '["Overview"]') as string[]);
+  const toggleGroup = (label: string) => setOpen((o) => { const n = o.includes(label) ? o.filter((x) => x !== label) : [...o, label]; store.set('nav.open', JSON.stringify(n)); return n; });
+  const [flyout, setFlyout] = useState<string | null>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  useEffect(() => setFlyout(null), [loc.pathname]);
+  useEffect(() => {
+    if (!flyout) return;
+    const close = (e: MouseEvent) => { if (railRef.current && !railRef.current.contains(e.target as Node)) setFlyout(null); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [flyout]);
+  const badge = (to: string) => to === '/approvals' && !!summary.data?.approvalsToDecide
+    ? <span className="rounded-full bg-amber-400 px-1.5 text-[10.5px] font-bold text-amber-950 tabular">{summary.data.approvalsToDecide}</span> : null;
+  const item = (i: (typeof groups)[number]['items'][number], close?: () => void) => (
+    <NavLink key={i.to} to={i.to} end={i.to === '/' || ALL_ITEMS.some((x) => x.to.startsWith(`${i.to}/`))} onClick={() => { close?.(); onNavigate?.(); }}
+      className={({ isActive: a }) => clsx('group flex items-center gap-2.5 rounded-md px-2.5 py-[6px] text-[13px] transition-colors', a ? 'bg-nav-800 text-white shadow-[inset_2px_0_0_var(--color-brand-400)]' : 'hover:bg-nav-900 hover:text-white')}>
+      <i.icon className="size-4 shrink-0 opacity-80" />
+      <span className="flex-1 truncate">{i.label}</span>
+      {badge(i.to)}
+    </NavLink>
+  );
+
+  if (collapsed) {
+    return (
+      <div ref={railRef} className="relative flex h-full flex-col items-center bg-nav-950 text-slate-300">
+        <button onClick={onToggle} className="flex h-14 w-full items-center justify-center" title="Expand the menu" aria-label="Expand the menu"><img src="/favicon.svg" alt="" className="size-7" /></button>
+        <nav className="scrollbar-thin flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto pb-3">
+          {groups.map((g) => {
+            const Icon = g.icon ?? g.items[0]!.icon;
+            const here = g.label === activeGroup;
+            const pending = g.items.some((i) => i.to === '/approvals') && !!summary.data?.approvalsToDecide;
+            return (
+              <button key={g.label} title={g.label} aria-label={g.label} onClick={() => setFlyout(flyout === g.label ? null : g.label)}
+                className={clsx('relative flex size-10 items-center justify-center rounded-lg transition-colors', here ? 'bg-nav-800 text-white' : 'hover:bg-nav-900 hover:text-white', flyout === g.label && 'ring-1 ring-brand-400')}>
+                <Icon className="size-[18px]" />
+                {pending && <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-amber-400" />}
+              </button>
+            );
+          })}
+        </nav>
+        <button onClick={onToggle} className="mb-3 rounded-md p-2 text-slate-400 hover:bg-nav-900 hover:text-white" title="Expand the menu" aria-label="Expand the menu"><ChevronsRight className="size-4" /></button>
+        {flyout && (
+          <div className="animate-slide-in absolute top-2 left-[64px] z-50 w-60 rounded-lg bg-nav-950 p-2 shadow-2xl ring-1 ring-nav-800">
+            <p className="px-2.5 pt-1 pb-1.5 text-[10.5px] font-semibold tracking-[0.08em] text-slate-500 uppercase">{flyout}</p>
+            {groups.find((g) => g.label === flyout)?.items.map((i) => item(i, () => setFlyout(null)))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col bg-nav-950 text-slate-300">
-      <div className="flex h-14 items-center gap-2.5 px-5">
+      <div className="flex h-14 items-center gap-2.5 px-4">
         <img src="/favicon.svg" alt="" className="size-7" />
-        <div className="leading-tight">
+        <div className="flex-1 leading-tight">
           <p className="text-[14px] font-semibold text-white">Textile ERP</p>
           <p className="text-[11px] text-slate-400">Trading · Processing · Fulfilment</p>
         </div>
+        {onToggle && <button onClick={onToggle} className="rounded-md p-1.5 text-slate-400 hover:bg-nav-900 hover:text-white" title="Collapse the menu" aria-label="Collapse the menu"><ChevronsLeft className="size-4" /></button>}
       </div>
       <nav className="scrollbar-thin flex-1 overflow-y-auto px-3 pb-6">
-        {NAV.map((g) => {
-          const items = g.items.filter((i) => !i.perms || can(...i.perms));
-          if (!items.length) return null;
+        {groups.map((g) => {
+          const expanded = g.label === activeGroup || open.includes(g.label);
+          const pending = g.items.some((i) => i.to === '/approvals') && !!summary.data?.approvalsToDecide;
           return (
-            <div key={g.label} className="mt-5">
-              <p className="mb-1.5 px-2.5 text-[10.5px] font-semibold tracking-[0.08em] text-slate-500 uppercase">{g.label}</p>
-              {items.map((i) => (
-                <NavLink
-                  key={i.to}
-                  to={i.to}
-                  end={i.to === '/' || ALL_ITEMS.some((x) => x.to.startsWith(`${i.to}/`))}
-                  onClick={onNavigate}
-                  className={({ isActive }) =>
-                    clsx(
-                      'group flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13.5px] transition-colors',
-                      isActive ? 'bg-nav-800 text-white shadow-[inset_2px_0_0_var(--color-brand-400)]' : 'hover:bg-nav-900 hover:text-white',
-                      i.phase && 'text-slate-400',
-                    )
-                  }
-                >
-                  <i.icon className={clsx('size-4 shrink-0', i.phase ? 'opacity-60' : 'opacity-80')} />
-                  <span className="flex-1 truncate">{i.label}</span>
-                  {i.phase && <span className="rounded bg-nav-800 px-1.5 py-px text-[10px] font-semibold text-slate-400">{i.phase}</span>}
-                  {i.to === '/approvals' && !!summary.data?.approvalsToDecide && (
-                    <span className="rounded-full bg-amber-400 px-1.5 text-[10.5px] font-bold text-amber-950 tabular">{summary.data.approvalsToDecide}</span>
-                  )}
-                </NavLink>
-              ))}
+            <div key={g.label} className="mt-2">
+              <button onClick={() => toggleGroup(g.label)} className="flex w-full items-center gap-1.5 rounded px-2.5 py-1.5 text-[10.5px] font-semibold tracking-[0.08em] text-slate-500 uppercase hover:text-slate-300" aria-expanded={expanded}>
+                <span className="flex-1 text-left">{g.label}</span>
+                {!expanded && pending && <span className="size-1.5 rounded-full bg-amber-400" />}
+                <ChevronRight className={clsx('size-3 transition-transform', expanded && 'rotate-90')} />
+              </button>
+              {expanded && g.items.map((i) => item(i))}
             </div>
           );
         })}
@@ -219,6 +267,9 @@ export function Layout({ children }: { children: ReactNode }) {
   const loc = useLocation();
   const [palette, setPalette] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
+  // The desktop menu starts collapsed to a strip of group icons and remembers the user's choice.
+  const [collapsed, setCollapsed] = useState(() => store.get('nav.collapsed') !== '0');
+  const toggleNav = () => setCollapsed((c) => { store.set('nav.collapsed', c ? '0' : '1'); return !c; });
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -231,7 +282,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <aside className="hidden w-[248px] shrink-0 lg:block"><Sidebar /></aside>
+      <aside className={clsx('hidden shrink-0 transition-[width] duration-200 lg:block', collapsed ? 'w-[64px]' : 'w-[248px]')}><Sidebar collapsed={collapsed} onToggle={toggleNav} /></aside>
       {mobileNav && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-slate-900/40" onClick={() => setMobileNav(false)} />
@@ -242,6 +293,7 @@ export function Layout({ children }: { children: ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur lg:px-6">
           <button className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 lg:hidden" onClick={() => setMobileNav(true)} aria-label="Open menu"><MenuIcon className="size-5" /></button>
+          <button className="hidden rounded-md p-1.5 text-slate-500 hover:bg-slate-100 lg:block" onClick={toggleNav} aria-label={collapsed ? 'Expand the menu' : 'Collapse the menu'} title={collapsed ? 'Expand the menu' : 'Collapse the menu'}><MenuIcon className="size-5" /></button>
           <button
             onClick={() => setPalette(true)}
             className="flex h-9 w-full max-w-md items-center gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-3 text-[13px] text-slate-500 transition hover:border-slate-300 hover:bg-white"
@@ -280,7 +332,7 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </header>
         <main className="scrollbar-thin flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-[1440px] px-4 py-6 lg:px-8 lg:py-7">{children}</div>
+          <div className="mx-auto max-w-[1680px] px-4 py-5 lg:px-6 lg:py-5">{children}</div>
         </main>
       </div>
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
