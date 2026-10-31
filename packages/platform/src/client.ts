@@ -17,15 +17,28 @@ const portOverrides: Partial<Record<ServiceName, number>> = {};
 export function setServicePorts(ports: Partial<Record<ServiceName, number>>) {
   Object.assign(portOverrides, ports);
 }
+export const servicePort = (name: ServiceName) => portOverrides[name] ?? config.port(name);
 
 /** Calls another service directly (not through the gateway) as the calling service. */
 export async function callService<T>(caller: string, target: ServiceName, method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
+  return send<T>(`Bearer ${await serviceToken(caller)}`, target, method, path, body, headers);
+}
+
+/**
+ * Calls another service with the signed-in user's own token, so that service applies the user's permissions and
+ * data scope. Used where results are shown back to that user (reports, dashboards, the assistant).
+ */
+export async function callAsUser<T>(authorization: string, target: ServiceName, method: string, path: string, body?: unknown): Promise<T> {
+  return send<T>(authorization, target, method, path, body, {});
+}
+
+async function send<T>(authorization: string, target: ServiceName, method: string, path: string, body: unknown, headers: Record<string, string>): Promise<T> {
   const port = portOverrides[target] ?? config.port(target);
   const raw = body instanceof Buffer || body instanceof Uint8Array;
   const res = await fetch(`http://127.0.0.1:${port}${path}`, {
     method,
     headers: {
-      authorization: `Bearer ${await serviceToken(caller)}`,
+      authorization,
       ...(body !== undefined && !raw ? { 'content-type': 'application/json' } : {}),
       ...headers,
     },

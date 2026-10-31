@@ -1,3 +1,4 @@
+import { postOrQueue, useOfflineQueue } from '../../lib/offline';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import { ClipboardCheck, MapPin, Scissors, ShieldAlert } from 'lucide-react';
@@ -121,6 +122,7 @@ export function ScanStationPage() {
   const [cur, setCur] = useState<ScanResp | null>(null);
   const [modal, setModal] = useState<'move' | 'split' | 'damage' | null>(null);
   const nav = useNavigate();
+  const offline = useOfflineQueue((r) => toast(r.rejected.length ? { tone: 'error', title: `${r.sent} saved move(s) sent, ${r.rejected.length} refused`, body: r.rejected.map((x) => `${x.item.label}: ${x.error}`).join('; ') } : { tone: 'success', title: `${r.sent} saved move(s) sent` }));
   const lookup = async (code: string): Promise<ScanResult> => {
     const r = await api.get<ScanResp>(`/inventory/scan/${encodeURIComponent(code)}`);
     if (r.kind === 'lot') { nav(`/inventory/lots/${r.lot_id}`); return { ok: true, title: 'Lot — opening' }; }
@@ -131,8 +133,9 @@ export function ScanStationPage() {
   const r = cur?.roll;
   return (
     <>
-      <PageHeader title="Scan station" description="Scan a roll or lot barcode with a handheld scanner or type it. Works on a phone." breadcrumbs={[{ label: 'Inventory', to: '/inventory' }, { label: 'Scan station' }]} />
+      <PageHeader title="Scan station" description="Scan a roll or lot barcode with a handheld scanner or type it. Works on a phone; put-away moves made without a connection are kept and sent when it returns." breadcrumbs={[{ label: 'Inventory', to: '/inventory' }, { label: 'Scan station' }]} />
       <div className="mx-auto max-w-3xl space-y-6">
+        {(!offline.online || offline.items.length > 0) && <Notice tone={offline.online ? 'info' : 'warning'} title={offline.online ? `Sending ${offline.items.length} saved move(s)…` : 'Offline — looking up rolls needs the network; moves are saved on this device'}>{offline.items.map((i) => <span key={i.id} className="mr-3 font-mono text-[12px]">{i.label}</span>)}</Notice>}
         <Card><ScanInput onScan={lookup} placeholder="Scan roll or lot barcode" /></Card>
         {r && (
           <Card title={<span className="font-mono">{r.barcode}</span>} description={`${r.sku} · ${r.product_name}`} actions={<StatusBadge status={r.state} />}>
@@ -193,7 +196,12 @@ export function MoveModal({ roll, suggestions, onClose, onDone }: { roll: { barc
   return (
     <Modal open onClose={onClose} title={`Move ${roll.barcode}`} footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={!loc} onClick={async () => {
       setBusy(true);
-      try { await api.post('/inventory/putaway', { barcodes: [roll.barcode], location_id: loc }); toast({ tone: 'success', title: 'Moved' }); onDone(); } catch (e) { toast({ tone: 'error', title: (e as Error).message }); } finally { setBusy(false); }
+      try {
+        const path = options.find((l) => l.id === loc)?.path ?? suggestions.find((s) => s.id === loc)?.path ?? 'bin';
+        const r = await postOrQueue('/inventory/putaway', { barcodes: [roll.barcode], location_id: loc }, `${roll.barcode} → ${path}`);
+        toast(r === 'sent' ? { tone: 'success', title: 'Moved' } : { tone: 'warning', title: 'No connection — move saved on this device', body: 'It is sent automatically when the network returns.' });
+        onDone();
+      } catch (e) { toast({ tone: 'error', title: (e as Error).message }); } finally { setBusy(false); }
     }}>Move</Button></>}>
       <div className="space-y-3">
         {suggestions.length > 0 && <div className="flex flex-wrap gap-2">{suggestions.map((s) => <Button key={s.id} size="sm" variant={loc === s.id ? 'primary' : 'secondary'} onClick={() => setLoc(s.id)}>{s.path}</Button>)}</div>}

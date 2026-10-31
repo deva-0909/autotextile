@@ -13,11 +13,12 @@ It is built phase by phase from the *Developer Brief & Functional Specification 
 - **P7 — Fulfilment: warehouse allocation engine, split approval, pick by scan, GST invoice, dispatch gates, transport, POD, returns**
 - **P8 — Finance: double-entry books per GSTIN, automatic postings, AR/AP ageing, GST returns and 2B match, TDS, bank reconciliation, statements, period close, alerts**
 - **P9 — Workflow and people: customer WhatsApp/SMS/email with consent and delivery tracking, rules and tasks (My Work), contracts, handover, HRMS and payroll**
+- **P10 — Insights and AI: control tower, report builder, explainable intelligence, business assistant (Claude), exception centre, backups with restore tests**
 
 | | |
 |---|---|
 | **Architecture** | Domain microservices behind an API gateway, PostgreSQL (schema per service), Postgres-backed event bus |
-| **Services in this release** | `identity` · `organisation` · `masters` · `governance` · `procurement` · `jobwork` · `inventory` · `crm` · `commerce` · `fulfilment` · `finance` · `workflow` · `hrms` · `gateway` |
+| **Services in this release** | `identity` · `organisation` · `masters` · `governance` · `procurement` · `jobwork` · `inventory` · `crm` · `commerce` · `fulfilment` · `finance` · `workflow` · `hrms` · `insights` · `gateway` |
 | **Web app** | React 19 + TypeScript + Tailwind CSS, served by the gateway |
 | **Runs on** | Windows, macOS or Linux — Node.js and PostgreSQL only, no Docker needed |
 
@@ -137,6 +138,15 @@ See [docs/architecture.md](docs/architecture.md) for the design and
 - **HRMS:** employees with onboarding/probation/confirmation/transfer/promotion/resignation/exit and checklists; recruitment pipeline; shifts, daily attendance (lateness and overtime against the shift), phone check-in/out, holidays, leave types and balances (pro-rata), comp-off for work on off days; leave approval by a checker. Attendance and approved leave feed CRM lead allocation.
 - **Payroll:** monthly run from attendance and salary structures — loss of pay, overtime at twice the hourly rate, PF on the ₹15,000 ceiling (EPF/EPS split), ESIC up to ₹21,000 gross, state professional tax slabs, salary TDS under the new regime with the 87A rebate; approval by a checker; payslips (self-service); bank upload file; salary cost and liabilities posted to accounts automatically.
 
+## What’s in P10 — BI, AI intelligence & continuity
+
+- **Control tower and daily brief:** finance, stock, mills, sales, dispatch, procurement, people and work in one page, a six-month sales trend and the top exceptions. Every panel is read with the viewer’s own permissions and data scope, so people see only what their role allows.
+- **Report builder:** any dataset you may see (sales and purchase registers, ageing, stock lots, leads, quotations, orders, shipments, POs, job work, tasks, employees) with AND/OR filters, two-level grouping by date (day/month/quarter/FY year) or field, totals, sort; export to Excel (CSV) or PDF; save, share, schedule (runs with the owner’s own access and notifies).
+- **Explainable intelligence:** stock health with cover days, reorder and transfer suggestions; customer buying cycle, next expected order, churn risk with its factors and margin; quotation win rates by margin, follow-up priority, competitor price register and a negotiation simulator; supplier ranking; compatible fabric substitutes with GSM/width tolerances and a customer-acceptance flag; money tied up in stock, mills, unbilled orders and receivables, and margin per invoice.
+- **Business assistant:** ask in plain words (or by voice). With `ANTHROPIC_API_KEY` set, Claude answers using read-only tools that run with the user’s own permissions; it suggests actions as links and never changes data. Without a key it answers common questions from built-in analyses and says so. Every question and answer is logged with feedback.
+- **Exception centre:** every open alert from every module in one list, most severe first, with “explain”.
+- **Continuity:** system health (services, event-bus lag, parked events with replay, database size), `pg_dump` backups with checksum and row counts, one-click restore tests into a scratch database, `npm run backup -- --verify` for the nightly schedule, offline put-away on the scan station, and a runbook ([docs/continuity.md](docs/continuity.md)). `npm run load-test` measures throughput and p95 latency.
+
 ## Run it on Windows (no Docker)
 
 ### 1. Install the prerequisites (one time)
@@ -188,7 +198,7 @@ npm start
 
 `npm run setup` creates the `textile_erp` database, runs every service’s migrations and loads demo data,
 including sample requisitions, RFQs, purchase orders, invoices, job-work orders, scanned stock, transfers, leads, quotations and credit.
-`npm start` launches the thirteen services and the gateway in one window. Open **http://localhost:4000**.
+`npm start` launches the fourteen services and the gateway in one window. Open **http://localhost:4000**.
 
 > Upgrading from an earlier release? Run `npm install` and then `npm run setup -- --reset` once, to load the demo data for the new modules.
 
@@ -227,7 +237,8 @@ A good first tour:
 9. Sign in as **dispatch** → *Fulfilment*: the Delhi order needs a decision (no single warehouse has 600 kg) — request a split; scan rolls on a released fulfilment, pack, invoice and dispatch; open the delivered shipment’s tracking and POD.
 10. Sign in as **accounts** → *B2B commerce*: payments and their reconciliation, customer advances, token policies (one Kolkata rule waits for approval). Then *Finance*: the vouchers posted automatically from the invoices and receipts above, the bank reconciliation (three statement lines left to explain — try *Create entry* on the gateway settlement), GST returns with the 2B match, TDS, and the statements.
 11. Sign in as **hr** → *HR & payroll*: last month’s payroll (posted in accounts), today’s attendance, the resignation with its exit checklist and handover task; then *My HR* as **sales.east** (on leave today, so CRM skips him). As **salesmgr**, open *Communications* for the WhatsApp/SMS/email log and *Workflow rules*; as **millops**, *Contracts* shows a rate contract due for renewal.
-12. Sign in as **admin** → *Approvals* to approve what is waiting, then look at the *Audit trail*.
+12. Sign in as **owner** → *Insights & AI*: the control tower and today’s brief, *Intelligence*, *Reports* (three shared reports), and ask the *Assistant* “Which fabrics should we reorder?”. As **admin**, *System health* → *Back up now* → *Test restore*.
+13. Sign in as **admin** → *Approvals* to approve what is waiting, then look at the *Audit trail*.
 
 ### Payment gateway
 
@@ -236,6 +247,10 @@ A good first tour:
 ### Customer messages
 
 `MESSAGING_PROVIDER=sandbox` (default) records and “delivers” WhatsApp, SMS and email inside the ERP so the whole flow can be tested. Set `MESSAGING_PROVIDER=live` with `WHATSAPP_TOKEN` and `WHATSAPP_PHONE_NUMBER_ID` to send WhatsApp through Meta’s Cloud API; SMS and email providers are not connected yet (those messages fail and show in the log). `APP_PUBLIC_URL` is the address used in links sent to customers.
+
+### Backups
+
+Schedule `npm run backup -- --verify` nightly (Windows Task Scheduler) with the PostgreSQL `bin` folder on `PATH`, and copy `BACKUP_DIR` off the machine. See [docs/continuity.md](docs/continuity.md).
 
 ### Optional: AI invoice extraction
 

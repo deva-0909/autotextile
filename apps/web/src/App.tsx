@@ -47,6 +47,7 @@ import { AgeingPage, ChartOfAccountsPage, FinanceOverview, LedgerPage, NewVouche
 import { AnomaliesPage, BankPage, ClosePage, GstPage, StatementsPage, TdsPage } from './pages/finance/Compliance';
 import { AllTasksPage, CommunicationsPage, ContractDetailPage, ContractsPage, HandoverPage, MyWorkPage, RuleEditorPage, RulesPage } from './pages/workflow/Workflow';
 import { AttendancePage, EmployeeDetailPage, EmployeesPage, HrOverview, LeavePage, MyHrPage, PayrollPage, PayrollRunPage, PayslipPage, RecruitmentPage } from './pages/hr/Hr';
+import { AssistantPage, ControlTowerPage, ExceptionsPage, IntelligencePage, ReportBuilderPage, ReportsPage, SystemHealthPage } from './pages/insights/Insights';
 import type { ReactNode } from 'react';
 
 function Guard({ perms, children }: { perms?: string[]; children: ReactNode }) {
@@ -245,6 +246,13 @@ export default function App() {
         <Route path="/hr/payroll" element={<Guard perms={['hrms.payroll.manage', 'hrms.payroll.approve']}><PayrollPage /></Guard>} />
         <Route path="/hr/payroll/:month" element={<Guard perms={['hrms.payroll.manage', 'hrms.payroll.approve']}><PayrollRunPage /></Guard>} />
         <Route path="/hr/payslips/:id" element={<PayslipPage />} />
+        <Route path="/insights" element={<Guard perms={['insights.read']}><ControlTowerPage /></Guard>} />
+        <Route path="/insights/reports" element={<Guard perms={['insights.read']}><ReportsPage /></Guard>} />
+        <Route path="/insights/reports/:id" element={<Guard perms={['insights.read']}><ReportBuilderPage /></Guard>} />
+        <Route path="/insights/intelligence" element={<Guard perms={['insights.read']}><IntelligencePage /></Guard>} />
+        <Route path="/insights/exceptions" element={<Guard perms={['insights.read']}><ExceptionsPage /></Guard>} />
+        <Route path="/insights/assistant" element={<Guard perms={['insights.ai.use']}><AssistantPage /></Guard>} />
+        <Route path="/system" element={<Guard perms={['system.health.read']}><SystemHealthPage /></Guard>} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/programme" element={<ProgrammePage />} />
         <Route path="/roadmap/:phase" element={<RoadmapPage />} />

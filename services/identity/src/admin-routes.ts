@@ -155,6 +155,14 @@ export function adminRoutes(r: Router, ctx: ServiceContext) {
     res.json(page(rows, lq));
   });
 
+  /** For services acting on a person's behalf later (scheduled reports): that person's current permissions and scope. */
+  r.get('/users/:id/auth-profile', async (req, res) => {
+    if (!req.user!.id.startsWith('svc:')) throw forbidden('Only services may read auth profiles');
+    const u = await one<{ status: string }>(pool, 'SELECT status FROM users WHERE id = $1', [req.params.id]);
+    if (!u || u.status !== 'active') throw notFound('Active user');
+    res.json(await loadAuthUser(pool, String(req.params.id)));
+  });
+
   r.get('/users/:id', requirePermission('identity.user.read'), async (req, res) => {
     const u = await one<Record<string, unknown>>(pool, `SELECT ${PUBLIC_USER_COLUMNS} FROM users u WHERE u.id = $1`, [req.params.id]);
     if (!u) throw notFound('User');

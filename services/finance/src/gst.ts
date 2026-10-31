@@ -100,6 +100,16 @@ export function gstRoutes(r: Router, { pool }: ServiceContext) {
     }));
   });
 
+  /** Sales or purchase register line by line (invoices, credit notes, transfers) for reports and analysis. */
+  r.get('/registers/:direction', requirePermission('finance.read'), async (req, res) => {
+    const dir = req.params.direction === 'purchases' ? 'inward' : 'outward';
+    const from = (req.query.from as string) || '2000-01-01', to = (req.query.to as string) || '9999-12-31';
+    res.json(await many(pool, `SELECT t.doc_type, t.doc_no, t.doc_date::text AS doc_date, t.party_id, t.party_name, t.party_gstin, t.place_of_supply, t.hsn, t.sku, t.qty_kg::float AS kg, t.rate::float AS gst_rate,
+      (CASE WHEN t.doc_type = 'credit_note' THEN -1 ELSE 1 END * t.taxable)::float AS taxable, (CASE WHEN t.doc_type = 'credit_note' THEN -1 ELSE 1 END * (t.cgst + t.sgst + t.igst))::float AS tax, b.code AS book, b.gstin
+      FROM tax_lines t JOIN vouchers v ON v.id = t.voucher_id JOIN books b ON b.id = t.book_id
+      WHERE t.direction = $1 AND v.status = 'posted' AND t.doc_date BETWEEN $2 AND $3 ORDER BY t.doc_date, t.doc_no LIMIT 20000`, [dir, from, to]));
+  });
+
   // ----- GSTR-2B reconciliation -----
   const twoB = z.object({ book_id: z.uuid(), month, lines: z.array(z.object({ supplier_gstin: z.string().trim().length(15), supplier_name: z.string().max(200).nullable().optional(), invoice_no: z.string().trim().min(1).max(40), invoice_date: z.string().nullable().optional(), taxable: z.number(), igst: z.number().default(0), cgst: z.number().default(0), sgst: z.number().default(0) })).min(1).max(5000) });
   r.post('/gst/2b', requirePermission('finance.gst.manage'), async (req, res) => {

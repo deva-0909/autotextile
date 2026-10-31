@@ -35,6 +35,9 @@ export async function ensureBus(pool: Pool) {
         error text NOT NULL,
         failed_at timestamptz NOT NULL DEFAULT now()
       );
+      ALTER TABLE bus.dead_letters ADD COLUMN IF NOT EXISTS replay_requested_at timestamptz;
+      ALTER TABLE bus.dead_letters ADD COLUMN IF NOT EXISTS replayed_at timestamptz;
+      ALTER TABLE bus.dead_letters ADD COLUMN IF NOT EXISTS replay_error text;
     `);
   } finally {
     await pool.query(`SELECT pg_advisory_unlock(hashtext('bus:init'))`);
@@ -87,6 +90,21 @@ export function subscribe(pool: Pool, consumer: string, handlers: Record<string,
         }
       }
       if (rows.length) await c.query('UPDATE bus.offsets SET last_id = $2 WHERE consumer = $1', [consumer, rows[rows.length - 1].id]);
+      // Parked events an operator asked to replay (after fixing the cause) run once more for this consumer only.
+      const { rows: replays } = await c.query(
+        `SELECT d.id AS dl_id, e.id, e.type, e.source, e.payload, e.occurred_at FROM bus.dead_letters d JOIN bus.events e ON e.id = d.event_id
+         WHERE d.consumer = $1 AND d.replay_requested_at IS NOT NULL AND d.replayed_at IS NULL ORDER BY d.id LIMIT 50`, [consumer]);
+      for (const r of replays as (BusEvent & { dl_id: number })[]) {
+        await c.query('SAVEPOINT rp');
+        try {
+          if (types.includes(r.type)) await handlers[r.type](r, c);
+          await c.query('RELEASE SAVEPOINT rp');
+          await c.query('UPDATE bus.dead_letters SET replayed_at = now(), replay_error = NULL WHERE id = $1', [r.dl_id]);
+        } catch (err) {
+          await c.query('ROLLBACK TO SAVEPOINT rp');
+          await c.query('UPDATE bus.dead_letters SET replay_requested_at = NULL, replay_error = $2 WHERE id = $1', [r.dl_id, (err as Error).message]);
+        }
+      }
       await c.query('COMMIT');
       return rows.length;
     } catch (err) {
@@ -105,6 +123,7 @@ export function subscribe(pool: Pool, consumer: string, handlers: Record<string,
     const run = (async () => {
       try {
         while (!stopped && (await batch()) > 0) { /* keep going */ }
+        await batch();
       } catch (err) {
         console.error(`[bus:${consumer}] handler failed, will retry`, (err as Error).message);
       }

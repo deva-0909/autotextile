@@ -502,6 +502,10 @@ export async function seedOperations(services: RunningService[]) {
     // A manual task in the dispatch queue.
     await call('workflow', salesMgr, 'POST', '/tasks', { title: 'Confirm transport slot for the Delhi 600 kg order once allocation is decided', queue_permission: 'fulfilment.dispatch', priority: 'high', due_at: new Date(Date.now() + 86_400_000).toISOString() });
     await drain();
+    // ---------- P10: shared reports ----------
+    await call('insights', accounts, 'POST', '/reports', { name: 'Sales by customer, month by month', definition: { dataset: 'sales_register', from: '2026-04-01', group_by: ['party_name', 'doc_date'], date_grain: 'month', measures: [{ field: 'taxable', agg: 'sum' }, { field: 'kg', agg: 'sum' }], sort: { field: 'sum_taxable', dir: 'desc' } }, shared: true, schedule: 'monthly' });
+    await call('insights', stores, 'POST', '/reports', { name: 'Stock older than 60 days', definition: { dataset: 'stock_lots', filters: { logic: 'and', rules: [{ field: 'age_days', op: 'gt', value: 60 }] }, columns: ['lot_no', 'sku', 'kg', 'value', 'age_days', 'recommendation'], sort: { field: 'age_days', dir: 'desc' } }, shared: true, schedule: 'weekly' });
+    await call('insights', salesMgr, 'POST', '/reports', { name: 'Leads by source and stage', definition: { dataset: 'leads', group_by: ['source_name', 'stage'], measures: [{ field: 'est_value', agg: 'sum' }, { field: 'number', agg: 'count_distinct' }] }, shared: true });
     const wf = services.find((s) => s.ctx.name === 'workflow')!.ctx.pool;
     await runContractChecks(wf);
     await dispatchMessages(wf);

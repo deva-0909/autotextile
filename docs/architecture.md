@@ -43,7 +43,7 @@ Browser ──► gateway :4000 ──► /api/identity/*      identity :4101   
 | P7 ✅ | fulfilment (allocation engine, split approval, pick/pack, GST invoice, dispatch gates, transport, tracking, POD, claims, returns) |
 | P8 ✅ | finance (GSTIN books, automatic postings, vouchers with maker-checker, AR/AP, GST registers and returns, TDS, bank reconciliation, valuation, statements, period close, anomaly alerts) |
 | P9 ✅ | workflow (message templates, consent, outbox and delivery log, rules engine, tasks/My Work, contracts, handover), hrms (employees, recruitment, attendance, leave, comp-off, payroll) |
-| P10 | analytics/BI, intelligence (AI copilot) |
+| P10 ✅ | insights (control tower, report builder, intelligence, business assistant on Claude, exception centre, system health, backups and restore tests) |
 
 ## Event bus
 
@@ -116,6 +116,18 @@ Make synchronous calls first, then audit and publish.
   ranks warehouses, and reserves in inventory. A split is never automatic: it becomes an approval.
 - **Dispatch gates** are computed from facts (picked, packed, invoiced, settled/credit/approved override) and
   re-checked at dispatch time inside the transaction.
+
+## P10 design notes
+
+- **Insights reads as the user.** It calls other services with the signed-in user’s own token (`callAsUser`), never
+  the all-powerful service token, so every dashboard, report and assistant answer respects permissions and warehouse
+  scope automatically. Scheduled reports sign a short-lived token for the owner from identity’s current profile.
+- **No cross-schema reads.** Datasets are the owning services’ list APIs; insights holds only saved reports, snapshots,
+  the assistant log and backup records.
+- **The assistant reads, people act.** Claude (`claude-opus-5-5`, adaptive thinking, tool runner, at most eight tool
+  rounds) gets read-only tools over the same functions the screens use; actions come back as links.
+- **Replay.** Parked events can be replayed for the one consumer that failed (`bus.dead_letters.replay_requested_at`);
+  handlers are idempotent on source ids, so a replay cannot double-post.
 
 ## P9 design notes
 

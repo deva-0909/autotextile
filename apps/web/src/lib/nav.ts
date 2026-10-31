@@ -1,8 +1,8 @@
 import {
   ArrowRightLeft, BadgeIndianRupee, CircleDollarSign, ClipboardPen, Contact, Inbox, Map as MapIcon, PackageCheck, PackageOpen, ScanLine, Shuffle, Tag, Target,
   AlarmClock, BookMarked, Boxes, Building2, ClipboardCheck, ClipboardList, Cog, Factory, FileSearch, FileStack, Gauge, History, KeyRound, Layers,
-  LayoutDashboard, LineChart, Medal, Package, Receipt, Rocket, ScanText, ShieldAlert, ShieldCheck, ShoppingCart, Sparkles, Truck, UserCog, Users, Warehouse,
-  Workflow, Wallet, ListTodo, UserCircle, MessagesSquare, FileSignature, ArrowRightLeft as Handover, CalendarCheck, CalendarDays, Briefcase, IndianRupee, Users2, ListChecks, BookOpen, FileSpreadsheet, Landmark, Percent, ScrollText, Scale, LockKeyhole, Siren, HandCoins, ArrowDownToLine, CreditCard, UserPlus, MessageSquareWarning, Undo2, Store, type LucideIcon,
+  LayoutDashboard, LineChart, Medal, Package, Receipt, Rocket, ScanText, ShieldAlert, ShieldCheck, ShoppingCart, Truck, UserCog, Users, Warehouse,
+  Workflow, Wallet, Radar, FileBarChart, BrainCircuit, Bot, HeartPulse, TriangleAlert, ListTodo, UserCircle, MessagesSquare, FileSignature, ArrowRightLeft as Handover, CalendarCheck, CalendarDays, Briefcase, IndianRupee, Users2, ListChecks, BookOpen, FileSpreadsheet, Landmark, Percent, ScrollText, Scale, LockKeyhole, Siren, HandCoins, ArrowDownToLine, CreditCard, UserPlus, MessageSquareWarning, Undo2, Store, type LucideIcon,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon; perms?: string[]; phase?: string }
@@ -16,6 +16,16 @@ export const NAV: NavGroup[] = [
       { to: '/approvals', label: 'Approvals', icon: ClipboardCheck },
       { to: '/my-work', label: 'My work', icon: ListTodo },
       { to: '/me', label: 'My HR', icon: UserCircle },
+    ],
+  },
+  {
+    label: 'Insights & AI',
+    items: [
+      { to: '/insights', label: 'Control tower', icon: Radar, perms: ['insights.read'] },
+      { to: '/insights/assistant', label: 'Assistant', icon: Bot, perms: ['insights.ai.use'] },
+      { to: '/insights/reports', label: 'Reports', icon: FileBarChart, perms: ['insights.read'] },
+      { to: '/insights/intelligence', label: 'Intelligence', icon: BrainCircuit, perms: ['insights.read'] },
+      { to: '/insights/exceptions', label: 'Exception centre', icon: TriangleAlert, perms: ['insights.read'] },
     ],
   },
   {
@@ -151,12 +161,12 @@ export const NAV: NavGroup[] = [
       { to: '/security/activity', label: 'Login activity', icon: ShieldCheck, perms: ['identity.session.read'] },
       { to: '/governance/audit', label: 'Audit trail', icon: History, perms: ['governance.audit.read'] },
       { to: '/governance/documents', label: 'Documents', icon: FileStack, perms: ['governance.document.read'] },
+      { to: '/system', label: 'System health', icon: HeartPulse, perms: ['system.health.read'] },
     ],
   },
   {
     label: 'Coming next',
     items: [
-      { to: '/roadmap/P10', label: 'BI & AI', icon: Sparkles, phase: 'P10' },
       { to: '/programme', label: 'Programme tracker', icon: Rocket },
     ],
   },

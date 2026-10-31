@@ -1,4 +1,4 @@
-# Requirement traceability — releases P1–P9
+# Requirement traceability — releases P1–P10
 
 Source: *Textile_Trading_ERP_Development_and_Figma_Tracker.xlsx*, Requirements and Figma Screens sheets.
 Statuses:
@@ -138,6 +138,21 @@ Statuses:
 | REQ-0080 | Payroll and statutory components | **Built / partial** | Salary components, LOP, overtime, PF (ceiling, EPF/EPS), ESIC, PT by state, salary TDS (new regime, 87A), payslips, approval, bank file, accounting posting | Old tax regime and employee declarations; PF ECR / ESIC challan files; Form 16/24Q; arrears; to be validated by the payroll consultant/CA |
 | REQ-0081 | Employee handover | **Built** | Open tasks, CRM leads and contracts moved with a reason; every item recorded; exit raises a handover task | Customer commitments other than leads/contracts (open quotations stay with the original owner) |
 
+## P10 — BI, AI intelligence, optimisation & continuity
+
+| ID | Requirement | Status | Implementation | Remaining (phase) |
+|---|---|---|---|---|
+| REQ-0082 | Dynamic report builder | **Built / partial** | 13 datasets; field picking; AND/OR filters with groups; grouping by field or date grain; sum/avg/min/max/count/distinct; sort; totals; save, share, schedule; CSV (Excel) and PDF (print) export | Native .xlsx; email delivery of scheduled reports (needs an email provider) |
+| REQ-0083 | Role-specific dashboards | **Built / partial** | Control tower (owner), finance, inventory ageing, mill, sales pipeline, dispatch, people and work panels shown by permission; supplier scorecards, customer, commercial and working-capital intelligence | Separate saved dashboard layouts per role; employee productivity beyond task counts |
+| REQ-0084 | Supplier price and reliability intelligence | **Built** | Ranking by price, on-time delivery, rejections and accuracy with reasons; RFQ and PO approval stay with procurement | Capacity and risk inputs from supplier KYC |
+| REQ-0085 | Fabric comparison and substitution | **Built** | GSM, width, composition, colour, finish and category similarity; tolerance checks; available stock; customer acceptance flag | Shade (ΔE) comparison from lab readings |
+| REQ-0086 | Stock optimisation | **Built / partial** | Health score with factors, days of cover, ageing action, demand-based reorder, transfer suggestions; stock-count discrepancies stay in inventory alerts | Netting open POs from reorder quantities; reservation priority suggestions |
+| REQ-0087 | Buying and retention prediction | **Built** | Buying cycle, next expected order, repeat-due flag, churn risk with factors, margin, overdue, credit | — |
+| REQ-0088 | Quotation and negotiation insights | **Built** | Win rate by margin band and salesperson, negotiation simulator, competitor price register, follow-up priority | Price elasticity by SKU once more history exists |
+| REQ-0089 | Working capital and order profitability | **Built / partial** | Money in warehouse, mills, transit, unbilled orders, receivables, advances, payables; margin per invoice after material and freight | Commission (no commission ledger yet); processing cost per order beyond landed lot cost |
+| REQ-0090 | Textile business copilot | **Built / partial** | Natural-language questions (Claude with read-only tools under the user’s permissions), daily brief, exception explanations, PO/receipt/invoice reconciliation, voice input and read-aloud in the browser; actions only as links | Needs `ANTHROPIC_API_KEY`; built-in answers otherwise |
+| REQ-0091 | Offline mobile and disaster recovery | **Built / partial** | Offline put-away queue on the scan station; backups with checksum and restore test; scheduled backup script; RPO/RTO targets; health and bus monitoring; parked-event replay; runbook; load-test script | Offline capture beyond put-away; automated off-site copy |
+
 ### Known gaps
 
 - **MFA is optional per user.** The setting *Require MFA for privileged users* exists, but the login does not force enrolment yet.
@@ -211,6 +226,12 @@ Statuses:
 | FIG-062 | Document and contract register | `/contracts`, `/contracts/:id` |
 | FIG-063 | Employee profile and attendance | `/hr/employees`, `/hr/employees/:id`, `/hr/attendance`, `/hr/leave`, `/me` |
 | FIG-064 | Payroll run and payslip | `/hr/payroll`, `/hr/payroll/:month`, `/hr/payslips/:id` |
+| FIG-065 | Dynamic report builder | `/insights/reports`, `/insights/reports/:id` |
+| FIG-066 | Executive control tower | `/insights` |
+| FIG-067 | Textile Intelligence workspace | `/insights/assistant`, `/insights/intelligence` |
+| FIG-068 | AI exception and anomaly centre | `/insights/exceptions` |
+| FIG-069 | Supplier / stock / customer intelligence | `/insights/intelligence` |
+| FIG-070 | Backup and system health | `/system` |
 | extra | Approvals inbox, document library, configuration, programme tracker, claims, reservations, issue to mill, sales dashboard, targets | `/approvals`, `/governance/documents`, `/organisation/configuration`, `/programme`, `/jobwork/claims`, `/inventory/reservations`, `/inventory/mill-issues`, `/crm`, `/crm/performance` |
 
 ## Acceptance tests (tracker sheet) touched by P1
