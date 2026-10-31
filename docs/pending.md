@@ -39,6 +39,25 @@ Status at the time of parking: all 115 automated tests pass, the web app builds,
 - **Cash ledger interest/fee heads:** cash is not moved between heads (PMT-09) from the ERP.
 - Returns are filed on the portal; GSTR-1 JSON is exported, nothing is uploaded automatically.
 
+## 4a. From the live demo audit (31 Oct 2026)
+
+Every demo role was crawled on the hosted demo (17 roles, 688 screen visits, no errors) and the books reconciled
+against the documents after a reload with richer history (14 checks, all pass). Open items from that audit:
+
+- **Durable document storage on the hosted demo.** On Vercel, uploads live in `/tmp` and vanish when the instance
+  recycles. Move document storage to Supabase Storage (or S3) before anyone uploads real files.
+- **Supplier payment run.** Supplier invoices can now be paid one at a time (*Record payment*); add a batch run over
+  approved bills with a bank bulk-upload file (NEFT bulk format) and a payment advice to each supplier.
+- **Customer receipt matching.** Offline receipts are recorded by hand (*Record offline payment*); match bank-statement
+  credits to open invoices and offer one-click recording.
+- **Bill-wise receivables.** Receivables ageing allocates receipts to the oldest bills from the party balance; add
+  explicit bill-wise knock-off (receipt against invoice) for customers who pay invoice by invoice.
+- **Remaining long screens.** Most screens fit 1440×900 without scrolling; the longest left are reference lists
+  (programme tracker, training, communications, system status, GST returns, audit trail). Add tabs or filters.
+- **Mobile warehouse screens.** Phone-first inward weighing, picking and counts with camera barcode scanning.
+- **Supabase plan.** The free plan has 60 connections, pauses after a week idle and keeps no point-in-time
+  backups: upgrade before production. Keep one login role (`deploy/supabase-roles.sql`).
+
 ## 4. Features partly built (code work)
 
 **Security and platform**
