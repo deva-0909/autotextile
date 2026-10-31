@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
+import { Link } from '../../components/AppLink';
 import { api, invalidatePrefix } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtDateTime, fmtINR, fmtNum, humanize } from '../../lib/format';

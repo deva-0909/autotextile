@@ -29,5 +29,9 @@ export function fromPg(err: { code?: string; constraint?: string; detail?: strin
   if (err.code === '23505') return conflict(`Already exists${err.detail ? `: ${err.detail.replace(/^Key /, '')}` : ''}`);
   if (err.code === '23503') return conflict('This record is referenced by, or refers to, another record');
   if (err.code === '23514') return badRequest(`Value violates rule ${err.constraint ?? ''}`.trim());
+  // Malformed input that reached the database (an id that is not a UUID, an impossible date, a number too large).
+  if (err.code === '22P02') return badRequest('A value is not in the expected format (for example, an id or a number)');
+  if (err.code === '22007' || err.code === '22008') return badRequest('A date is not valid');
+  if (err.code === '22003') return badRequest('A number is too large');
   return null;
 }

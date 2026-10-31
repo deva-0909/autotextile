@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, Circle, Medal } from 'lucide-react';
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from '../../components/AppLink';
 import { api } from '../../lib/api';
 import { fmtDate, fmtINR, fmtNum, GST_STATES } from '../../lib/format';
 import { SimpleTable } from '../../components/DataTable';

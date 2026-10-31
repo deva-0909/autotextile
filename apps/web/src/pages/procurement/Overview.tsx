@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, ClipboardList, FileSearch, Receipt, ScanText, ShieldAlert, ShoppingCart } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from '../../components/AppLink';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtINR, fmtRelative, humanize } from '../../lib/format';

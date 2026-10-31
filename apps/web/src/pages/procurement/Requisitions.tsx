@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, FileSearch, Plus, Send, XCircle } from 'lucide-react';
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import { Link } from '../../components/AppLink';
 import { api, invalidatePrefix } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtDate, fmtNum } from '../../lib/format';

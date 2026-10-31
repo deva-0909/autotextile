@@ -1,7 +1,8 @@
 import { ArrowLeft, Eye, EyeOff, KeyRound, Lock, Mail, ShieldCheck } from 'lucide-react';
 import { DemoLoginPanel, useDemoUsers } from '../components/DemoSwitcher';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link } from '../components/AppLink';
 import { api, ApiError, type SessionUser } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Button, Input, Notice } from '../components/ui';

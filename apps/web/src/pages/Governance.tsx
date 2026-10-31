@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, ChevronRight, Clock, ShieldAlert, XCircle } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link } from '../components/AppLink';
 import { api, invalidatePrefix } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { fmtBytes, fmtDate, fmtDateTime, fmtRelative, humanize } from '../lib/format';

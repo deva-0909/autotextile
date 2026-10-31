@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import { CheckCircle2, Download, FileUp, Landmark, Lock, ShieldAlert, Unlock } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from '../../components/AppLink';
 import { api, invalidatePrefix } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtAmt, fmtDate, fmtDateTime, fmtINR, fmtNum, humanize } from '../../lib/format';

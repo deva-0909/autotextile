@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipboardList, Factory, Plus, Undo2 } from 'lucide-react';
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Link } from '../../components/AppLink';
 import { api, invalidatePrefix } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtDate, fmtDateTime, fmtNum, fmtRelative, humanize } from '../../lib/format';

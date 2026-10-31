@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2 } from 'lucide-react';
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from '../../components/AppLink';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtINR, fmtNum, fmtRelative, humanize } from '../../lib/format';

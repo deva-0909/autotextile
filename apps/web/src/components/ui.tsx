@@ -1,9 +1,11 @@
 import { clsx } from 'clsx';
-import { AlertTriangle, Inbox, Loader2, Lock, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Inbox, Loader2, Lock, RefreshCw } from 'lucide-react';
 import {
   forwardRef, useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes,
 } from 'react';
-import { Link } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Link } from './AppLink';
+import { pageOf } from '../lib/nav';
 
 // ---------- Button ----------
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'subtle';
@@ -212,9 +214,30 @@ export function Card({ title, description, actions, children, className, padded 
   );
 }
 
-export function PageHeader({ title, description, actions, breadcrumbs, meta }: {
+/**
+ * Back from a detail page (any page that is not itself in the menu): to the previous screen in this session, or else
+ * to the page's parent in the breadcrumb. A page can pass back={false} to hide it, or a path to override the target.
+ */
+function BackButton({ to }: { to: string }) {
+  const nav = useNavigate();
+  const inApp = ((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0;
+  return (
+    <button type="button" data-back aria-label="Back" title="Back" onClick={() => (inApp ? nav(-1) : nav(to))}
+      className="flex size-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:bg-slate-50 hover:text-slate-800">
+      <ArrowLeft className="size-4" />
+    </button>
+  );
+}
+
+export function PageHeader({ title, description, actions, breadcrumbs, meta, back }: {
   title: ReactNode; description?: ReactNode; actions?: ReactNode; breadcrumbs?: { label: string; to?: string }[]; meta?: ReactNode;
+  back?: boolean | string;
 }) {
+  const loc = useLocation();
+  const parent = [...(breadcrumbs ?? [])].reverse().find((b) => b.to)?.to;
+  const page = pageOf(loc.pathname);
+  const isDetail = !page || page.to !== loc.pathname;
+  const backTo = typeof back === 'string' ? back : back === false ? null : isDetail && (parent || page) ? (parent ?? page!.to) : null;
   return (
     <div className="mb-4">
       {breadcrumbs && (
@@ -228,10 +251,13 @@ export function PageHeader({ title, description, actions, breadcrumbs, meta }: {
         </nav>
       )}
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-start gap-3">
+          {backTo && <BackButton to={backTo} />}
+          <div className="min-w-0">
           <h1 className="flex flex-wrap items-center gap-3 text-[20px] font-semibold tracking-[-0.01em] text-slate-900">{title}</h1>
           {description && <p className="mt-0.5 max-w-4xl text-[13px] text-slate-500">{description}</p>}
           {meta && <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12.5px] text-slate-600">{meta}</div>}
+          </div>
         </div>
         {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>

@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Link } from '../../components/AppLink';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtDate, fmtINR, fmtNum } from '../../lib/format';

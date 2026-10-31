@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, CircleDot, Lock, MapPin, ShieldCheck, Truck, XCircle } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { Link } from '../../components/AppLink';
 import { clsx } from 'clsx';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';

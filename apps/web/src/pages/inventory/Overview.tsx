@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, ArrowRightLeft, ClipboardCheck, Factory, PackageOpen, ScanLine, ShieldAlert, Tag, Timer } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from '../../components/AppLink';
 import { api } from '../../lib/api';
 import { fmtNum, fmtRelative, humanize } from '../../lib/format';
 import { Bar } from '../../components/scan';

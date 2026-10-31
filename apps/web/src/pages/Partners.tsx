@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Building, Factory, Landmark, Mail, MapPin, Pencil, Phone, Plus, ShieldAlert, Star, Trash2, Truck, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link } from '../components/AppLink';
 import { api, invalidatePrefix, qs } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { GST_STATES, fmtDate, fmtDateTime, fmtINR, gstinProblem, humanize } from '../lib/format';

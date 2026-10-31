@@ -2,7 +2,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import { AlertTriangle, Bot, Database, Download, HardDriveDownload, Mic, MicOff, Play, Plus, RefreshCw, Save, Send, ShieldCheck, Sparkles, ThumbsDown, ThumbsUp, Trash2, Volume2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link } from '../../components/AppLink';
 import { api, getAccessToken, invalidatePrefix } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtBytes, fmtDate, fmtDateTime, fmtINR, fmtNum, fmtRelative, humanize } from '../../lib/format';
@@ -157,7 +158,7 @@ export function ReportBuilderPage() {
   const { user, can } = useAuth();
   const ds = useQuery({ queryKey: ['ins-datasets'], queryFn: () => api.get<Dataset[]>('/insights/datasets') });
   const saved = useQuery({ queryKey: ['ins-report', id], queryFn: () => api.get<Row>(`/insights/reports/${id}`), enabled: id !== 'new' });
-  const [def, setDef] = useState<Def>({ dataset: sp.get('dataset') ?? 'sales_register', filters: { logic: 'and', rules: [] }, group_by: [], measures: [], columns: [] });
+  const [def, setDef] = useState<Def>({ dataset: sp.get('dataset') ?? '', filters: { logic: 'and', rules: [] }, group_by: [], measures: [], columns: [] });
   const [meta, setMeta] = useState({ name: '', shared: false, schedule: 'none' });
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
@@ -166,7 +167,9 @@ export function ReportBuilderPage() {
   useEffect(() => { if (saved.data) { setDef(saved.data.definition); setMeta({ name: saved.data.name, shared: saved.data.shared, schedule: saved.data.schedule }); } }, [saved.data]);
   const snap = sp.get('snapshot');
   useEffect(() => { if (snap && id !== 'new') void api.get<{ result: Result }>(`/insights/reports/${id}/snapshots/${snap}`).then((s) => setResult({ ...s.result, dataset: '', total_rows: s.result.rows.length, result_rows: s.result.rows.length, truncated: false })); }, [snap, id]);
-  const fields = useQuery({ queryKey: ['ins-fields', def.dataset], queryFn: () => api.get<Field[]>(`/insights/datasets/${def.dataset}/fields`) });
+  // Start on the first dataset this person may report on (the list holds only those), never on one they cannot read.
+  useEffect(() => { if (ds.data?.length && id === 'new' && !ds.data.some((d) => d.key === def.dataset)) setDef((x) => ({ ...x, dataset: ds.data![0]!.key })); }, [ds.data, id, def.dataset]);
+  const fields = useQuery({ queryKey: ['ins-fields', def.dataset], queryFn: () => api.get<Field[]>(`/insights/datasets/${def.dataset}/fields`), enabled: !!ds.data?.some((d) => d.key === def.dataset) });
   const F = fields.data ?? [];
   const nums = F.filter((f) => f.type === 'number');
   const dsx = ds.data?.find((d) => d.key === def.dataset);

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import { ArrowDown, ArrowUp, ArrowUpDown, Bookmark, ChevronLeft, ChevronRight, Columns3, Download, RefreshCw, Search, Trash2, X } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, qs, type Page } from '../lib/api';
 import { Button, EmptyState, ErrorState, IconButton, Skeleton } from './ui';
 import { Menu, useToast } from './overlay';
@@ -251,19 +251,53 @@ export function DataTable<T>({
 }
 
 /** Compact client-side table for short lists that are already loaded. */
-export function SimpleTable<T>({ rows, columns, rowKey, onRowClick, empty, pageSize }: {
+/** A rendered cell's text for CSV: amounts become plain numbers (₹1,23,456.50 → 123456.50) so spreadsheets can add them. */
+function cellValue(text: string) {
+  const t = text.replace(/\s+/g, ' ').trim();
+  const m = /^(-?)₹?\s?(-?[\d,]+(?:\.\d+)?)\s*(Dr|Cr)?$/.exec(t);
+  return m && /\d/.test(m[2]!) ? `${m[1]}${m[2]!.replace(/,/g, '')}${m[3] ? ` ${m[3]}` : ''}` : t;
+}
+const csvEsc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+
+export function SimpleTable<T>({ rows, columns, rowKey, onRowClick, empty, pageSize, csv, csvName }: {
   rows: T[]; columns: Omit<Column<T>, 'sort' | 'csv'>[]; rowKey: (r: T) => string; onRowClick?: (r: T) => void; empty?: ReactNode;
   /** Show this many rows at a time, with a pager underneath, when there are more. */
   pageSize?: number;
+  /** Offer a CSV download of every row (default: when the table has 3 rows or more). */
+  csv?: boolean;
+  /** File name for the CSV (default: the page title). */
+  csvName?: string;
 }) {
   const [pg, setPg] = useState(0);
+  const [exporting, setExporting] = useState(false);
+  const tableRef = useRef<HTMLTableElement>(null);
   const pages = pageSize ? Math.max(1, Math.ceil(rows.length / pageSize)) : 1;
   const at = Math.min(pg, pages - 1);
   useEffect(() => { setPg(0); }, [rows.length]);
-  const body = useMemo(() => (pageSize ? rows.slice(at * pageSize, (at + 1) * pageSize) : rows), [rows, pageSize, at]);
+  // While exporting, every row is rendered so the file holds what the screen would show across all pages.
+  const body = useMemo(() => (pageSize && !exporting ? rows.slice(at * pageSize, (at + 1) * pageSize) : rows), [rows, pageSize, at, exporting]);
+  const offerCsv = csv ?? rows.length >= 3;
+  useEffect(() => {
+    if (!exporting || !tableRef.current) return;
+    const t = tableRef.current;
+    const heads = [...t.querySelectorAll('thead th')].map((th) => (th as HTMLElement).innerText.trim());
+    const keep = heads.map((h, i) => (h ? i : -1)).filter((i) => i >= 0);
+    const lines = [keep.map((i) => csvEsc(heads[i]!)).join(',')];
+    for (const tr of t.querySelectorAll('tbody tr')) {
+      const cells = [...tr.children].map((td) => cellValue((td as HTMLElement).innerText));
+      lines.push(keep.map((i) => csvEsc(cells[i] ?? '')).join(','));
+    }
+    const title = csvName ?? (document.querySelector('main h1') as HTMLElement | null)?.innerText.split('\n')[0] ?? 'export';
+    const url = URL.createObjectURL(new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: `${title.replace(/[^\w.-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'export'}-${new Date().toISOString().slice(0, 10)}.csv` });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    setExporting(false);
+  }, [exporting, csvName]);
+  const showPager = !!pageSize && rows.length > pageSize;
   return (
     <div className="scrollbar-thin overflow-x-auto">
-      <table className="w-full text-left">
+      <table ref={tableRef} className="w-full text-left">
         <thead>
           <tr className="border-b border-slate-200 bg-slate-50/80">
             {columns.map((c) => (
@@ -282,13 +316,16 @@ export function SimpleTable<T>({ rows, columns, rowKey, onRowClick, empty, pageS
         </tbody>
       </table>
       {body.length === 0 && (empty ?? <EmptyState title="Nothing here yet" />)}
-      {pageSize && rows.length > pageSize && (
-        <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2 text-[12.5px] text-slate-500">
-          <span className="tabular">{at * pageSize + 1}–{Math.min(rows.length, (at + 1) * pageSize)} of {rows.length}</span>
+      {(showPager || (offerCsv && rows.length > 0)) && (
+        <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-1.5 text-[12.5px] text-slate-500">
+          <span className="tabular">{showPager ? `${at * pageSize! + 1}–${Math.min(rows.length, (at + 1) * pageSize!)} of ${rows.length}` : `${rows.length} rows`}</span>
           <span className="flex items-center gap-1">
-            <button className="rounded px-2 py-1 hover:bg-slate-100 disabled:opacity-40" disabled={at === 0} onClick={() => setPg(at - 1)} aria-label="Previous page">‹ Previous</button>
-            <span className="tabular">Page {at + 1} of {pages}</span>
-            <button className="rounded px-2 py-1 hover:bg-slate-100 disabled:opacity-40" disabled={at >= pages - 1} onClick={() => setPg(at + 1)} aria-label="Next page">Next ›</button>
+            {offerCsv && rows.length > 0 && <button type="button" className="flex items-center gap-1 rounded px-2 py-1 hover:bg-slate-100 hover:text-slate-800" onClick={() => setExporting(true)} aria-label="Download CSV" title="Download every row as CSV"><Download className="size-3.5" />CSV</button>}
+            {showPager && <>
+              <button className="rounded px-2 py-1 hover:bg-slate-100 disabled:opacity-40" disabled={at === 0} onClick={() => setPg(at - 1)} aria-label="Previous page">‹ Previous</button>
+              <span className="tabular">Page {at + 1} of {pages}</span>
+              <button className="rounded px-2 py-1 hover:bg-slate-100 disabled:opacity-40" disabled={at >= pages - 1} onClick={() => setPg(at + 1)} aria-label="Next page">Next ›</button>
+            </>}
           </span>
         </div>
       )}

@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, BookCheck, CheckCircle2, PenLine, Plus, RefreshCw, Wallet, XCircle } from 'lucide-react';
 import { useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link } from '../../components/AppLink';
 import { api, invalidatePrefix } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtDate, fmtDateTime, fmtINR, fmtNum } from '../../lib/format';

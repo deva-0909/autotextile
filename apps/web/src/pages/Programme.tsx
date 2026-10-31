@@ -1,7 +1,8 @@
 import { clsx } from 'clsx';
 import { CheckCircle2, CircleDashed, Construction, Flag, ListChecks, PenTool, Target } from 'lucide-react';
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { Link } from '../components/AppLink';
 import programme from '../lib/programme.json';
 import { Badge, Card, EmptyState, PageHeader, Segmented } from '../components/ui';
 

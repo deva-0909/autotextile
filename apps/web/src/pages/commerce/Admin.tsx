@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BadgeIndianRupee, Landmark, Check, ClipboardCopy, FileText, Link2, MessageSquareWarning, Plus, RotateCcw, ShieldAlert, UserPlus, Wallet } from 'lucide-react';
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Link } from '../../components/AppLink';
 import { api, invalidatePrefix } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtDate, fmtDateTime, fmtINR, fmtNum, humanize } from '../../lib/format';

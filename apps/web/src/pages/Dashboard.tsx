@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight, Boxes, Building2, CheckCircle2, ClipboardCheck, Factory, FileWarning, HandCoins, History, Landmark, Package, Receipt, ShieldAlert, TrendingUp, Truck, Users, Warehouse } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from '../components/AppLink';
 import { api, qs, type Page } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { fmtNum, fmtRelative, humanize } from '../lib/format';
