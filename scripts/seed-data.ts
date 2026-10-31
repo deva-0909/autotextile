@@ -161,6 +161,7 @@ export const DEMO_USERS: { email: string; name: string; designation: string; rol
   { email: 'auditor@textile.local', name: 'CA Review Desk', designation: 'Statutory Auditor', role: 'auditor', scope: 'all' },
   { email: 'millops@textile.local', name: 'Karthik Raman', designation: 'Mill Operations Manager', role: 'mill_ops_manager', scope: 'all' },
   { email: 'dispatch@textile.local', name: 'Imran Shaikh', designation: 'Dispatch Manager', role: 'dispatch_manager', scope: 'all' },
+  { email: 'hr@textile.local', name: 'Farida Khan', designation: 'HR Manager', role: 'hr_manager', scope: 'all' },
   { email: 'buyer@srimurugan.example', name: 'S. Murugan', designation: 'Customer portal: company admin', role: 'customer_company_admin', scope: 'none', party: 'Sri Murugan Garments' },
   { email: 'purchase@kolkatahosiery.example', name: 'Debashis Roy', designation: 'Customer portal: buyer', role: 'customer_buyer', scope: 'none', party: 'Kolkata Hosiery Works' },
   { email: 'supplier@ambica.example', name: 'Ambica Dispatch Desk', designation: 'Supplier portal user', role: 'supplier_portal', scope: 'none', party: 'Shree Ambica Knitters' },

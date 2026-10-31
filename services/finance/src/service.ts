@@ -1,6 +1,6 @@
 import { type ServiceDefinition, migrationsOf } from '@erp/platform';
 import { applyFinanceDecision, voucherRoutes } from './vouchers.ts';
-import { approvalDecidedConsumer, creditNoteConsumer, orderCancelledConsumer, paymentReceivedConsumer, paymentRefundedConsumer, salesInvoiceConsumer, supplierInvoiceConsumer, transferConsumer } from './postings.ts';
+import { approvalDecidedConsumer, creditNoteConsumer, orderCancelledConsumer, payrollApprovedConsumer, payrollPaidConsumer, paymentReceivedConsumer, paymentRefundedConsumer, salesInvoiceConsumer, supplierInvoiceConsumer, transferConsumer } from './postings.ts';
 import { partyRoutes } from './parties.ts';
 import { gstRoutes } from './gst.ts';
 import { tdsRoutes } from './tds.ts';
@@ -27,5 +27,7 @@ export const financeService: ServiceDefinition = {
     'commerce.payment.refunded': paymentRefundedConsumer(),
     'commerce.order.cancelled': orderCancelledConsumer(),
     'inventory.transfer.dispatched': transferConsumer(),
+    'hrms.payroll.approved': payrollApprovedConsumer(),
+    'hrms.payroll.paid': payrollPaidConsumer(),
   }),
 };

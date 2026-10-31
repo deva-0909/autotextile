@@ -42,7 +42,7 @@ Browser ──► gateway :4000 ──► /api/identity/*      identity :4101   
 | P6 ✅ | commerce (catalogue, cart, registrations, token policies, orders, payment gateway adapter, customer advance ledger, complaints, customer portal) |
 | P7 ✅ | fulfilment (allocation engine, split approval, pick/pack, GST invoice, dispatch gates, transport, tracking, POD, claims, returns) |
 | P8 ✅ | finance (GSTIN books, automatic postings, vouchers with maker-checker, AR/AP, GST registers and returns, TDS, bank reconciliation, valuation, statements, period close, anomaly alerts) |
-| P9 | workflow (rules, tasks, escalation), notifications (WhatsApp/SMS/email), hrms |
+| P9 ✅ | workflow (message templates, consent, outbox and delivery log, rules engine, tasks/My Work, contracts, handover), hrms (employees, recruitment, attendance, leave, comp-off, payroll) |
 | P10 | analytics/BI, intelligence (AI copilot) |
 
 ## Event bus
@@ -82,6 +82,11 @@ Events in P1:
 | `commerce.payment.received` / `.refunded`, `commerce.order.cancelled` | commerce | finance → receipt / refund / cancellation-fee income |
 | `inventory.transfer.dispatched` | inventory | finance → inter-GSTIN supply in both books |
 | `approval.decided` (masters bank changes) | governance | finance → payments to that party are checked for 30 days |
+| business events (lead, quotation sent/accepted, order booked, payment link/receipt, invoice, dispatch, delivery, complaint, payment reminder) | various | workflow → customer messages and rule actions |
+| `crm.quotation.sent`, `commerce.payment.link_created`, `commerce.complaint.raised`, `finance.payment.reminder_due` | crm, commerce, finance | workflow |
+| `hrms.attendance.marked`, `hrms.leave.approved` | hrms | crm → salesperson availability; workflow → cover tasks |
+| `hrms.employee.exiting` | hrms | workflow → handover task |
+| `hrms.payroll.approved`, `hrms.payroll.paid` | hrms | finance → payroll voucher, salary payment |
 | `inventory.reservation.picked` | inventory | (fulfilment P7) |
 | `crm.lead.created` | crm | (analytics P10) |
 | `jobwork.claim.accepted` | jobwork | (accounting P8) |
@@ -111,6 +116,16 @@ Make synchronous calls first, then audit and publish.
   ranks warehouses, and reserves in inventory. A split is never automatic: it becomes an approval.
 - **Dispatch gates** are computed from facts (picked, packed, invoiced, settled/credit/approved override) and
   re-checked at dispatch time inside the transaction.
+
+## P9 design notes
+
+- **Messaging is an outbox:** an event queues one row per template and recipient (unique per event, template and
+  address, so replays never double-send); a dispatcher sends due rows and retries with backoff (1, 5, 15, 60 minutes)
+  up to five attempts. Consent is checked when the message is queued, so the log shows why something was not sent.
+- **Rules** compare raw event values (numbers stay numbers) and render text with formatted values. Delayed actions are
+  stored with their context and run by the scheduler; overdue tasks escalate once.
+- **Payroll rules** live in `services/hrms/src/statutory.ts` (rates, ceilings, tax slabs) and the `pt_slabs` table, so
+  the payroll consultant can review them in one place.
 
 ## P8 design notes
 

@@ -26,5 +26,19 @@ export const crmService: ServiceDefinition = {
     creditRoutes(r, ctx);
     insightRoutes(r, ctx);
   },
-  consumers: () => ({ 'approval.decided': approvalHandler() }),
+  consumers: () => ({
+    'approval.decided': approvalHandler(),
+    // Attendance and approved leave from HRMS (P9) drive allocation: absent and on-leave salespeople are skipped.
+    'hrms.attendance.marked': async (ev: BusEvent, c: Client) => {
+      const p = ev.payload as { user_id: string; day: string; status: string };
+      if (!(await c.query('SELECT 1 FROM sales_team WHERE user_id = $1', [p.user_id])).rowCount) return;
+      await c.query(`INSERT INTO attendance (user_id, day, status, recorded_by_name) VALUES ($1,$2,$3,'HRMS') ON CONFLICT (user_id, day) DO UPDATE SET status = EXCLUDED.status, recorded_by_name = 'HRMS', recorded_at = now()`, [p.user_id, p.day, p.status]);
+    },
+    'hrms.leave.approved': async (ev: BusEvent, c: Client) => {
+      const p = ev.payload as { user_id: string | null; from: string; to: string; half_day: boolean; leave_type: string };
+      if (!p.user_id || !(await c.query('SELECT 1 FROM sales_team WHERE user_id = $1', [p.user_id])).rowCount) return;
+      await c.query(`INSERT INTO attendance (user_id, day, status, note, recorded_by_name) SELECT $1, d::date, $4, $5, 'HRMS' FROM generate_series($2::date, $3::date, interval '1 day') d
+        ON CONFLICT (user_id, day) DO UPDATE SET status = EXCLUDED.status, note = EXCLUDED.note, recorded_by_name = 'HRMS', recorded_at = now()`, [p.user_id, p.from, p.to, p.half_day ? 'half_day' : 'leave', `${p.leave_type} leave approved in HRMS`]);
+    },
+  }),
 };

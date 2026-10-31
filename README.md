@@ -12,11 +12,12 @@ It is built phase by phase from the *Developer Brief & Functional Specification 
 - **P6 — B2B commerce: trade portal, cart, token booking, payment gateway (sandbox), customer advance ledger**
 - **P7 — Fulfilment: warehouse allocation engine, split approval, pick by scan, GST invoice, dispatch gates, transport, POD, returns**
 - **P8 — Finance: double-entry books per GSTIN, automatic postings, AR/AP ageing, GST returns and 2B match, TDS, bank reconciliation, statements, period close, alerts**
+- **P9 — Workflow and people: customer WhatsApp/SMS/email with consent and delivery tracking, rules and tasks (My Work), contracts, handover, HRMS and payroll**
 
 | | |
 |---|---|
 | **Architecture** | Domain microservices behind an API gateway, PostgreSQL (schema per service), Postgres-backed event bus |
-| **Services in this release** | `identity` · `organisation` · `masters` · `governance` · `procurement` · `jobwork` · `inventory` · `crm` · `commerce` · `fulfilment` · `finance` · `gateway` |
+| **Services in this release** | `identity` · `organisation` · `masters` · `governance` · `procurement` · `jobwork` · `inventory` · `crm` · `commerce` · `fulfilment` · `finance` · `workflow` · `hrms` · `gateway` |
 | **Web app** | React 19 + TypeScript + Tailwind CSS, served by the gateway |
 | **Runs on** | Windows, macOS or Linux — Node.js and PostgreSQL only, no Docker needed |
 
@@ -126,6 +127,16 @@ See [docs/architecture.md](docs/architecture.md) for the design and
 - **Statements:** trial balance, P&L, balance sheet, cash flow (direct), DSO/DPO/inventory days and working capital; closing stock valued at landed lot cost (weighted average or lot-wise) when a month is locked, with a provisional valuation between closes.
 - **Alerts:** duplicate supplier bills and payments, payments soon after a bank-detail change, unusual discounts, large credit notes and refunds, manual journals on sensitive accounts, unusual expense movements, overdue TDS and receivables over 90 days.
 
+## What’s in P9 — Communications, workflow, contracts & HRMS
+
+- **Customer communications:** WhatsApp, SMS and email templates triggered by business events (enquiry, quotation, booking, payment link, invoice, receipt, dispatch with LR and tracking link, delivery feedback, complaint, overdue reminders). Templates are versioned, use only the variables their trigger provides, and go live after a checker approves; WhatsApp templates also carry Meta’s approval status. WhatsApp and SMS go only to numbers with a recorded opt-in; opt-outs stop messages immediately. Every message has a delivery log (queued, sent, delivered, read, failed, skipped with the reason), retries with backoff up to five attempts, manual retry, and signed delivery receipts. `MESSAGING_PROVIDER=sandbox` delivers inside the ERP; `live` sends WhatsApp through the Meta Cloud API once credentials are set.
+- **Workflow rules:** when an event happens and conditions match, create a task (for the record owner or a team queue, with priority, due time and escalation), notify a team, or send a message — immediately or after a delay. Every evaluation is logged.
+- **My Work:** one list of my tasks, my team’s unassigned queue, approvals I can decide and CRM follow-ups that are due; take, start, complete with a resolution note, reassign with a reason.
+- **Contracts:** supplier, mill, customer, transport and lease agreements with rates, payment/quality/delivery terms and penalties; correspondence log; full-text search over terms and notes; renewal tasks at 30, 15 and 7 days; renewal creates a linked new version.
+- **Handover:** move a person’s open tasks, CRM leads and contracts to a colleague in one recorded step (leave, exit, transfer).
+- **HRMS:** employees with onboarding/probation/confirmation/transfer/promotion/resignation/exit and checklists; recruitment pipeline; shifts, daily attendance (lateness and overtime against the shift), phone check-in/out, holidays, leave types and balances (pro-rata), comp-off for work on off days; leave approval by a checker. Attendance and approved leave feed CRM lead allocation.
+- **Payroll:** monthly run from attendance and salary structures — loss of pay, overtime at twice the hourly rate, PF on the ₹15,000 ceiling (EPF/EPS split), ESIC up to ₹21,000 gross, state professional tax slabs, salary TDS under the new regime with the 87A rebate; approval by a checker; payslips (self-service); bank upload file; salary cost and liabilities posted to accounts automatically.
+
 ## Run it on Windows (no Docker)
 
 ### 1. Install the prerequisites (one time)
@@ -177,7 +188,7 @@ npm start
 
 `npm run setup` creates the `textile_erp` database, runs every service’s migrations and loads demo data,
 including sample requisitions, RFQs, purchase orders, invoices, job-work orders, scanned stock, transfers, leads, quotations and credit.
-`npm start` launches the eleven services and the gateway in one window. Open **http://localhost:4000**.
+`npm start` launches the thirteen services and the gateway in one window. Open **http://localhost:4000**.
 
 > Upgrading from an earlier release? Run `npm install` and then `npm run setup -- --reset` once, to load the demo data for the new modules.
 
@@ -197,6 +208,7 @@ Demo users all share the password `Textile@2026`:
 | `auditor@textile.local` | Auditor / CA | read-only, including the audit trail |
 | `millops@textile.local` | Mill Operations Manager | job-work orders, mills, rate cards, claims |
 | `dispatch@textile.local` | Dispatch Manager | allocation, pick/pack, invoices, dispatch, transport, returns |
+| `hr@textile.local` | HR Manager | employees, attendance, leave, recruitment, payroll, handover |
 | `buyer@srimurugan.example` | Customer portal — company admin (Sri Murugan Garments, credit) | shop, orders, invoices, company users |
 | `purchase@kolkatahosiery.example` | Customer portal — buyer (Kolkata Hosiery Works, advance) | shop, orders, token payments |
 | `supplier@ambica.example` | Supplier portal (Shree Ambica Knitters) | the supplier’s own POs, dispatches and invoices |
@@ -214,11 +226,16 @@ A good first tour:
 8. Sign in as **purchase@kolkatahosiery.example**: open the order waiting for its token and pay it on the sandbox payment page; the order is booked and appears in dispatch.
 9. Sign in as **dispatch** → *Fulfilment*: the Delhi order needs a decision (no single warehouse has 600 kg) — request a split; scan rolls on a released fulfilment, pack, invoice and dispatch; open the delivered shipment’s tracking and POD.
 10. Sign in as **accounts** → *B2B commerce*: payments and their reconciliation, customer advances, token policies (one Kolkata rule waits for approval). Then *Finance*: the vouchers posted automatically from the invoices and receipts above, the bank reconciliation (three statement lines left to explain — try *Create entry* on the gateway settlement), GST returns with the 2B match, TDS, and the statements.
-11. Sign in as **admin** → *Approvals* to approve what is waiting, then look at the *Audit trail*.
+11. Sign in as **hr** → *HR & payroll*: last month’s payroll (posted in accounts), today’s attendance, the resignation with its exit checklist and handover task; then *My HR* as **sales.east** (on leave today, so CRM skips him). As **salesmgr**, open *Communications* for the WhatsApp/SMS/email log and *Workflow rules*; as **millops**, *Contracts* shows a rate contract due for renewal.
+12. Sign in as **admin** → *Approvals* to approve what is waiting, then look at the *Audit trail*.
 
 ### Payment gateway
 
 `PAYMENT_GATEWAY=sandbox` (default) shows a stand-in bank page with *Pay* and *Simulate a declined payment*; the ERP still checks a signed callback and verifies the status separately. To go live with ICICI, set `PAYMENT_GATEWAY=icici` with the merchant credentials once the bank issues them; until then that adapter refuses requests rather than pretending.
+
+### Customer messages
+
+`MESSAGING_PROVIDER=sandbox` (default) records and “delivers” WhatsApp, SMS and email inside the ERP so the whole flow can be tested. Set `MESSAGING_PROVIDER=live` with `WHATSAPP_TOKEN` and `WHATSAPP_PHONE_NUMBER_ID` to send WhatsApp through Meta’s Cloud API; SMS and email providers are not connected yet (those messages fail and show in the log). `APP_PUBLIC_URL` is the address used in links sent to customers.
 
 ### Optional: AI invoice extraction
 

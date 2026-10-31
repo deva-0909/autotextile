@@ -1,6 +1,6 @@
 import type { Router } from 'express';
 import { z } from 'zod';
-import { type ServiceContext, many, notFound, notify, one, optText, parse, reqText, requirePermission, tx } from '@erp/platform';
+import { type ServiceContext, many, notFound, notify, one, optText, parse, publish, reqText, requirePermission, tx } from '@erp/platform';
 import { S, auditReq, getParty, localNumber, portalCustomer } from './common.ts';
 
 export function supportRoutes(r: Router, { pool }: ServiceContext) {
@@ -16,6 +16,7 @@ export function supportRoutes(r: Router, { pool }: ServiceContext) {
       const number = await localNumber(c, 'complaint', 'CMP-');
       const row = await one<{ id: string }>(c, `INSERT INTO complaints (number, customer_id, customer_name, order_id, category, subject, description, raised_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [number, cust, p.legal_name, b.order_id ?? null, b.category, b.subject, b.description, req.user!.name]);
       await notify(c, S, { audience_permission: 'fulfilment.returns.manage', kind: 'action', title: `Complaint ${number} from ${p.legal_name}: ${b.subject}`, body: b.category, link: '/commerce/complaints' });
+      await publish(c, S, 'commerce.complaint.raised', { complaint_id: row!.id, number, customer_id: cust, customer_name: p.legal_name, order_id: b.order_id ?? null, category: b.category, subject: b.subject, raised_by_name: req.user!.name });
       return { id: row!.id, number };
     });
     res.status(201).json(out);

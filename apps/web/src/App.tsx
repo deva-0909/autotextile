@@ -45,6 +45,8 @@ import { AllocationListPage, DispatchCockpit, FulfilmentDetailPage, OrderAllocat
 import { InvoicePage } from './pages/fulfilment/Invoice';
 import { AgeingPage, ChartOfAccountsPage, FinanceOverview, LedgerPage, NewVoucherPage, PartyLedgerPage, VoucherDetailPage, VouchersPage } from './pages/finance/Ledger';
 import { AnomaliesPage, BankPage, ClosePage, GstPage, StatementsPage, TdsPage } from './pages/finance/Compliance';
+import { AllTasksPage, CommunicationsPage, ContractDetailPage, ContractsPage, HandoverPage, MyWorkPage, RuleEditorPage, RulesPage } from './pages/workflow/Workflow';
+import { AttendancePage, EmployeeDetailPage, EmployeesPage, HrOverview, LeavePage, MyHrPage, PayrollPage, PayrollRunPage, PayslipPage, RecruitmentPage } from './pages/hr/Hr';
 import type { ReactNode } from 'react';
 
 function Guard({ perms, children }: { perms?: string[]; children: ReactNode }) {
@@ -225,6 +227,24 @@ export default function App() {
         <Route path="/finance/statements" element={<Guard perms={['finance.read']}><StatementsPage /></Guard>} />
         <Route path="/finance/close" element={<Guard perms={['finance.read']}><ClosePage /></Guard>} />
         <Route path="/finance/anomalies" element={<Guard perms={['finance.read']}><AnomaliesPage /></Guard>} />
+        <Route path="/my-work" element={<MyWorkPage />} />
+        <Route path="/me" element={<MyHrPage />} />
+        <Route path="/workflow/communications" element={<Guard perms={['workflow.read']}><CommunicationsPage /></Guard>} />
+        <Route path="/workflow/rules" element={<Guard perms={['workflow.read']}><RulesPage /></Guard>} />
+        <Route path="/workflow/rules/:id" element={<Guard perms={['workflow.read']}><RuleEditorPage /></Guard>} />
+        <Route path="/workflow/tasks" element={<Guard perms={['workflow.read']}><AllTasksPage /></Guard>} />
+        <Route path="/workflow/handover" element={<Guard perms={['workflow.handover.manage', 'workflow.read']}><HandoverPage /></Guard>} />
+        <Route path="/contracts" element={<Guard perms={['workflow.contract.read']}><ContractsPage /></Guard>} />
+        <Route path="/contracts/:id" element={<Guard perms={['workflow.contract.read']}><ContractDetailPage /></Guard>} />
+        <Route path="/hr" element={<Guard perms={['hrms.read']}><HrOverview /></Guard>} />
+        <Route path="/hr/employees" element={<Guard perms={['hrms.read']}><EmployeesPage /></Guard>} />
+        <Route path="/hr/employees/:id" element={<EmployeeDetailPage />} />
+        <Route path="/hr/attendance" element={<Guard perms={['hrms.read']}><AttendancePage /></Guard>} />
+        <Route path="/hr/leave" element={<Guard perms={['hrms.read']}><LeavePage /></Guard>} />
+        <Route path="/hr/recruitment" element={<Guard perms={['hrms.read']}><RecruitmentPage /></Guard>} />
+        <Route path="/hr/payroll" element={<Guard perms={['hrms.payroll.manage', 'hrms.payroll.approve']}><PayrollPage /></Guard>} />
+        <Route path="/hr/payroll/:month" element={<Guard perms={['hrms.payroll.manage', 'hrms.payroll.approve']}><PayrollRunPage /></Guard>} />
+        <Route path="/hr/payslips/:id" element={<PayslipPage />} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/programme" element={<ProgrammePage />} />
         <Route path="/roadmap/:phase" element={<RoadmapPage />} />

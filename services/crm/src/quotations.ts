@@ -242,7 +242,7 @@ export function quotationRoutes(r: Router, { pool }: ServiceContext) {
 
   r.post('/quotations/:id/send', requirePermission('crm.quote.manage'), async (req, res) => {
     const out = await tx(pool, async (c) => {
-      const q = await one<{ id: string; status: string; owner_id: string | null; number: string; version: number; lead_id: string | null; total: number; valid_until: string }>(c, 'SELECT * FROM quotations WHERE id = $1 FOR UPDATE', [req.params.id]);
+      const q = await one<{ id: string; status: string; owner_id: string | null; owner_name: string | null; number: string; version: number; lead_id: string | null; customer_id: string | null; prospect_name: string | null; total: number; valid_until: string }>(c, 'SELECT * FROM quotations WHERE id = $1 FOR UPDATE', [req.params.id]);
       if (!q) throw notFound('Quotation');
       assertOwnerOrAll(req, q.owner_id, 'Quotation');
       if (q.status !== 'approved') throw conflict(q.status === 'pending_approval' ? 'Waiting for price approval' : `A ${q.status.replace('_', ' ')} quotation can’t be sent`);
@@ -250,6 +250,8 @@ export function quotationRoutes(r: Router, { pool }: ServiceContext) {
       await c.query(`UPDATE quotations SET status = 'sent', sent_at = now(), updated_at = now() WHERE id = $1`, [q.id]);
       await advanceLead(c, q.lead_id, 'quotation', `${q.number} v${q.version} sent: ₹${Number(q.total).toLocaleString('en-IN')}`, req.user!.name);
       await auditReq(c, req, 'quotation', q.id, 'sent');
+      // Communications (P9) send the quotation to the customer from this event.
+      await publish(c, S, 'crm.quotation.sent', { quotation_id: q.id, number: q.number, version: q.version, customer_id: q.customer_id, prospect_name: q.prospect_name, lead_id: q.lead_id, owner_id: q.owner_id, owner_name: q.owner_name, total: Number(q.total), valid_until: String(q.valid_until).slice(0, 10) });
       return { status: 'sent' };
     });
     res.json(out);

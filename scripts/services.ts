@@ -10,5 +10,7 @@ import { crmService } from '../services/crm/src/service.ts';
 import { commerceService } from '../services/commerce/src/service.ts';
 import { fulfilmentService } from '../services/fulfilment/src/service.ts';
 import { financeService } from '../services/finance/src/service.ts';
+import { workflowService } from '../services/workflow/src/service.ts';
+import { hrmsService } from '../services/hrms/src/service.ts';
 
-export const SERVICE_DEFS = [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService, inventoryService, crmService, commerceService, fulfilmentService, financeService];
+export const SERVICE_DEFS = [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService, inventoryService, crmService, commerceService, fulfilmentService, financeService, workflowService, hrmsService];

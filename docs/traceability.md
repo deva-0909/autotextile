@@ -1,4 +1,4 @@
-# Requirement traceability — releases P1–P8
+# Requirement traceability — releases P1–P9
 
 Source: *Textile_Trading_ERP_Development_and_Figma_Tracker.xlsx*, Requirements and Figma Screens sheets.
 Statuses:
@@ -125,6 +125,19 @@ Statuses:
 | REQ-0072 | Management and statutory reports | **Built / partial** | Trial balance, P&L, balance sheet, cash flow, customer/supplier ageing, cash and bank, working capital, DSO/DPO, inventory days, year-end close | Schedule III formatting and comparatives for the statutory audit |
 | REQ-0073 | Financial anomaly detection | **Built** | Duplicate bills and payments, payments after bank changes, unusual discounts, large credit notes and refunds, sensitive manual journals, weekend/round journals, unusual ledger movement, overdue TDS, 90-day receivables | Thresholds are settings; machine-learned scoring is P10 |
 
+## P9 — Communications, workflow automation, DMS & HRMS
+
+| ID | Requirement | Status | Implementation | Remaining (phase) |
+|---|---|---|---|---|
+| REQ-0074 | WhatsApp/SMS/email integration | **Built / partial** | Templates and triggers for enquiry, quotation, booking, payment link, invoice, receipt, dispatch + LR + tracking, delivery/feedback, complaint and overdue reminders; outbox, provider adapter, sandbox | Live WhatsApp needs Meta Cloud API credentials (adapter wired, untested without them); SMS and email providers not connected; inbound WhatsApp replies (feedback scores) |
+| REQ-0075 | Template manager and consent | **Built** | Language, variables checked against the trigger, versioning with maker-checker, active status, Meta template status, consent/opt-out per number and scope, delivery/read/failure status, retry with backoff, signed delivery receipts | — |
+| REQ-0076 | Event-driven task engine | **Built** | Trigger, conditions (all/any), actions (task, notification, message), delay, reminders, escalation, completion with resolution; tasks carry source, owner/queue, priority, due date | Approval as a rule action (approvals come from the owning services today) |
+| REQ-0077 | My Work | **Built** | Tasks, team queue, approvals, CRM follow-ups, due/overdue, take/complete/reassign, handover | — |
+| REQ-0078 | Agreement and document lifecycle | **Built / partial** | Contracts with rates, validity, payment/quality/delivery terms, penalties, renewal alerts 30/15/7 days, renewals as linked versions, correspondence, full-text search, linked documents | Semantic (AI) search arrives with P10; document upload from the contract screen uses the document library |
+| REQ-0079 | Employee lifecycle and attendance | **Built / partial** | Recruitment pipeline, onboarding, probation, confirmation, transfer, promotion, resignation, exit with checklists; shifts, attendance with lateness/overtime, mobile check-in with optional location, holidays, leave, weekly off, overtime and comp-off | Biometric device import; geofencing |
+| REQ-0080 | Payroll and statutory components | **Built / partial** | Salary components, LOP, overtime, PF (ceiling, EPF/EPS), ESIC, PT by state, salary TDS (new regime, 87A), payslips, approval, bank file, accounting posting | Old tax regime and employee declarations; PF ECR / ESIC challan files; Form 16/24Q; arrears; to be validated by the payroll consultant/CA |
+| REQ-0081 | Employee handover | **Built** | Open tasks, CRM leads and contracts moved with a reason; every item recorded; exit raises a handover task | Customer commitments other than leads/contracts (open quotations stay with the original owner) |
+
 ### Known gaps
 
 - **MFA is optional per user.** The setting *Require MFA for privileged users* exists, but the login does not force enrolment yet.
@@ -192,6 +205,12 @@ Statuses:
 | FIG-056 | GST compliance cockpit | `/finance/gst` |
 | FIG-057 | TDS configuration and returns | `/finance/tds` |
 | FIG-058 | Financial statements and period close | `/finance/statements`, `/finance/close`, `/finance/anomalies` |
+| FIG-059 | Template manager and delivery log | `/workflow/communications` |
+| FIG-060 | Workflow builder | `/workflow/rules`, `/workflow/rules/:id` |
+| FIG-061 | My Work and approvals | `/my-work`, `/workflow/tasks` |
+| FIG-062 | Document and contract register | `/contracts`, `/contracts/:id` |
+| FIG-063 | Employee profile and attendance | `/hr/employees`, `/hr/employees/:id`, `/hr/attendance`, `/hr/leave`, `/me` |
+| FIG-064 | Payroll run and payslip | `/hr/payroll`, `/hr/payroll/:month`, `/hr/payslips/:id` |
 | extra | Approvals inbox, document library, configuration, programme tracker, claims, reservations, issue to mill, sales dashboard, targets | `/approvals`, `/governance/documents`, `/organisation/configuration`, `/programme`, `/jobwork/claims`, `/inventory/reservations`, `/inventory/mill-issues`, `/crm`, `/crm/performance` |
 
 ## Acceptance tests (tracker sheet) touched by P1

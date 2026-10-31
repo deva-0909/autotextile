@@ -2,7 +2,7 @@ import {
   ArrowRightLeft, BadgeIndianRupee, CircleDollarSign, ClipboardPen, Contact, Inbox, Map as MapIcon, PackageCheck, PackageOpen, ScanLine, Shuffle, Tag, Target,
   AlarmClock, BookMarked, Boxes, Building2, ClipboardCheck, ClipboardList, Cog, Factory, FileSearch, FileStack, Gauge, History, KeyRound, Layers,
   LayoutDashboard, LineChart, Medal, Package, Receipt, Rocket, ScanText, ShieldAlert, ShieldCheck, ShoppingCart, Sparkles, Truck, UserCog, Users, Warehouse,
-  Workflow, Wallet, BookOpen, FileSpreadsheet, Landmark, Percent, ScrollText, Scale, LockKeyhole, Siren, HandCoins, ArrowDownToLine, CreditCard, UserPlus, MessageSquareWarning, Undo2, Store, type LucideIcon,
+  Workflow, Wallet, ListTodo, UserCircle, MessagesSquare, FileSignature, ArrowRightLeft as Handover, CalendarCheck, CalendarDays, Briefcase, IndianRupee, Users2, ListChecks, BookOpen, FileSpreadsheet, Landmark, Percent, ScrollText, Scale, LockKeyhole, Siren, HandCoins, ArrowDownToLine, CreditCard, UserPlus, MessageSquareWarning, Undo2, Store, type LucideIcon,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon; perms?: string[]; phase?: string }
@@ -14,6 +14,8 @@ export const NAV: NavGroup[] = [
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard },
       { to: '/approvals', label: 'Approvals', icon: ClipboardCheck },
+      { to: '/my-work', label: 'My work', icon: ListTodo },
+      { to: '/me', label: 'My HR', icon: UserCircle },
     ],
   },
   {
@@ -121,6 +123,27 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
+    label: 'Workflow',
+    items: [
+      { to: '/workflow/communications', label: 'Communications', icon: MessagesSquare, perms: ['workflow.read'] },
+      { to: '/workflow/rules', label: 'Workflow rules', icon: Workflow, perms: ['workflow.read'] },
+      { to: '/workflow/tasks', label: 'All tasks', icon: ListChecks, perms: ['workflow.read'] },
+      { to: '/contracts', label: 'Contracts', icon: FileSignature, perms: ['workflow.contract.read'] },
+      { to: '/workflow/handover', label: 'Handover', icon: Handover, perms: ['workflow.handover.manage', 'workflow.read'] },
+    ],
+  },
+  {
+    label: 'HR & payroll',
+    items: [
+      { to: '/hr', label: 'People', icon: Users2, perms: ['hrms.read'] },
+      { to: '/hr/employees', label: 'Employees', icon: Briefcase, perms: ['hrms.read'] },
+      { to: '/hr/attendance', label: 'Attendance', icon: CalendarCheck, perms: ['hrms.read'] },
+      { to: '/hr/leave', label: 'Leave', icon: CalendarDays, perms: ['hrms.read'] },
+      { to: '/hr/recruitment', label: 'Recruitment', icon: UserPlus, perms: ['hrms.read'] },
+      { to: '/hr/payroll', label: 'Payroll', icon: IndianRupee, perms: ['hrms.payroll.manage', 'hrms.payroll.approve'] },
+    ],
+  },
+  {
     label: 'Security & governance',
     items: [
       { to: '/security/users', label: 'Users', icon: UserCog, perms: ['identity.user.read'] },
@@ -133,7 +156,6 @@ export const NAV: NavGroup[] = [
   {
     label: 'Coming next',
     items: [
-      { to: '/roadmap/P9', label: 'Workflow & HRMS', icon: Workflow, phase: 'P9' },
       { to: '/roadmap/P10', label: 'BI & AI', icon: Sparkles, phase: 'P10' },
       { to: '/programme', label: 'Programme tracker', icon: Rocket },
     ],

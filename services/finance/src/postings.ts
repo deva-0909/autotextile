@@ -230,3 +230,33 @@ export function approvalDecidedConsumer(applyFinance: (c: Client, p: { approval_
 
 export const recentBankChange = (c: Client, partyId: string) => one<{ changed_at: string }>(c, `SELECT changed_at FROM bank_changes WHERE party_id = $1 AND changed_at > now() - interval '30 days' ORDER BY changed_at DESC LIMIT 1`, [partyId]);
 
+
+/** Payroll approved in HR: salary cost and the liabilities to employees, PF/ESIC/PT and salary TDS (section 192). */
+export function payrollApprovedConsumer() {
+  return async (ev: BusEvent, c: Client) => {
+    const p = ev.payload as { run_id: string; month: string; reference: string; gross: number; net: number; pf_employee: number; esic_employee: number; pt: number; tds: number; pf_employer: number; esic_employer: number };
+    const book = await primaryBook(c);
+    const statutory = round2(Number(p.pf_employee) + Number(p.esic_employee) + Number(p.pt) + Number(p.pf_employer) + Number(p.esic_employer));
+    await post(c, {
+      type: 'payroll', book_id: book.id, date: monthEndOf(p.month), auto: true, by: SYSTEM, approved_by: 'payroll approval',
+      narration: `Salaries for ${p.month.slice(0, 7)}`, source: { service: 'hrms', type: 'payroll_run', id: p.run_id, ref: p.reference },
+      lines: [
+        { account: 'salaries', debit: Number(p.gross) }, { account: 'employer_contribution', debit: round2(Number(p.pf_employer) + Number(p.esic_employer)) },
+        { account: 'salaries_payable', credit: Number(p.net) }, { account: 'payroll_statutory', credit: statutory, narration: 'PF, ESIC and professional tax' },
+        { account: 'tds_payable', credit: Number(p.tds), narration: 'Salary TDS (section 192)' },
+      ],
+    });
+  };
+}
+export function payrollPaidConsumer() {
+  return async (ev: BusEvent, c: Client) => {
+    const p = ev.payload as { run_id: string; month: string; paid_on: string; net: number; reference: string };
+    const book = await primaryBook(c);
+    await post(c, {
+      type: 'payment', book_id: book.id, date: p.paid_on, auto: true, by: SYSTEM, approved_by: 'payroll release',
+      narration: `Salary transfer for ${p.month.slice(0, 7)}`, source: { service: 'hrms', type: 'payroll_payment', id: p.run_id, ref: p.reference },
+      lines: [{ account: 'salaries_payable', debit: Number(p.net) }, { account: 'bank_main', credit: Number(p.net) }],
+    });
+  };
+}
+const monthEndOf = (m: string) => { const d = new Date(`${m.slice(0, 7)}-01T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + 1); d.setUTCDate(0); return d.toISOString().slice(0, 10); };

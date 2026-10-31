@@ -89,6 +89,9 @@ function recordLink(a: { approval_type: string; ref_id: string; payload: Record<
     case 'stock_adjustment': return `/inventory/stocktakes/${a.ref_id}`;
     case 'quotation_price': return `/crm/quotations/${a.ref_id}`;
     case 'credit_limit': case 'credit_override': return p.customer_id ? `/crm/credit/${p.customer_id}` : '/crm/credit';
+    case 'message_template': return '/workflow/communications';
+    case 'leave_request': return '/hr/leave';
+    case 'payroll_run': return p.month ? `/hr/payroll/${p.month}` : '/hr/payroll';
     case 'finance_voucher': return `/finance/vouchers/${a.ref_id}`;
     case 'period_reopen': return '/finance/close';
     case 'token_policy': return '/commerce/token-policies';

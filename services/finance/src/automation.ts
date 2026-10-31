@@ -1,5 +1,5 @@
-import { type Pool, many, tx } from '@erp/platform';
-import { raiseAnomaly, round2, today } from './common.ts';
+import { type Pool, many, publish, tx } from '@erp/platform';
+import { S, raiseAnomaly, round2, today } from './common.ts';
 import { openBills } from './ledger.ts';
 import { tdsDueDate } from './tds.ts';
 
@@ -26,6 +26,13 @@ export async function runFinanceChecks(pool: Pool) {
     for (const t of tds) {
       const due = tdsDueDate(t.month);
       if (due < today()) raised += Number(await raiseAnomaly(c, { kind: 'tds_overdue', severity: 'critical', ref_type: 'tds', ref_id: `${t.month}:${t.section}`, ref_label: `TDS ${t.section} · ${t.month.slice(0, 7)}`, message: `TDS ${t.section} of ₹${round2(t.pending).toLocaleString('en-IN')} deducted in ${t.month.slice(0, 7)} was due by ${due} and is not deposited (interest runs at 1.5% a month)`, amount: t.pending }));
+    }
+    // Payment reminders at 1, 7, 15 and 30 days overdue; communications and follow-up tasks come from this event.
+    for (const b of ar.bills.filter((x) => days(x.due_date) >= 1)) {
+      const d = days(b.due_date);
+      const stage = [30, 15, 7, 1].find((s) => d >= s)!;
+      const r = await c.query('INSERT INTO reminders (bill_id, stage) VALUES ($1, $2) ON CONFLICT DO NOTHING', [b.id, stage]);
+      if (r.rowCount) await publish(c, S, 'finance.payment.reminder_due', { bill_id: b.id, party_id: b.party_id, party_name: b.party_name, doc_no: b.doc_no, due_date: b.due_date, outstanding: b.outstanding, days_overdue: d, stage });
     }
     for (const b of ar.bills.filter((x) => days(x.due_date) > 90))
       raised += Number(await raiseAnomaly(c, { kind: 'receivable_90_days', severity: 'warning', ref_type: 'bill', ref_id: b.id, ref_label: `${b.doc_no} · ${b.party_name}`, message: `${b.party_name}: ₹${b.outstanding.toLocaleString('en-IN')} on ${b.doc_no} is more than 90 days overdue`, amount: b.outstanding }));

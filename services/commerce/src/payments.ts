@@ -19,6 +19,8 @@ export async function createPaymentLink(c: Client, p: { customer_id: string; cus
     [number, p.customer_id, p.customer_name, p.order_id, p.purpose, p.ref_no, round2(p.amount), gw.name, gatewayOrderId, link, expires, p.by]);
   await gw.createOrder(c, { gatewayOrderId, amount: round2(p.amount), reference: p.ref_no ?? number, expiresAt: expires });
   await c.query(`INSERT INTO payment_events (payment_id, kind, detail) VALUES ($1, 'created', $2)`, [pay!.id, JSON.stringify({ amount: p.amount, purpose: p.purpose, expires })]);
+  // Communications (P9) send the link to the customer from this event.
+  await publish(c, S, 'commerce.payment.link_created', { payment_id: pay!.id, number, customer_id: p.customer_id, customer_name: p.customer_name, order_id: p.order_id, purpose: p.purpose, ref_no: p.ref_no, amount: round2(p.amount), link_token: link, expires_at: expires.toISOString() });
   return { id: pay!.id, number, amount: round2(p.amount), link_token: link, url: `/pay/${link}`, expires_at: expires.toISOString() };
 }
 

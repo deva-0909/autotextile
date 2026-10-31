@@ -8,6 +8,9 @@ import { DEMO_PASSWORD } from './seed-data.ts';
 import { runProcurementChecks } from '../services/procurement/src/automation.ts';
 import { runJobworkChecks } from '../services/jobwork/src/automation.ts';
 import { runFinanceChecks } from '../services/finance/src/automation.ts';
+import { runContractChecks } from '../services/workflow/src/contracts.ts';
+import { dispatchMessages } from '../services/workflow/src/messaging.ts';
+import { runScheduled } from '../services/workflow/src/engine.ts';
 import { runCrmChecks } from '../services/crm/src/automation.ts';
 
 export async function seedOperations(services: RunningService[]) {
@@ -48,6 +51,12 @@ export async function seedOperations(services: RunningService[]) {
     const salesSouth = await login('sales.south@textile.local');
 
     const wh = await call<{ id: string; code: string }[]>('organisation', admin, 'GET', '/warehouses');
+    // ---------- P9: customers who opted in to WhatsApp and SMS updates (recorded before any order is placed) ----------
+    {
+      const all = (await call<{ items: { id: string; party_type: string; phone: string | null }[] }>('masters', admin, 'GET', '/parties?pageSize=100&f_type=customer')).items;
+      for (const p of all.filter((x) => x.phone)) for (const ch of ['whatsapp', 'sms'])
+        await call('workflow', admin, 'POST', '/consents', { party_id: p.id, address: p.phone, channel: ch, status: 'opted_in', scope: 'transactional', source: 'Signed customer account form' });
+    }
     // ---------- P8: TDS sections for mills (194C) and grey-fabric suppliers (194Q), before their bills post ----------
     {
       const all = (await call<{ items: { id: string; legal_name: string; party_type: string; pan: string | null }[] }>('masters', admin, 'GET', '/parties?pageSize=100')).items;
@@ -403,6 +412,100 @@ export async function seedOperations(services: RunningService[]) {
     for (const pr of await call<{ month: string; status: string }[]>('finance', accounts, 'GET', '/periods'))
       if (pr.month.slice(0, 7) <= lastMonth && pr.status === 'open') await call('finance', accounts, 'POST', `/periods/${pr.month}/lock`, { value_stock: false, note: 'Reviewed with the CA' });
     await runFinanceChecks(services.find((s) => s.ctx.name === 'finance')!.ctx.pool);
+
+    // ---------- P9: employees, attendance, leave, payroll; contracts; message delivery ----------
+    await drain();
+    const hr = await login('hr@textile.local');
+    const users = await call<{ id: string; email: string; name: string }[]>('identity', admin, 'GET', '/directory');
+    const uid = (e: string) => users.find((u) => u.email === e)?.id ?? null;
+    const staff: [string, string | null, string, string, string, number, string, number, boolean][] = [
+      // name, login, designation, department, location, basic, shift, weekly off, overtime eligible
+      ['Amit Deva', 'owner@textile.local', 'Director', 'Management', 'Surat', 120000, 'GEN', 0, false],
+      ['Priya Shah', 'purchase@textile.local', 'Purchase Manager', 'Procurement', 'Surat', 45000, 'GEN', 0, false],
+      ['Rakesh Patel', 'surat.stores@textile.local', 'Stores Manager', 'Warehouse', 'Surat', 32000, 'WH1', 0, false],
+      ['Lakshmi Narayanan', 'accounts@textile.local', 'Accounts Manager', 'Finance', 'Surat', 42000, 'GEN', 0, false],
+      ['Neha Kapoor', 'salesmgr@textile.local', 'Sales Manager', 'Sales', 'Surat', 50000, 'GEN', 0, false],
+      ['Arjun Mehta', 'sales@textile.local', 'Sales Executive', 'Sales', 'Surat', 22000, 'GEN', 0, false],
+      ['Selvi Raman', 'sales.south@textile.local', 'Sales Executive', 'Sales', 'Tiruppur', 21000, 'GEN', 0, false],
+      ['Sourav Ghosh', 'sales.east@textile.local', 'Sales Executive', 'Sales', 'Kolkata', 21000, 'GEN', 0, false],
+      ['Karthik Raman', 'millops@textile.local', 'Mill Operations Manager', 'Operations', 'Surat', 38000, 'GEN', 0, false],
+      ['Imran Shaikh', 'dispatch@textile.local', 'Dispatch Manager', 'Warehouse', 'Surat', 30000, 'WH1', 0, false],
+      ['Farida Khan', 'hr@textile.local', 'HR Manager', 'Human Resources', 'Surat', 36000, 'GEN', 0, false],
+      ['Mahesh Vasava', null, 'Warehouse Operator', 'Warehouse', 'Surat', 9500, 'WH1', 3, true],
+      ['Sunil Rathod', null, 'Warehouse Operator', 'Warehouse', 'Surat', 9500, 'WH2', 3, true],
+      ['Bapi Das', null, 'Loader', 'Warehouse', 'Kolkata', 8500, 'WH1', 0, true],
+      ['Rekha Solanki', null, 'Accounts Assistant', 'Finance', 'Surat', 14000, 'GEN', 0, false],
+    ];
+    const emp: Record<string, string> = {};
+    for (const [i, [name, login, desig, dept, loc, basic, shift, off, ot]] of staff.entries()) {
+      const joined = name === 'Rekha Solanki' ? daysAgo(50) : `20${String(19 + (i % 6)).padStart(2, '0')}-0${1 + (i % 9)}-1${i % 9}`;
+      const e = await call<{ id: string }>('hrms', hr, 'POST', '/employees', { name, email: login, phone: `98250${String(10000 + i * 731).slice(0, 5)}`, designation: desig, department: dept, location: loc, date_of_joining: joined, user_id: login ? uid(login) : null,
+        pan: `ABCP${String.fromCharCode(65 + i)}${1000 + i}K`.slice(0, 10), uan: `1009${String(42210000 + i * 37)}`, bank_account: `5010${String(20044000 + i * 113)}`, ifsc: 'HDFC0001234', shift_code: shift, weekly_off: off, pt_state: loc === 'Kolkata' ? '19' : loc === 'Tiruppur' ? '33' : '24', overtime_eligible: ot });
+      emp[name] = e.id;
+      const hra = Math.round(basic * 0.4), special = Math.round(basic * 0.25);
+      await call('hrms', hr, 'POST', `/employees/${e.id}/salary`, { effective_from: '2026-04-01', basic, hra, conveyance: 1600, special, other: 0, pf_applicable: true, pf_on_capped_wage: true });
+      await call('hrms', hr, 'POST', `/employees/${e.id}/lifecycle`, { action: 'start_probation', effective_date: joined });
+      if (name !== 'Rekha Solanki') await call('hrms', hr, 'POST', `/employees/${e.id}/lifecycle`, { action: 'confirm', effective_date: joined });
+    }
+    // Attendance for last month and this month to date: mostly present, a few late arrivals, absences and Sunday work.
+    const days: string[] = [];
+    for (let d = new Date(`${daysAgo(30).slice(0, 7)}-01T00:00:00Z`); d.toISOString().slice(0, 10) < daysAgo(0); d.setUTCDate(d.getUTCDate() + 1)) days.push(d.toISOString().slice(0, 10));
+    const offOf = Object.fromEntries(staff.map((x) => [x[0], x[7]]));
+    for (const [di, day] of days.entries()) {
+      const dowN = new Date(`${day}T00:00:00Z`).getUTCDay();
+      const entries = staff.filter(([name]) => !(name === 'Rekha Solanki' && day < daysAgo(50))).map(([name, , , , , , shift], k) => {
+        const off = dowN === offOf[name];
+        if (off && !(name === 'Mahesh Vasava' && di % 14 === 3)) return { employee_id: emp[name]!, status: 'weekly_off' as const };
+        if ((k * 7 + di) % 41 === 0) return { employee_id: emp[name]!, status: 'absent' as const, note: 'Did not report' };
+        if ((k * 5 + di) % 53 === 0) return { employee_id: emp[name]!, status: 'half_day' as const };
+        const start = shift === 'WH1' ? 8 : shift === 'WH2' ? 14 : 9;
+        const late = (k + di) % 9 === 0 ? 25 : 0;
+        const inT = `${String(start).padStart(2, '0')}:${String((shift === 'GEN' ? 25 : 0) + late).padStart(2, '0')}`;
+        const outH = Math.min(23, start + (shift === 'GEN' ? 9 : 8) + ((k + di) % 6 === 0 && shift !== 'GEN' ? 2 : 0));
+        return { employee_id: emp[name]!, status: 'present' as const, in_time: inT, out_time: `${String(outH).padStart(2, '0')}:${shift === 'GEN' ? '40' : '35'}` };
+      });
+      await call('hrms', hr, 'PUT', '/attendance', { day, entries });
+    }
+    // Sourav is on approved leave today (lead allocation skips him); Selvi has leave waiting for approval.
+    const sourav = await call<{ id: string }>('hrms', hr, 'POST', '/leave', { employee_id: emp['Sourav Ghosh'], leave_type: 'EL', from_date: daysAgo(0), to_date: inDays(2), reason: 'Family function in Siliguri' });
+    await call('hrms', hr, 'POST', '/leave', { employee_id: emp['Selvi Raman'], leave_type: 'CL', from_date: inDays(6), to_date: inDays(7), reason: 'Personal work' });
+    await drain();
+    const ownerTok = await login('owner@textile.local');
+    const pendingApprovals = await call<{ items: { id: string; ref_id: string }[] }>('governance', ownerTok, 'GET', '/approvals?f_status=pending&pageSize=100');
+    const lv = pendingApprovals.items.find((a) => a.ref_id === sourav.id);
+    if (lv) await call('governance', ownerTok, 'POST', `/approvals/${lv.id}/decide`, { decision: 'approved', comment: 'Approved; Arjun covers East leads' });
+    await drain();
+    // Last month's payroll: prepared, approved and paid (finance posts the salary and the bank transfer).
+    const payMonth = daysAgo(30).slice(0, 7);
+    await call('hrms', hr, 'POST', `/payroll/${payMonth}/prepare`);
+    await call('hrms', hr, 'POST', `/payroll/${payMonth}/submit`);
+    await drain();
+    const prApproval = (await call<{ items: { id: string; approval_type: string }[] }>('governance', ownerTok, 'GET', '/approvals?f_status=pending&pageSize=100')).items.find((a) => a.approval_type === 'payroll_run');
+    if (prApproval) await call('governance', ownerTok, 'POST', `/approvals/${prApproval.id}/decide`, { decision: 'approved', comment: 'Checked against attendance' });
+    await drain();
+    await call('hrms', hr, 'POST', `/payroll/${payMonth}/pay`, { paid_on: `${daysAgo(0).slice(0, 7)}-01` });
+    // A warehouse operator has resigned; the exit checklist and a handover task are open.
+    await call('hrms', hr, 'POST', `/employees/${emp['Sunil Rathod']}/lifecycle`, { action: 'resign', effective_date: daysAgo(5), last_working_day: inDays(25), reason: 'Moving back to his village' });
+    // Recruitment for the Kolkata warehouse.
+    const op = await call<{ id: string }>('hrms', hr, 'POST', '/openings', { title: 'Warehouse picker', department: 'Warehouse', location: 'Kolkata', positions: 2 });
+    for (const [n, st] of [['Rahul Mondal', 'interview'], ['Tapas Saha', 'screening'], ['Imtiaz Ali', 'applied']] as const) {
+      const cnd = await call<{ id: string }>('hrms', hr, 'POST', `/openings/${op.id}/candidates`, { name: n, phone: '9830012345', source: 'Walk-in' });
+      if (st !== 'applied') await call('hrms', hr, 'POST', `/candidates/${cnd.id}/stage`, { stage: st });
+    }
+    // Contracts: supply rates with Ambica, job-work rates with Surat Process House (renewal due soon), transport and the godown lease.
+    await call('workflow', purchase, 'POST', '/contracts', { kind: 'supply', title: 'Annual grey fabric supply 2026-27', party_id: party('Shree Ambica Knitters'), start_date: '2026-04-01', end_date: '2027-03-31', value: 4500000,
+      rates: [{ item: 'SJ-160 grey', rate: 246, uom: 'kg' }, { item: 'RIB-240 grey', rate: 268, uom: 'kg' }], payment_terms: '30 days from invoice; 1% discount if paid in 7 days', quality_terms: 'GSM ±3%, width ±1 inch; shade variation per lot; rejection replaced within 10 days', delivery_terms: 'Ex-mill Surat, within 10 days of PO', penalties: '0.5% per day of delay beyond 5 days, capped at 5%' });
+    await call('workflow', millops, 'POST', '/contracts', { kind: 'job_work', title: 'Dyeing and compacting rate contract', party_id: party('Surat Process House'), start_date: daysAgo(353), end_date: inDays(12), value: 1800000,
+      rates: [{ item: 'Reactive dyeing — dark shades', rate: 62, uom: 'kg' }, { item: 'Reactive dyeing — light shades', rate: 48, uom: 'kg' }, { item: 'Compacting', rate: 9, uom: 'kg' }], payment_terms: '45 days', quality_terms: 'Process loss up to 8%; shade within ΔE 1.0 of the approved lab dip', delivery_terms: '7 working days from receipt', penalties: 'Re-processing at mill cost for shade or GSM failures' });
+    await call('workflow', admin, 'POST', '/contracts', { kind: 'transport', title: 'PTL freight agreement', party_id: party('VRL Logistics'), start_date: '2026-06-01', end_date: '2027-05-31', rates: [{ item: 'Surat → Tiruppur PTL', rate: 4.5, uom: 'kg' }, { item: 'Surat → Kolkata PTL', rate: 5.5, uom: 'kg' }], payment_terms: 'Fortnightly billing, 15 days', penalties: 'Shortage or damage settled at invoice value within 30 days' });
+    await call('workflow', admin, 'POST', '/contracts', { kind: 'rent', title: 'Godown lease, Ring Road Surat', party_name: 'Shree Laxmi Estates', start_date: '2024-11-01', end_date: '2027-10-31', value: 1020000, rates: [{ item: 'Monthly rent', rate: 85000, uom: 'month' }], payment_terms: 'By the 5th of each month', penalties: '3 months notice; 5% escalation each November' });
+    // A manual task in the dispatch queue.
+    await call('workflow', salesMgr, 'POST', '/tasks', { title: 'Confirm transport slot for the Delhi 600 kg order once allocation is decided', queue_permission: 'fulfilment.dispatch', priority: 'high', due_at: new Date(Date.now() + 86_400_000).toISOString() });
+    await drain();
+    const wf = services.find((s) => s.ctx.name === 'workflow')!.ctx.pool;
+    await runContractChecks(wf);
+    await dispatchMessages(wf);
+    await runScheduled(wf);
 
     await drain();
     await runProcurementChecks(services.find((s) => s.ctx.name === 'procurement')!.ctx.pool);
