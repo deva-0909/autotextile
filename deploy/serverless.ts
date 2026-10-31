@@ -63,7 +63,7 @@ async function resolveDatabase() {
 }
 const database = () => (resolved ??= resolveDatabase().catch((e) => { resolved = null; throw e; }));
 
-type Booted = { gateway: ReturnType<typeof createGateway>; services: RunningService[] };
+type Booted = { gateway: ReturnType<typeof createGateway>; services: RunningService[]; ports: Partial<Record<ServiceName, number>> };
 let booted: Promise<Booted> | null = null;
 let lastSetupCheck = Date.now();
 let resetting: Promise<void> | null = null;
@@ -105,7 +105,7 @@ async function boot(): Promise<Booted> {
     const srv = s.app.listen(0, '127.0.0.1', () => { ports[s.ctx.name] = (srv.address() as AddressInfo).port; resolve(); });
   })));
   setServicePorts(ports);
-  return { gateway: createGateway(ports as Record<ServiceName, number>), services };
+  return { gateway: createGateway(ports as Record<ServiceName, number>), services, ports };
 }
 
 // ---- event bus ----
@@ -176,14 +176,15 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     }
     return;
   }
-  const { gateway, services } = await (booted ??= boot().catch((e) => { booted = null; throw e; }));
+  const { gateway, services, ports } = await (booted ??= boot().catch((e) => { booted = null; throw e; }));
   // A warm instance re-checks the setup marker at most once a minute, so deleting it (to reload the demo) takes effect
   // without waiting for a cold start.
   if (Date.now() - lastSetupCheck > 60_000) {
     lastSetupCheck = Date.now();
     const pool = services.find((s) => s.ctx.name === 'identity')!.ctx.pool;
     const ok = await pool.query(`SELECT to_regclass('identity.setup_state') IS NOT NULL AND EXISTS (SELECT 1 FROM identity.setup_state) AS ok`).then((r) => r.rows[0].ok as boolean, () => false);
-    if (!ok) { await (resetting ??= ensureSetUp((await database()).session).finally(() => { resetting = null; })); }
+    // The seed points service-to-service calls at its own temporary servers; point them back at this instance's.
+    if (!ok) { await (resetting ??= ensureSetUp((await database()).session).finally(() => { setServicePorts(ports); resetting = null; })); }
   }
   if (url.startsWith('/api/_cron')) {
     if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
