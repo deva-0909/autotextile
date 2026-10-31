@@ -74,15 +74,17 @@ async function ensureSetUp(session: string) {
   const c = new pg.Client({ connectionString: session.replace(/\/\/erp_owner/, '//erp_identity'), ssl: /localhost|127\.0\.0\.1/.test(session) ? undefined : { rejectUnauthorized: false } });
   await c.connect();
   try {
-    const ready = async () => (await c.query(`SELECT to_regclass('identity.users') IS NOT NULL AND EXISTS (SELECT 1 FROM identity.users) AS ok`).catch(() => ({ rows: [{ ok: false }] }))).rows[0].ok;
-    if (await ready()) return;
+    // Complete only when setup reached its end marker; data without it means an interrupted setup, redone from scratch.
+    const state = async () => (await c.query(`SELECT to_regclass('identity.users') IS NOT NULL AS started, to_regclass('identity.setup_state') IS NOT NULL AS marker`)).rows[0] as { started: boolean; marker: boolean };
+    const complete = async () => { const s = await state(); return s.marker && (await c.query('SELECT EXISTS (SELECT 1 FROM identity.setup_state) AS ok')).rows[0].ok as boolean; };
+    if (await complete()) return;
     await c.query(`SELECT pg_advisory_lock(hashtext('erp:setup'))`);
     try {
-      if (await ready()) return;
-      console.log('[setup] empty database: migrating and loading demo data');
-      const transaction = process.env.DATABASE_URL;
-      process.env.DATABASE_URL = session;
-      try { await setupDatabase({ log: (l) => console.log(`[setup] ${l}`) }); } finally { process.env.DATABASE_URL = transaction; }
+      if (await complete()) return;
+      const reset = (await state()).started;
+      console.log(`[setup] ${reset ? 'incomplete setup found: starting again' : 'empty database'}: migrating and loading demo data`);
+      // Setup uses the same transaction-mode pool as the app (DATABASE_URL); only this coordinating lock uses a session.
+      await setupDatabase({ reset, log: (l) => console.log(`[setup] ${l}`) });
     } finally {
       await c.query(`SELECT pg_advisory_unlock(hashtext('erp:setup'))`).catch(() => {});
     }
@@ -163,17 +165,12 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       return res.end();
     }
     res.setHeader('content-type', 'text/plain; charset=utf-8');
-    const db = await database();
-    const transaction = process.env.DATABASE_URL;
-    process.env.DATABASE_URL = db.session;
+    process.env.DATABASE_URL = (await database()).transaction;
     try {
       await setupDatabase({ reset: new URL(url, 'http://x').searchParams.get('reset') === '1', log: (line) => void res.write(`${line}\n`) });
       res.end('✔ setup complete\n');
     } catch (e) {
       res.end(`✖ setup failed: ${(e as Error).stack ?? e}\n`);
-    } finally {
-      if (transaction === undefined) delete process.env.DATABASE_URL;
-      else process.env.DATABASE_URL = transaction;
     }
     return;
   }

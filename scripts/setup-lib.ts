@@ -66,5 +66,8 @@ export async function setupDatabase({ reset = false, log = console.log }: { rese
     log('  ✓ commerce and fulfilment examples (portal orders, token payments, a dispatched shipment, an order awaiting a split)');
   }
 
+  // Written last: a setup cut off part-way (time limit, lost connection) leaves no marker and is redone from scratch.
+  await identity.ctx.pool.query(`CREATE TABLE IF NOT EXISTS identity.setup_state (completed_at timestamptz NOT NULL DEFAULT now())`);
+  await identity.ctx.pool.query(`INSERT INTO identity.setup_state DEFAULT VALUES`);
   for (const s of services) await s.close();
 }

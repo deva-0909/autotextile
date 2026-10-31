@@ -15,9 +15,12 @@ export interface BusEvent<T = Record<string, unknown>> {
 }
 
 export async function ensureBus(pool: Pool) {
-  await pool.query(`SELECT pg_advisory_lock(hashtext('bus:init'))`);
+  // A transaction-scoped lock: it cannot outlive its transaction, which matters behind a transaction pooler.
+  const c = await pool.connect();
   try {
-    await pool.query(`
+    await c.query('BEGIN');
+    await c.query(`SELECT pg_advisory_xact_lock(hashtext('bus:init'))`);
+    await c.query(`
       CREATE SCHEMA IF NOT EXISTS bus;
       CREATE TABLE IF NOT EXISTS bus.events (
         id bigserial PRIMARY KEY,
@@ -39,8 +42,12 @@ export async function ensureBus(pool: Pool) {
       ALTER TABLE bus.dead_letters ADD COLUMN IF NOT EXISTS replayed_at timestamptz;
       ALTER TABLE bus.dead_letters ADD COLUMN IF NOT EXISTS replay_error text;
     `);
+    await c.query('COMMIT');
+  } catch (err) {
+    await c.query('ROLLBACK').catch(() => {});
+    throw err;
   } finally {
-    await pool.query(`SELECT pg_advisory_unlock(hashtext('bus:init'))`);
+    c.release();
   }
 }
 
