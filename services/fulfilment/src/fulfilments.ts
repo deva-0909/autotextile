@@ -247,7 +247,16 @@ export async function applyGateDecision(c: Client, p: { ref_id: string; decision
 /** Money arrived for an order: re-apply the customer’s advance to its unpaid invoices. */
 export function paymentReceivedConsumer() {
   return async (ev: BusEvent, c: Client) => {
-    const p = ev.payload as { customer_id: string; order_id: string | null };
+    const p = ev.payload as { customer_id: string; order_id: string | null; purpose?: string; ref_no?: string | null };
+    // Money paid against a named invoice on credit terms is set against that invoice, so the customer's advance does
+    // not show it as unapplied (invoices on advance terms are settled below).
+    if (p.purpose === 'invoice' && p.ref_no) {
+      const f = await one<F>(c, `SELECT * FROM fulfilments WHERE customer_id = $1 AND invoice_no = $2 AND gate_payment = 'credit'`, [p.customer_id, p.ref_no]);
+      if (f) {
+        const r = await callService<{ applied_total: number }>(S, 'commerce', 'POST', '/wallet/apply', { customer_id: f.customer_id, order_id: f.order_id, invoice_no: f.invoice_no, amount: Number(f.invoice_total) });
+        await c.query(`UPDATE fulfilments SET amount_settled = $2, updated_at = now() WHERE id = $1`, [f.id, r.applied_total]);
+      }
+    }
     const fs = await many<F>(c, `SELECT * FROM fulfilments WHERE customer_id = $1 AND invoice_no IS NOT NULL AND gate_payment IN ('pending','override') AND status = 'invoiced' ORDER BY (order_id = $2) DESC, created_at FOR UPDATE`, [p.customer_id, p.order_id]);
     for (const f of fs) await settle(c, f);
   };
