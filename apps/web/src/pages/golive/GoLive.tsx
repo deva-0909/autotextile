@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { api, invalidatePrefix } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtDateTime, fmtNum, fmtRelative, humanize } from '../../lib/format';
-import { SimpleTable } from '../../components/DataTable';
+import { SimpleTable, TableCsvButton } from '../../components/DataTable';
 import { Drawer, Modal, useToast } from '../../components/overlay';
 import { Badge, Button, Card, Checkbox, EmptyState, Input, Notice, PageHeader, Segmented, Select, Skeleton, Stat, StatusBadge, Tabs, Textarea } from '../../components/ui';
 
@@ -181,7 +181,7 @@ export function TrainingPage() {
       {!d ? <Skeleton className="h-60" /> : (
         <>
           <div className="mb-4 grid grid-cols-3 gap-3"><Stat label="Modules completed" value={`${d.completion.completed} / ${d.completion.assigned}`} /><Stat label="Staff fully trained" value={`${d.completion.staff_trained} / ${d.completion.staff}`} /><Stat label="Modules" value={d.modules.length} /></div>
-          <Card title="Who has done what" padded={false}>
+          <Card title="Who has done what" padded={false} actions={<TableCsvButton name="training-completion" />}>
             <div className="scrollbar-thin overflow-x-auto"><table className="w-full text-[12.5px]"><thead><tr className="border-b border-slate-200 bg-slate-50"><th className="px-3 py-2 text-left">Person</th>{d.modules.map((m) => <th key={m.code} title={m.title} className="px-2 py-2 font-mono text-[11px]">{m.code}</th>)}</tr></thead>
               <tbody className="divide-y divide-slate-100">{d.staff.map((u) => <tr key={u.id}><td className="px-3 py-1.5 whitespace-nowrap">{u.name}</td>{d.modules.map((m) => { const r = d.records.find((x) => x.user_id === u.id && x.module_code === m.code); return <td key={m.code} className="px-2 py-1.5 text-center">{!r ? <span className="text-slate-200">·</span> : r.status === 'completed' ? <CheckCircle2 className="mx-auto size-4 text-emerald-600" /> : manage ? <button title="Mark completed" onClick={async () => { await api.post('/golive/training/complete', { user_id: u.id, module_code: m.code }); invalidatePrefix(qc, 'gl-'); }}><Circle className="mx-auto size-4 text-amber-500" /></button> : <Circle className="mx-auto size-4 text-amber-500" />}</td>; })}</tr>)}</tbody></table></div>
           </Card>

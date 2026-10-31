@@ -6,7 +6,7 @@ import { Link } from '../../components/AppLink';
 import { api, invalidatePrefix } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtAmt, fmtDate, fmtDateTime, fmtINR, fmtNum, humanize } from '../../lib/format';
-import { SimpleTable } from '../../components/DataTable';
+import { SimpleTable, TableCsvButton } from '../../components/DataTable';
 import { ConfirmDialog, Modal, useToast } from '../../components/overlay';
 import { useParties } from '../../components/business';
 import { Badge, Button, Card, Checkbox, EmptyState, Input, KeyValue, Notice, PageHeader, Segmented, Select, Skeleton, Stat, StatusBadge, Tabs, Textarea } from '../../components/ui';
@@ -626,7 +626,7 @@ export function StatementsPage() {
         actions={<div className="flex items-end gap-2"><BookPicker value={book} onChange={setBook} />{tab !== 'bs' && tab !== 'ratios' && <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />}<Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /><Button onClick={() => window.print()}>Print</Button></div>} />
       <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ value: 'pl', label: 'Profit and loss' }, { value: 'bs', label: 'Balance sheet' }, { value: 'tb', label: 'Trial balance' }, { value: 'cf', label: 'Cash flow' }, { value: 'ratios', label: 'Working capital' }]} />
       {tab === 'pl' && (!pl.data ? <Skeleton className="h-96" /> : (
-        <Card className="max-w-3xl"><table className="w-full text-[13.5px]"><tbody>
+        <Card className="max-w-3xl" title="Profit and loss" actions={<TableCsvButton name="profit-and-loss" />}><table className="w-full text-[13.5px]"><tbody>
           <Section title="Revenue from operations" rows={pl.data.revenue} total={pl.data.revenue_total} />
           <Section title="Cost of sales" rows={pl.data.cost_of_sales} total={pl.data.cost_of_sales_total} neg />
           <Strong label={<>Gross profit {pl.data.gross_margin_pct != null && <span className="text-[12px] font-normal text-slate-500">({pl.data.gross_margin_pct}%)</span>}</>} v={pl.data.gross_profit} />
@@ -637,7 +637,8 @@ export function StatementsPage() {
         </tbody></table><p className="mt-3 text-[12px] text-slate-500">Cost of sales includes the change in inventory posted at each period close. When the report runs to today, stock not yet posted is valued now and shown as a provisional line; nothing is posted until the month is locked.</p></Card>
       ))}
       {tab === 'bs' && (!bs.data ? <Skeleton className="h-96" /> : (
-        <div className="grid max-w-5xl gap-4 lg:grid-cols-2">
+        <div className="grid max-w-5xl gap-4 lg:grid-cols-2" data-csv-scope>
+          <div className="flex justify-end lg:col-span-2"><TableCsvButton name="balance-sheet" /></div>
           <Card title="Assets"><table className="w-full text-[13.5px]"><tbody><Section title="Non-current assets" rows={bs.data.non_current_assets} total={bs.data.non_current_assets.reduce((s, r) => s + r.amount, 0)} /><Section title="Current assets" rows={bs.data.current_assets} total={bs.data.current_assets.reduce((s, r) => s + r.amount, 0)} /><Strong label="Total assets" v={bs.data.total_assets} /></tbody></table></Card>
           <Card title="Equity and liabilities"><table className="w-full text-[13.5px]"><tbody><Section title="Equity" rows={bs.data.equity} total={bs.data.total_equity} /><Section title="Non-current liabilities" rows={bs.data.non_current_liabilities} total={bs.data.non_current_liabilities.reduce((s, r) => s + r.amount, 0)} /><Section title="Current liabilities" rows={bs.data.current_liabilities} total={bs.data.current_liabilities.reduce((s, r) => s + r.amount, 0)} /><Strong label="Total equity and liabilities" v={bs.data.total_equity + bs.data.total_liabilities} /></tbody></table></Card>
           <div className="lg:col-span-2">{bs.data.balanced ? <Notice tone="success">Assets equal equity plus liabilities.</Notice> : <Notice tone="danger">Out of balance by {fmtAmt(bs.data.difference)}.</Notice>}</div>
@@ -657,7 +658,7 @@ export function StatementsPage() {
         </Card>
       ))}
       {tab === 'cf' && (!cf.data ? <Skeleton className="h-80" /> : (
-        <Card className="max-w-2xl" title="Cash flow (direct method)" description="Movements on cash, bank and the payment-gateway clearing account, classified by the other side of each voucher.">
+        <Card className="max-w-2xl" actions={<TableCsvButton name="cash-flow" />} title="Cash flow (direct method)" description="Movements on cash, bank and the payment-gateway clearing account, classified by the other side of each voucher.">
           <table className="w-full text-[13.5px]"><tbody>
             {([['Receipts from customers', cf.data.receipts_from_customers], ['Payments to suppliers and mills', cf.data.payments_to_suppliers], ['Payments to employees', cf.data.payments_to_employees], ['Taxes paid (GST, TDS)', cf.data.taxes_paid], ['Other operating', cf.data.other_operating]] as [string, number][]).map(([l, v]) => <tr key={l}><td className="py-1 pl-3">{l}</td><td className="py-1 text-right tabular">{fmtAmt(v, false)}</td></tr>)}
             <Strong label="Net cash from operations" v={cf.data.operating} />

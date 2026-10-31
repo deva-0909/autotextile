@@ -420,7 +420,7 @@ function RateModal({ onClose, onDone }: { onClose: () => void; onDone: () => voi
   );
 }
 
-interface ShipD extends ShipRow { fulfilment_id: string; fulfilment_no: string; invoice_no: string | null; vehicle_no: string | null; driver_name: string | null; driver_phone: string | null; eway_bill_no: string | null; freight_amount: number; rolls: number; packages: number | null; tracking_token: string; pod_received_by: string | null; pod_kg: number | null; pod_remarks: string | null; pod_source: string | null; pod_at: string | null; created_by_name: string;
+interface ShipD extends ShipRow { warehouse_name?: string | null; fulfilment_id: string; fulfilment_no: string; invoice_no: string | null; vehicle_no: string | null; driver_name: string | null; driver_phone: string | null; eway_bill_no: string | null; freight_amount: number; rolls: number; packages: number | null; tracking_token: string; pod_received_by: string | null; pod_kg: number | null; pod_remarks: string | null; pod_source: string | null; pod_at: string | null; created_by_name: string;
   events: { id: number; milestone: string; location: string | null; note: string | null; by_name: string | null; source: string; at: string }[]; claims: { id: string; number: string; claim_type: string; kg: number | null; amount: number; description: string; status: string; settlement_amount: number | null; resolution: string | null }[] }
 
 export function ShipmentDetailPage() {
@@ -436,7 +436,7 @@ export function ShipmentDetailPage() {
   if (!s) return <Skeleton className="h-96" />;
   return (
     <>
-      <PageHeader title={`Shipment ${s.number}`} description={`${s.customer_name} · ${s.order_no} · from ${s.warehouse_code}`} meta={<StatusBadge status={s.status} />}
+      <PageHeader title={`Shipment ${s.number}`} description={`${s.customer_name} · ${s.order_no}${s.warehouse_name ?? s.warehouse_code ? ` · from ${s.warehouse_name ?? s.warehouse_code}` : ''}`} meta={<StatusBadge status={s.status} />}
         breadcrumbs={[{ label: 'Fulfilment', to: '/fulfilment' }, { label: 'Transport', to: '/fulfilment/shipments' }, { label: s.number }]}
         actions={<><Link to={`/track/${s.tracking_token}`}><Button icon={<Truck className="size-4" />}>Customer tracking page</Button></Link>{s.status !== 'delivered' && can('fulfilment.dispatch') && <Button variant="primary" icon={<PackageCheck className="size-4" />} onClick={() => setPod(true)}>Record delivery (POD)</Button>}</>} />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">

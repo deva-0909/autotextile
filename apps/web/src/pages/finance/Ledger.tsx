@@ -30,12 +30,13 @@ export const Amt = ({ v, className }: { v: number | null | undefined; className?
 interface Dash { cash_and_bank: number; receivables: number; receivables_overdue: number; payables: number; payables_overdue: number; gst_payable: number; gst_this_month: { output: number; input: number }; tds_payable: number; inventory: number; ytd: { revenue: number; gross_profit: number; net_profit: number }; anomalies: { n: number; critical: number }; pending_approval: number; periods: { month: string; status: string }[]; recent: VRow[] }
 export function FinanceOverview() {
   const nav = useNavigate();
+  const { can } = useAuth();
   const q = useQuery({ queryKey: ['fin-dash'], queryFn: () => api.get<Dash>('/finance/dashboard') });
   const d = q.data;
   return (
     <>
       <PageHeader title="Finance" description="Double-entry books for each GSTIN, posted automatically from purchase, sales, receipts, returns and stock transfers. Manual entries above the limit go to a checker; locked periods cannot change." breadcrumbs={[{ label: 'Finance' }]}
-        actions={<Link to="/finance/vouchers/new"><Button variant="primary" icon={<FilePlus2 className="size-4" />}>New voucher</Button></Link>} />
+        actions={can('finance.voucher.post') && <Link to="/finance/vouchers/new"><Button variant="primary" icon={<FilePlus2 className="size-4" />}>New voucher</Button></Link>} />
       {q.isError ? <ErrorState error={q.error} /> : !d ? <Skeleton className="h-80" /> : (
         <>
           {d.anomalies.critical > 0 && <div className="mb-4"><Notice tone="danger" title={`${d.anomalies.critical} critical alert(s)`} action={<Link to="/finance/anomalies"><Button size="sm">Review</Button></Link>}>Possible duplicate payments, payments after bank changes or overdue statutory dues.</Notice></div>}
@@ -167,6 +168,7 @@ function VoucherTable({ rows, onOpen }: { rows: VRow[]; onOpen: (id: string) => 
 
 export function VouchersPage() {
   const nav = useNavigate();
+  const { can } = useAuth();
   const [book, setBook] = useState('all');
   const [type, setType] = useState('');
   const [status, setStatus] = useState('');
@@ -175,7 +177,7 @@ export function VouchersPage() {
   return (
     <>
       <PageHeader title="Vouchers" description="Day book of every entry. Automatic vouchers link back to the invoice, receipt or transfer that created them." breadcrumbs={[{ label: 'Finance', to: '/finance' }, { label: 'Vouchers' }]}
-        actions={<Link to="/finance/vouchers/new"><Button variant="primary" icon={<FilePlus2 className="size-4" />}>New voucher</Button></Link>} />
+        actions={can('finance.voucher.post') && <Link to="/finance/vouchers/new"><Button variant="primary" icon={<FilePlus2 className="size-4" />}>New voucher</Button></Link>} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <BookPicker value={book} onChange={setBook} />
         <Select className="w-44" value={type} onChange={(e) => setType(e.target.value)} options={[{ value: '', label: 'All types' }, ...VTYPES.map((t) => ({ value: t, label: humanize(t) }))]} />

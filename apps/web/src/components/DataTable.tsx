@@ -259,6 +259,46 @@ function cellValue(text: string) {
 }
 const csvEsc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
 
+/** Downloads a rendered table as CSV: headers as written, cells as shown, amounts as plain numbers, empty columns skipped. */
+export function exportTable(t: HTMLTableElement, name?: string) {
+  const heads = [...t.querySelectorAll('thead th')].map((th) => (th.textContent ?? '').replace(/\s+/g, ' ').trim());
+  const width = Math.max(heads.length, ...[...t.querySelectorAll('tbody tr')].map((tr) => tr.children.length));
+  const keep = heads.length ? heads.map((h, i) => (h ? i : -1)).filter((i) => i >= 0) : Array.from({ length: width }, (_, i) => i);
+  const lines = heads.length ? [keep.map((i) => csvEsc(heads[i]!)).join(',')] : [];
+  for (const tr of t.querySelectorAll('tbody tr')) {
+    const cells = [...tr.children].map((td) => cellValue((td as HTMLElement).innerText));
+    lines.push(keep.map((i) => csvEsc(cells[i] ?? '')).join(','));
+  }
+  const title = name ?? (document.querySelector('main h1') as HTMLElement | null)?.innerText.split('\n')[0] ?? 'export';
+  const url = URL.createObjectURL(new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: `${title.replace(/[^\w.-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'export'}-${new Date().toISOString().slice(0, 10)}.csv` });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+/** CSV download for a hand-built table: exports the table(s) inside the same card or section. */
+export function TableCsvButton({ name }: { name?: string }) {
+  return (
+    <button type="button" aria-label="Download CSV" title="Download as CSV" className="inline-flex items-center gap-1 rounded px-2 py-1 text-[12.5px] text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+      onClick={(e) => {
+        const box = (e.currentTarget as HTMLElement).closest('.card, section, [data-csv-scope]');
+        const tables = [...(box?.querySelectorAll('table') ?? [])] as HTMLTableElement[];
+        if (tables.length === 1) exportTable(tables[0]!, name);
+        else if (tables.length > 1) {
+          // Several tables (a statement in sections): export them one after another in a single file.
+          const merged = document.createElement('table');
+          const body = document.createElement('tbody');
+          for (const t of tables) for (const tr of t.querySelectorAll('tr')) body.appendChild(tr.cloneNode(true));
+          merged.appendChild(body);
+          merged.style.position = 'absolute'; merged.style.left = '-99999px';
+          document.body.appendChild(merged);
+          exportTable(merged, name);
+          merged.remove();
+        }
+      }}><Download className="size-3.5" />CSV</button>
+  );
+}
+
 export function SimpleTable<T>({ rows, columns, rowKey, onRowClick, empty, pageSize, csv, csvName }: {
   rows: T[]; columns: Omit<Column<T>, 'sort' | 'csv'>[]; rowKey: (r: T) => string; onRowClick?: (r: T) => void; empty?: ReactNode;
   /** Show this many rows at a time, with a pager underneath, when there are more. */
@@ -279,20 +319,7 @@ export function SimpleTable<T>({ rows, columns, rowKey, onRowClick, empty, pageS
   const offerCsv = csv ?? rows.length >= 3;
   useEffect(() => {
     if (!exporting || !tableRef.current) return;
-    const t = tableRef.current;
-    // Header text as written, not as styled (headers are shown in capitals).
-    const heads = [...t.querySelectorAll('thead th')].map((th) => (th.textContent ?? '').replace(/\s+/g, ' ').trim());
-    const keep = heads.map((h, i) => (h ? i : -1)).filter((i) => i >= 0);
-    const lines = [keep.map((i) => csvEsc(heads[i]!)).join(',')];
-    for (const tr of t.querySelectorAll('tbody tr')) {
-      const cells = [...tr.children].map((td) => cellValue((td as HTMLElement).innerText));
-      lines.push(keep.map((i) => csvEsc(cells[i] ?? '')).join(','));
-    }
-    const title = csvName ?? (document.querySelector('main h1') as HTMLElement | null)?.innerText.split('\n')[0] ?? 'export';
-    const url = URL.createObjectURL(new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv' }));
-    const a = Object.assign(document.createElement('a'), { href: url, download: `${title.replace(/[^\w.-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'export'}-${new Date().toISOString().slice(0, 10)}.csv` });
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    exportTable(tableRef.current, csvName);
     setExporting(false);
   }, [exporting, csvName]);
   const showPager = !!pageSize && rows.length > pageSize;
