@@ -151,7 +151,9 @@ export function authRoutes(r: Router, ctx: ServiceContext) {
     setRefreshCookie(res, next);
     const user = await loadAuthUser(ctx.pool, s.user_id, s.id);
     const flags = await one<{ must_change_password: boolean }>(ctx.pool, 'SELECT must_change_password FROM users WHERE id = $1', [s.user_id]);
-    res.json({ accessToken: await signAccessToken(user), user: { ...user, menu: await loadMenu(ctx.pool, s.user_id) }, mustChangePassword: flags!.must_change_password });
+    res.json({ accessToken: await signAccessToken(user), user: { ...user, menu: await loadMenu(ctx.pool, s.user_id) },
+      // Demo sign-in skips the first-sign-in password change; a reload must not bring it back.
+      mustChangePassword: process.env.DEMO_MODE === '1' ? false : flags!.must_change_password });
   });
 
   r.post('/auth/logout', async (req, res) => {
