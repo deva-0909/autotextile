@@ -11,11 +11,12 @@ It is built phase by phase from the *Developer Brief & Functional Specification 
 - **P5 — Sales & CRM: lead capture, allocation, pipeline, customer 360, quotations, pricing & credit approvals**
 - **P6 — B2B commerce: trade portal, cart, token booking, payment gateway (sandbox), customer advance ledger**
 - **P7 — Fulfilment: warehouse allocation engine, split approval, pick by scan, GST invoice, dispatch gates, transport, POD, returns**
+- **P8 — Finance: double-entry books per GSTIN, automatic postings, AR/AP ageing, GST returns and 2B match, TDS, bank reconciliation, statements, period close, alerts**
 
 | | |
 |---|---|
 | **Architecture** | Domain microservices behind an API gateway, PostgreSQL (schema per service), Postgres-backed event bus |
-| **Services in this release** | `identity` · `organisation` · `masters` · `governance` · `procurement` · `jobwork` · `inventory` · `crm` · `commerce` · `fulfilment` · `gateway` |
+| **Services in this release** | `identity` · `organisation` · `masters` · `governance` · `procurement` · `jobwork` · `inventory` · `crm` · `commerce` · `fulfilment` · `finance` · `gateway` |
 | **Web app** | React 19 + TypeScript + Tailwind CSS, served by the gateway |
 | **Runs on** | Windows, macOS or Linux — Node.js and PostgreSQL only, no Docker needed |
 
@@ -113,6 +114,18 @@ See [docs/architecture.md](docs/architecture.md) for the design and
 - **Transport:** freight rate cards and quotes, LR/vehicle, milestones, shareable tracking link (`/track/:token`), proof of delivery with shortage/damage that opens a transport claim.
 - **Returns (RMA):** request from the portal or internally, authorise, receive by scan into a returns location, disposition, credit note credited to the customer’s advance.
 
+## What’s in P8 — Accounting, GST, TDS & financial control
+
+- **Books per GSTIN:** one book for each GST registration of the legal entity; consolidated reports remove inter-GSTIN transfers and inter-unit balances.
+- **Automatic postings** from the events other services publish: supplier and mill bills (purchase or job-work charges, input GST, AP net of TDS), GST tax invoices (sales, output GST, AR), credit notes, gateway receipts and refunds, cancellation fees, and inter-GSTIN stock transfers (a supply in the sending book and a purchase in the receiving one). Every posting is idempotent on its source document.
+- **Ledger controls:** debits must equal credits; posted vouchers and lines cannot be changed in the database (triggers) — corrections are reversals; manual journals, payments and contra entries above the limit wait for a checker; locked months refuse entries, and late automatic postings move to the next open month; reopening needs approval.
+- **AR/AP:** bill-wise ageing (not due, 1–30, 31–60, 61–90, 90+), settled first-in-first-out against the party balance; advances shown as liabilities (customers) or assets (suppliers).
+- **GST:** GSTR-1 (B2B incl. branch transfers, B2C, credit notes, HSN summary) with JSON export, GSTR-3B with the statutory credit set-off order, GSTR-2B import and matching, e-invoice payloads in the IRP schema.
+- **TDS:** sections with rates and single/annual thresholds (194C, 194Q on the excess, 194J, 194H, 194I), PAN and lower-deduction certificates per party, deduction at bill posting, challans, due dates and the quarterly 26Q summary.
+- **Bank reconciliation:** CSV statement import with duplicate detection, auto-match by amount, date and UTR, creating missing entries from statement lines, and a reconciliation statement that must explain every rupee.
+- **Statements:** trial balance, P&L, balance sheet, cash flow (direct), DSO/DPO/inventory days and working capital; closing stock valued at landed lot cost (weighted average or lot-wise) when a month is locked, with a provisional valuation between closes.
+- **Alerts:** duplicate supplier bills and payments, payments soon after a bank-detail change, unusual discounts, large credit notes and refunds, manual journals on sensitive accounts, unusual expense movements, overdue TDS and receivables over 90 days.
+
 ## Run it on Windows (no Docker)
 
 ### 1. Install the prerequisites (one time)
@@ -164,7 +177,7 @@ npm start
 
 `npm run setup` creates the `textile_erp` database, runs every service’s migrations and loads demo data,
 including sample requisitions, RFQs, purchase orders, invoices, job-work orders, scanned stock, transfers, leads, quotations and credit.
-`npm start` launches the ten services and the gateway in one window. Open **http://localhost:4000**.
+`npm start` launches the eleven services and the gateway in one window. Open **http://localhost:4000**.
 
 > Upgrading from an earlier release? Run `npm install` and then `npm run setup -- --reset` once, to load the demo data for the new modules.
 
@@ -200,7 +213,7 @@ A good first tour:
 7. Sign in as **sales.south** to see only your own leads, then build a quotation and watch the margin and approval flag change as you type a price.
 8. Sign in as **purchase@kolkatahosiery.example**: open the order waiting for its token and pay it on the sandbox payment page; the order is booked and appears in dispatch.
 9. Sign in as **dispatch** → *Fulfilment*: the Delhi order needs a decision (no single warehouse has 600 kg) — request a split; scan rolls on a released fulfilment, pack, invoice and dispatch; open the delivered shipment’s tracking and POD.
-10. Sign in as **accounts** → *B2B commerce*: payments and their reconciliation, customer advances, token policies (one Kolkata rule waits for approval).
+10. Sign in as **accounts** → *B2B commerce*: payments and their reconciliation, customer advances, token policies (one Kolkata rule waits for approval). Then *Finance*: the vouchers posted automatically from the invoices and receipts above, the bank reconciliation (three statement lines left to explain — try *Create entry* on the gateway settlement), GST returns with the 2B match, TDS, and the statements.
 11. Sign in as **admin** → *Approvals* to approve what is waiting, then look at the *Audit trail*.
 
 ### Payment gateway

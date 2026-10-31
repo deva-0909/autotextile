@@ -1,4 +1,4 @@
-# Requirement traceability — releases P1–P7
+# Requirement traceability — releases P1–P8
 
 Source: *Textile_Trading_ERP_Development_and_Figma_Tracker.xlsx*, Requirements and Figma Screens sheets.
 Statuses:
@@ -111,6 +111,20 @@ Statuses:
 | REQ-0063 | Delivery | **Built** | POD with received kg, condition and receiver; shortage/damage opens a transport claim | — |
 | REQ-0064 | Returns | **Built / partial** | RMA request, authorisation, scan receipt, disposition, credit note credited to the customer advance | Replacement orders are created manually; e-invoice IRN for invoices/credit notes not generated (GSP integration) |
 
+## P8 — Accounting, GST, TDS & financial control
+
+| ID | Requirement | Status | Implementation | Remaining (phase) |
+|---|---|---|---|---|
+| REQ-0065 | Double-entry general ledger | **Built** | Chart of accounts, vouchers (journal, receipt, payment, contra, sales, purchase, credit note, transfer, opening, closing), trial balance, period locks with approved reopening, year-end close, audit, immutable postings | — |
+| REQ-0066 | AP, AR, customer and supplier ledgers | **Built / partial** | Automatic postings from supplier/mill bills, tax invoices, credit notes, gateway receipts, refunds, cancellation fees, transfers; bill-wise FIFO ageing; party ledgers | Payroll postings arrive with P9; manual bill-wise allocation; debit notes to suppliers are entered as journals |
+| REQ-0067 | GSTIN / entity-wise accounting | **Built / partial** | One book per GST registration, GSTIN-wise invoice series and tax registers, consolidated reports with inter-unit and branch-transfer elimination | Several legal entities and intercompany (other than branch transfers) not exercised in the demo |
+| REQ-0068 | Landed cost and valuation | **Built / partial** | Closing stock at lot landed cost (weighted average per SKU or lot-wise), stock at mills and in transit included, posted at period close; provisional valuation in reports | Historical (back-dated) valuation; lot profitability report (P10) |
+| REQ-0069 | GST tax engine and returns | **Built / partial** | CGST/SGST vs IGST by place of supply, HSN, RCM flag, ITC; GSTR-1 (B2B, B2C, CDNR, HSN) with JSON export, GSTR-3B with set-off order, GSTR-2B import and match; e-invoice payloads | IRN generation and e-way bill API need a GSP; returns are filed on the portal |
+| REQ-0070 | TDS engine | **Built** | Sections, rates, single/annual thresholds, 194Q on excess, PAN/no-PAN, lower-deduction certificates, effective dates, deduction at bill, challans, due dates, 26Q quarterly summary, overdue alert | Form 26Q file in the NSDL FVU format |
+| REQ-0071 | Bank statement import and reconciliation | **Built** | CSV import with header detection, duplicates, auto-match by amount/date/UTR, manual match, create entry from a line, set aside with reason, reconciliation statement | Direct bank feeds (ICICI CIB API) |
+| REQ-0072 | Management and statutory reports | **Built / partial** | Trial balance, P&L, balance sheet, cash flow, customer/supplier ageing, cash and bank, working capital, DSO/DPO, inventory days, year-end close | Schedule III formatting and comparatives for the statutory audit |
+| REQ-0073 | Financial anomaly detection | **Built** | Duplicate bills and payments, payments after bank changes, unusual discounts, large credit notes and refunds, sensitive manual journals, weekend/round journals, unusual ledger movement, overdue TDS, 90-day receivables | Thresholds are settings; machine-learned scoring is P10 |
+
 ### Known gaps
 
 - **MFA is optional per user.** The setting *Require MFA for privileged users* exists, but the login does not force enrolment yet.
@@ -171,6 +185,13 @@ Statuses:
 | FIG-049 | Transporter, LR and tracking | `/fulfilment/shipments`, `/fulfilment/shipments/:id`, `/track/:token` |
 | FIG-050 | Delivery tracking and POD | `/portal/orders/:id`, `/fulfilment/shipments/:id` |
 | FIG-051 | Return / RMA and claims | `/fulfilment/returns`, `/fulfilment/returns/:id`, `/fulfilment/shipments?tab=claims` |
+| FIG-052 | Chart of accounts and ledger | `/finance/accounts`, `/finance/ledger/:id` |
+| FIG-053 | Voucher and journal entry | `/finance/vouchers`, `/finance/vouchers/new`, `/finance/vouchers/:id` |
+| FIG-054 | Customer and supplier ledgers | `/finance/receivables`, `/finance/payables`, `/finance/{receivables,payables}/:id` |
+| FIG-055 | Bank reconciliation | `/finance/bank` |
+| FIG-056 | GST compliance cockpit | `/finance/gst` |
+| FIG-057 | TDS configuration and returns | `/finance/tds` |
+| FIG-058 | Financial statements and period close | `/finance/statements`, `/finance/close`, `/finance/anomalies` |
 | extra | Approvals inbox, document library, configuration, programme tracker, claims, reservations, issue to mill, sales dashboard, targets | `/approvals`, `/governance/documents`, `/organisation/configuration`, `/programme`, `/jobwork/claims`, `/inventory/reservations`, `/inventory/mill-issues`, `/crm`, `/crm/performance` |
 
 ## Acceptance tests (tracker sheet) touched by P1

@@ -9,7 +9,7 @@ export interface PermissionDef {
   /** Sensitive actions are highlighted in the permission matrix and always audited. */
   sensitive?: boolean;
   /** Release that introduced the permission; baseline roles receive new ones once on upgrade. */
-  since?: 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7';
+  since?: 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8' | 'P9' | 'P10' | 'P11';
 }
 
 export const PERMISSIONS: PermissionDef[] = [
@@ -110,6 +110,17 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: 'fulfilment.gate.approve', module: 'Fulfilment', label: 'Approve dispatch without invoice or payment (checker)', sensitive: true, since: 'P7' },
   { code: 'fulfilment.transport.manage', module: 'Fulfilment', label: 'Maintain freight rates', since: 'P7' },
   { code: 'fulfilment.returns.manage', module: 'Fulfilment', label: 'Authorise returns, record disposition, raise transport claims', since: 'P7' },
+
+  { code: 'finance.read', module: 'Finance', label: 'View ledgers, vouchers, statements, GST and TDS registers', since: 'P8' },
+  { code: 'finance.voucher.post', module: 'Finance', label: 'Enter journals, receipts, payments and contra vouchers (maker)', sensitive: true, since: 'P8' },
+  { code: 'finance.voucher.approve', module: 'Finance', label: 'Approve vouchers above the limit and reversals (checker)', sensitive: true, since: 'P8' },
+  { code: 'finance.bank.reconcile', module: 'Finance', label: 'Import bank statements and reconcile', since: 'P8' },
+  { code: 'finance.gst.manage', module: 'Finance', label: 'Prepare GST returns, import GSTR-2B, export e-invoice data', sensitive: true, since: 'P8' },
+  { code: 'finance.tds.manage', module: 'Finance', label: 'Maintain TDS sections and party PAN, record challans', sensitive: true, since: 'P8' },
+  { code: 'finance.period.manage', module: 'Finance', label: 'Lock periods, value inventory, close the year', sensitive: true, since: 'P8' },
+  { code: 'finance.period.approve', module: 'Finance', label: 'Approve reopening a locked period (checker)', sensitive: true, since: 'P8' },
+  { code: 'finance.config.manage', module: 'Finance', label: 'Maintain the chart of accounts and bank accounts', sensitive: true, since: 'P8' },
+  { code: 'finance.anomaly.manage', module: 'Finance', label: 'Review and close financial anomaly alerts', since: 'P8' },
 ];
 
 export const ALL_PERMISSION_CODES = PERMISSIONS.map((p) => p.code);
@@ -120,12 +131,13 @@ const P2_BUY = ['procurement.read', 'procurement.requisition.create', 'procureme
 const P3_MILL = ['jobwork.read', 'jobwork.order.manage', 'jobwork.return.record', 'jobwork.claim.manage'];
 const P4_STORES = ['inventory.read', 'inventory.inward.record', 'inventory.qc.record', 'inventory.move', 'inventory.reserve', 'inventory.transfer.request', 'inventory.transfer.execute', 'inventory.stocktake.count'];
 const P7_DISPATCH = ['fulfilment.read', 'fulfilment.pick', 'fulfilment.dispatch', 'fulfilment.transport.manage', 'fulfilment.returns.manage', 'commerce.read'];
+const P8_FIN = ['finance.read', 'finance.voucher.post', 'finance.bank.reconcile', 'finance.gst.manage', 'finance.tds.manage', 'finance.period.manage', 'finance.config.manage', 'finance.anomaly.manage'];
 const P5_SALES = ['crm.read', 'crm.lead.manage', 'crm.quote.manage', 'crm.credit.request', 'inventory.read', 'inventory.reserve', 'org.warehouse.read'];
 
 /** Baseline roles from the developer brief (section 7). Editable in the app. */
 export const BASELINE_ROLES: { code: string; name: string; description: string; permissions: string[] }[] = [
   { code: 'super_admin', name: 'Super Admin', description: 'All configuration and platform access', permissions: ALL_PERMISSION_CODES.filter((c) => !c.startsWith('portal.')) },
-  { code: 'owner', name: 'Owner / Director', description: 'Executive visibility and strategic approvals', permissions: [...READS, 'governance.approval.decide', 'masters.party.bank.view', 'procurement.po.approve', 'procurement.invoice.approve', 'procurement.payment.approve', 'procurement.invoice.read', 'inventory.price.approve', 'inventory.transfer.approve', 'inventory.stocktake.approve', 'crm.lead.read_all', 'crm.price.approve', 'crm.credit.approve', 'crm.target.manage', 'fulfilment.split.approve', 'fulfilment.gate.approve', 'commerce.policy.approve'] },
+  { code: 'owner', name: 'Owner / Director', description: 'Executive visibility and strategic approvals', permissions: [...READS, 'governance.approval.decide', 'masters.party.bank.view', 'procurement.po.approve', 'procurement.invoice.approve', 'procurement.payment.approve', 'procurement.invoice.read', 'inventory.price.approve', 'inventory.transfer.approve', 'inventory.stocktake.approve', 'crm.lead.read_all', 'crm.price.approve', 'crm.credit.approve', 'crm.target.manage', 'fulfilment.split.approve', 'fulfilment.gate.approve', 'commerce.policy.approve', 'finance.voucher.approve', 'finance.period.approve'] },
   { code: 'management_approver', name: 'Management Approver', description: 'Assigned approval authority', permissions: [...READS, 'governance.approval.decide', 'procurement.po.approve', 'procurement.invoice.approve', 'procurement.requisition.approve', 'procurement.invoice.read', 'inventory.price.approve', 'inventory.transfer.approve', 'inventory.stocktake.approve', 'crm.lead.read_all', 'crm.price.approve', 'crm.credit.approve', 'fulfilment.split.approve', 'fulfilment.gate.approve', 'commerce.policy.approve'] },
   { code: 'purchase_manager', name: 'Purchase Manager', description: 'Procurement and supplier management', permissions: ['masters.party.read', 'masters.supplier.manage', 'masters.mill.manage', 'masters.party.bank.request', 'masters.product.read', 'masters.reference.read', 'org.entity.read', 'org.warehouse.read', 'governance.document.read', 'governance.document.upload', 'governance.approval.read', ...P2_BUY, 'procurement.requisition.approve', 'jobwork.read', 'inventory.read', 'inventory.price.tag'] },
   { code: 'purchase_executive', name: 'Purchase Executive', description: 'Purchase operations', permissions: ['masters.party.read', 'masters.product.read', 'masters.reference.read', 'org.warehouse.read', 'governance.document.read', 'governance.document.upload', 'procurement.read', 'procurement.requisition.create', 'procurement.rfq.manage', 'procurement.po.manage', 'procurement.invoice.read', 'procurement.invoice.capture'] },
@@ -135,8 +147,8 @@ export const BASELINE_ROLES: { code: string; name: string; description: string; 
   { code: 'mill_user', name: 'Mill User', description: 'Mill portal actions', permissions: ['portal.mill.access'] },
   { code: 'sales_manager', name: 'Sales Manager / TSM', description: 'Sales team and pipeline', permissions: ['masters.party.read', 'masters.customer.manage', 'masters.product.read', 'masters.reference.read', 'org.warehouse.read', 'governance.document.read', 'governance.document.upload', 'governance.approval.read', ...P5_SALES, 'crm.lead.read_all', 'crm.lead.assign', 'crm.config.manage', 'crm.target.manage', 'crm.price.approve', 'inventory.price.tag', 'commerce.read', 'commerce.order.manage', 'commerce.policy.manage', 'commerce.registration.approve', 'fulfilment.read', 'fulfilment.allocate'] },
   { code: 'sales_executive', name: 'Sales Executive / TSE', description: 'Assigned leads and customers', permissions: ['masters.party.read', 'masters.customer.manage', 'masters.product.read', 'governance.document.read', 'governance.document.upload', ...P5_SALES, 'commerce.read', 'fulfilment.read'] },
-  { code: 'accounts_manager', name: 'Accounts Manager', description: 'Accounting and statutory controls', permissions: [...READS, 'masters.party.bank.view', 'masters.party.bank.request', 'masters.reference.manage', 'governance.document.upload', 'procurement.invoice.read', 'procurement.invoice.capture', 'procurement.payment.approve', 'procurement.exception.manage', 'crm.credit.approve', 'inventory.stocktake.approve', 'commerce.payment.manage', 'fulfilment.invoice'] },
-  { code: 'accounts_executive', name: 'Accounts Executive', description: 'Day-to-day accounting', permissions: ['masters.party.read', 'masters.reference.read', 'org.entity.read', 'governance.document.read', 'governance.document.upload', 'procurement.read', 'procurement.invoice.read', 'procurement.invoice.capture', 'crm.read', 'commerce.read', 'fulfilment.read'] },
+  { code: 'accounts_manager', name: 'Accounts Manager', description: 'Accounting and statutory controls', permissions: [...READS, 'masters.party.bank.view', 'masters.party.bank.request', 'masters.reference.manage', 'governance.document.upload', 'procurement.invoice.read', 'procurement.invoice.capture', 'procurement.payment.approve', 'procurement.exception.manage', 'crm.credit.approve', 'inventory.stocktake.approve', 'commerce.payment.manage', 'fulfilment.invoice', ...P8_FIN, 'finance.voucher.approve'] },
+  { code: 'accounts_executive', name: 'Accounts Executive', description: 'Day-to-day accounting', permissions: ['masters.party.read', 'masters.reference.read', 'org.entity.read', 'governance.document.read', 'governance.document.upload', 'procurement.read', 'procurement.invoice.read', 'procurement.invoice.capture', 'crm.read', 'commerce.read', 'fulfilment.read', 'finance.read', 'finance.voucher.post', 'finance.bank.reconcile'] },
   { code: 'dispatch_manager', name: 'Dispatch Manager', description: 'Dispatch and transport', permissions: ['masters.party.read', 'masters.transporter.manage', 'org.warehouse.read', 'masters.product.read', 'governance.document.read', 'governance.document.upload', 'inventory.read', 'inventory.move', 'inventory.reserve', 'inventory.transfer.execute', ...P7_DISPATCH, 'fulfilment.allocate', 'fulfilment.invoice'] },
   { code: 'customer_care', name: 'Customer Care', description: 'Customer service and complaints', permissions: ['masters.party.read', 'masters.product.read', 'governance.document.read', 'crm.read', 'crm.lead.manage', 'inventory.read', 'commerce.read', 'fulfilment.read', 'fulfilment.returns.manage'] },
   { code: 'hr_manager', name: 'HR Manager', description: 'HRMS and payroll', permissions: ['identity.user.read', 'org.entity.read', 'governance.document.read', 'governance.document.upload'] },

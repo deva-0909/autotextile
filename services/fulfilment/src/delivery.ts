@@ -1,7 +1,7 @@
 import type { Request, Router } from 'express';
 import { z } from 'zod';
 import { type Client, type Pool, type ServiceContext, badRequest, callService, conflict, forbidden, many, notFound, notify, one, optText, parse, publish, reqText, requirePermission, tx } from '@erp/platform';
-import { S, assertWarehouse, auditReq, getParty, getWarehouses, localNumber, nextNumber, notifyCustomer, raiseException, round2, round3 } from './common.ts';
+import { S, assertWarehouse, auditReq, getParty, getWarehouses, localNumber, nextNumber, gstSplit, notifyCustomer, raiseException, round2, round3 } from './common.ts';
 
 interface Shipment { id: string; number: string; fulfilment_id: string; order_id: string; customer_id: string; customer_name: string; transporter_name: string; status: string; kg: number; rolls: number; tracking_token: string }
 
@@ -244,7 +244,7 @@ export function deliveryRoutes(r: Router, { pool }: ServiceContext) {
       const ret = await one<{ id: string; number: string; status: string; customer_id: string; order_id: string; fulfilment_id: string }>(c, 'SELECT * FROM returns WHERE id = $1 FOR UPDATE', [req.params.id]);
       if (!ret) throw notFound('Return');
       if (ret.status !== 'inspected') throw conflict('Inspect the returned rolls first');
-      const f = (await one<{ gst_registration_id: string; warehouse_state_code: string; customer_state_code: string | null }>(c, 'SELECT * FROM fulfilments WHERE id = $1', [ret.fulfilment_id]))!;
+      const f = (await one<{ gst_registration_id: string; gstin: string; invoice_no: string | null; customer_name: string; customer_gstin: string | null; warehouse_state_code: string; customer_state_code: string | null }>(c, 'SELECT * FROM fulfilments WHERE id = $1', [ret.fulfilment_id]))!;
       const lines = await many<{ kg: number; price_per_kg: number; gst_rate: number }>(c, 'SELECT * FROM return_lines WHERE return_id = $1 AND received', [ret.id]);
       let cn: string | null = null, taxable = 0, tax = 0;
       if (b.resolution === 'credit_note') {
@@ -252,7 +252,7 @@ export function deliveryRoutes(r: Router, { pool }: ServiceContext) {
         tax = round2(lines.reduce((s, l) => s + (Number(l.kg) * Number(l.price_per_kg) * Number(l.gst_rate)) / 100, 0));
         cn = await nextNumber(c, 'credit_note', 'CN-', f.gst_registration_id);
         await callService(S, 'commerce', 'POST', '/wallet/credit', { customer_id: ret.customer_id, amount: round2(taxable + tax), entry_type: 'credit_note', ref_no: cn, order_id: ret.order_id, narration: `Credit note ${cn} for return ${ret.number}` });
-        await publish(c, S, 'fulfilment.credit_note.issued', { return_id: ret.id, credit_note_no: cn, customer_id: ret.customer_id, taxable, tax, total: round2(taxable + tax) });
+        await publish(c, S, 'fulfilment.credit_note.issued', { return_id: ret.id, credit_note_no: cn, fulfilment_id: ret.fulfilment_id, gstin: f.gstin, original_invoice_no: f.invoice_no, customer_id: ret.customer_id, customer_name: f.customer_name, customer_gstin: f.customer_gstin, ...gstSplit(tax, f.warehouse_state_code, f.customer_state_code), place_of_supply: f.customer_state_code, taxable, tax, total: round2(taxable + tax) });
       }
       await c.query(`UPDATE returns SET status = 'closed', resolution = $2, credit_note_no = $3, credit_taxable = $4, credit_tax = $5, credit_total = $6, decision_note = coalesce($7, decision_note), updated_at = now() WHERE id = $1`, [ret.id, b.resolution, cn, taxable, tax, round2(taxable + tax), b.note ?? null]);
       await notifyCustomer(c, ret.customer_id, { title: `Return ${ret.number} closed${cn ? `: credit note ${cn} for ₹${round2(taxable + tax).toLocaleString('en-IN')} added to your advance` : ' — replacement to follow'}`, link: `/portal/orders/${ret.order_id}` });

@@ -83,7 +83,7 @@ export function routes(r: Router, { pool }: ServiceContext) {
     const { decision, comment } = parse(z.object({ decision: z.enum(['approved', 'rejected']), comment: optText(500) }), req.body);
     if (decision === 'rejected' && !comment) throw badRequest('Give a reason for rejecting', { fields: { comment: 'Required when rejecting' } });
     const out = await tx(pool, async (c) => {
-      const a = await one<{ id: string; status: string; requested_by: string; required_permission: string; source_service: string; approval_type: string; ref_id: string; title: string }>(
+      const a = await one<{ id: string; status: string; requested_by: string; required_permission: string; source_service: string; approval_type: string; ref_id: string; title: string; payload: unknown }>(
         c, 'SELECT * FROM approval_requests WHERE id = $1 FOR UPDATE', [req.params.id]);
       if (!a) throw notFound('Approval request');
       if (!hasPermission(req.user, a.required_permission)) throw forbidden('You are not an approver for this request');
@@ -93,7 +93,7 @@ export function routes(r: Router, { pool }: ServiceContext) {
         UPDATE approval_requests SET status = $2, decided_by = $3, decided_by_name = $4, decided_at = now(), comment = $5 WHERE id = $1 RETURNING *`,
         [a.id, decision, req.user!.id, req.user!.name, comment ?? null]);
       await publish(c, S, 'approval.decided', {
-        approval_id: a.id, source_service: a.source_service, approval_type: a.approval_type, ref_id: a.ref_id,
+        approval_id: a.id, source_service: a.source_service, approval_type: a.approval_type, ref_id: a.ref_id, payload: a.payload,
         decision, decided_by: req.user!.id, decided_by_name: req.user!.name, comment: comment ?? null,
       });
       await audit(c, S, contextOf(req), { entity: 'approval_request', entityId: a.id, action: decision, reason: comment, after: { title: a.title } });

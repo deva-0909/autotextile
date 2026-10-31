@@ -43,6 +43,8 @@ import { CartPage, CustomerAccountPage, CustomerCompanyPage, CustomerOrderPage, 
 import { CommerceOrderDetailPage, CommerceOrdersPage, ComplaintsPage, PaymentsPage, RegistrationsPage, TokenPoliciesPage, WalletPage } from './pages/commerce/Admin';
 import { AllocationListPage, DispatchCockpit, FulfilmentDetailPage, OrderAllocationPage, ReturnDetailPage, ReturnsPage, ShipmentDetailPage, ShipmentsPage } from './pages/fulfilment/Fulfilment';
 import { InvoicePage } from './pages/fulfilment/Invoice';
+import { AgeingPage, ChartOfAccountsPage, FinanceOverview, LedgerPage, NewVoucherPage, PartyLedgerPage, VoucherDetailPage, VouchersPage } from './pages/finance/Ledger';
+import { AnomaliesPage, BankPage, ClosePage, GstPage, StatementsPage, TdsPage } from './pages/finance/Compliance';
 import type { ReactNode } from 'react';
 
 function Guard({ perms, children }: { perms?: string[]; children: ReactNode }) {
@@ -207,6 +209,22 @@ export default function App() {
         <Route path="/fulfilment/returns" element={<Guard perms={['fulfilment.read']}><ReturnsPage /></Guard>} />
         <Route path="/fulfilment/returns/:id" element={<Guard perms={['fulfilment.read']}><ReturnDetailPage /></Guard>} />
         <Route path="/fulfilment/:id" element={<Guard perms={['fulfilment.read']}><FulfilmentDetailPage /></Guard>} />
+        <Route path="/finance" element={<Guard perms={['finance.read']}><FinanceOverview /></Guard>} />
+        <Route path="/finance/accounts" element={<Guard perms={['finance.read']}><ChartOfAccountsPage /></Guard>} />
+        <Route path="/finance/ledger/:id" element={<Guard perms={['finance.read']}><LedgerPage /></Guard>} />
+        <Route path="/finance/vouchers" element={<Guard perms={['finance.read']}><VouchersPage /></Guard>} />
+        <Route path="/finance/vouchers/new" element={<Guard perms={['finance.voucher.post']}><NewVoucherPage /></Guard>} />
+        <Route path="/finance/vouchers/:id" element={<Guard perms={['finance.read']}><VoucherDetailPage /></Guard>} />
+        <Route path="/finance/receivables" element={<Guard perms={['finance.read']}><AgeingPage kind="receivables" /></Guard>} />
+        <Route path="/finance/receivables/:id" element={<Guard perms={['finance.read']}><PartyLedgerPage kind="receivables" /></Guard>} />
+        <Route path="/finance/payables" element={<Guard perms={['finance.read']}><AgeingPage kind="payables" /></Guard>} />
+        <Route path="/finance/payables/:id" element={<Guard perms={['finance.read']}><PartyLedgerPage kind="payables" /></Guard>} />
+        <Route path="/finance/bank" element={<Guard perms={['finance.read']}><BankPage /></Guard>} />
+        <Route path="/finance/gst" element={<Guard perms={['finance.read']}><GstPage /></Guard>} />
+        <Route path="/finance/tds" element={<Guard perms={['finance.read']}><TdsPage /></Guard>} />
+        <Route path="/finance/statements" element={<Guard perms={['finance.read']}><StatementsPage /></Guard>} />
+        <Route path="/finance/close" element={<Guard perms={['finance.read']}><ClosePage /></Guard>} />
+        <Route path="/finance/anomalies" element={<Guard perms={['finance.read']}><AnomaliesPage /></Guard>} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/programme" element={<ProgrammePage />} />
         <Route path="/roadmap/:phase" element={<RoadmapPage />} />

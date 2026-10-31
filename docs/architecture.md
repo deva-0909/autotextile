@@ -41,7 +41,7 @@ Browser ──► gateway :4000 ──► /api/identity/*      identity :4101   
 | P5 ✅ | crm (lead sources/webhooks, duplicates, allocation, pipeline, quotations, pricing and credit approvals, targets) |
 | P6 ✅ | commerce (catalogue, cart, registrations, token policies, orders, payment gateway adapter, customer advance ledger, complaints, customer portal) |
 | P7 ✅ | fulfilment (allocation engine, split approval, pick/pack, GST invoice, dispatch gates, transport, tracking, POD, claims, returns) |
-| P8 | accounting (double-entry GL, AP/AR, GST, TDS, bank reconciliation) |
+| P8 ✅ | finance (GSTIN books, automatic postings, vouchers with maker-checker, AR/AP, GST registers and returns, TDS, bank reconciliation, valuation, statements, period close, anomaly alerts) |
 | P9 | workflow (rules, tasks, escalation), notifications (WhatsApp/SMS/email), hrms |
 | P10 | analytics/BI, intelligence (AI copilot) |
 
@@ -77,11 +77,13 @@ Events in P1:
 | `fulfilment.plan.reserved` | fulfilment | commerce → order awaits token or is booked on credit |
 | `commerce.payment.received` | commerce | fulfilment → re-checks the payment gate |
 | `fulfilment.started` / `.dispatched` / `.delivered` | fulfilment | commerce → order status |
-| `fulfilment.invoiced`, `fulfilment.credit_note.issued` | fulfilment | (accounting P8) |
-| `inventory.transfer.dispatched` | inventory | (accounting P8: inter-GSTIN supply) |
+| `fulfilment.invoiced`, `fulfilment.credit_note.issued` | fulfilment | finance → sales voucher / credit note, GST register, AR bill |
+| `procurement.invoice.posted` | procurement | finance → purchase or job-work voucher, input GST, AP bill, TDS |
+| `commerce.payment.received` / `.refunded`, `commerce.order.cancelled` | commerce | finance → receipt / refund / cancellation-fee income |
+| `inventory.transfer.dispatched` | inventory | finance → inter-GSTIN supply in both books |
+| `approval.decided` (masters bank changes) | governance | finance → payments to that party are checked for 30 days |
 | `inventory.reservation.picked` | inventory | (fulfilment P7) |
 | `crm.lead.created` | crm | (analytics P10) |
-| `procurement.invoice.posted` | procurement | (accounting GL in P8) |
 | `jobwork.claim.accepted` | jobwork | (accounting P8) |
 | `<service>.<entity>.changed` | all | (future read-model caches) |
 
@@ -109,6 +111,17 @@ Make synchronous calls first, then audit and publish.
   ranks warehouses, and reserves in inventory. A split is never automatic: it becomes an approval.
 - **Dispatch gates** are computed from facts (picked, packed, invoiced, settled/credit/approved override) and
   re-checked at dispatch time inside the transaction.
+
+## P8 design notes
+
+- **One posting function** (`services/finance/src/ledger.ts` → `post`) validates balance, account rules and the period,
+  numbers the voucher per type and financial year, and writes GST register rows and AR/AP bills in the same transaction.
+- **Immutability** is enforced by database triggers: lines of posted vouchers cannot be updated or deleted, and a posted
+  voucher can only move to `reversed`. Pending vouchers do not count in any balance.
+- **Ageing without allocation tables:** a party’s outstanding is its control-account balance; bills are settled
+  oldest-first against it. Manual bill-wise allocation is a known gap.
+- **Inventory** is periodic: purchases go to expense and closing stock is valued from inventory’s lots (landed cost)
+  at period close; reports run to today add a provisional valuation line without posting.
 
 ## P2/P3 design notes
 

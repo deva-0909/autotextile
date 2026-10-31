@@ -1,8 +1,8 @@
 import {
   ArrowRightLeft, BadgeIndianRupee, CircleDollarSign, ClipboardPen, Contact, Inbox, Map as MapIcon, PackageCheck, PackageOpen, ScanLine, Shuffle, Tag, Target,
-  AlarmClock, Banknote, BookMarked, Boxes, Building2, ClipboardCheck, ClipboardList, Cog, Factory, FileSearch, FileStack, Gauge, History, KeyRound, Layers,
+  AlarmClock, BookMarked, Boxes, Building2, ClipboardCheck, ClipboardList, Cog, Factory, FileSearch, FileStack, Gauge, History, KeyRound, Layers,
   LayoutDashboard, LineChart, Medal, Package, Receipt, Rocket, ScanText, ShieldAlert, ShieldCheck, ShoppingCart, Sparkles, Truck, UserCog, Users, Warehouse,
-  Workflow, Wallet, CreditCard, UserPlus, MessageSquareWarning, Undo2, Store, type LucideIcon,
+  Workflow, Wallet, BookOpen, FileSpreadsheet, Landmark, Percent, ScrollText, Scale, LockKeyhole, Siren, HandCoins, ArrowDownToLine, CreditCard, UserPlus, MessageSquareWarning, Undo2, Store, type LucideIcon,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon; perms?: string[]; phase?: string }
@@ -105,6 +105,22 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
+    label: 'Finance',
+    items: [
+      { to: '/finance', label: 'Overview', icon: Gauge, perms: ['finance.read'] },
+      { to: '/finance/vouchers', label: 'Vouchers', icon: ScrollText, perms: ['finance.read'] },
+      { to: '/finance/accounts', label: 'Chart of accounts', icon: BookOpen, perms: ['finance.read'] },
+      { to: '/finance/receivables', label: 'Receivables', icon: ArrowDownToLine, perms: ['finance.read'] },
+      { to: '/finance/payables', label: 'Payables', icon: HandCoins, perms: ['finance.read'] },
+      { to: '/finance/bank', label: 'Bank reconciliation', icon: Landmark, perms: ['finance.read'] },
+      { to: '/finance/gst', label: 'GST', icon: FileSpreadsheet, perms: ['finance.read'] },
+      { to: '/finance/tds', label: 'TDS', icon: Percent, perms: ['finance.read'] },
+      { to: '/finance/statements', label: 'Statements', icon: Scale, perms: ['finance.read'] },
+      { to: '/finance/close', label: 'Period close', icon: LockKeyhole, perms: ['finance.read'] },
+      { to: '/finance/anomalies', label: 'Alerts', icon: Siren, perms: ['finance.read'] },
+    ],
+  },
+  {
     label: 'Security & governance',
     items: [
       { to: '/security/users', label: 'Users', icon: UserCog, perms: ['identity.user.read'] },
@@ -117,7 +133,6 @@ export const NAV: NavGroup[] = [
   {
     label: 'Coming next',
     items: [
-      { to: '/roadmap/P8', label: 'Accounting & GST', icon: Banknote, phase: 'P8' },
       { to: '/roadmap/P9', label: 'Workflow & HRMS', icon: Workflow, phase: 'P9' },
       { to: '/roadmap/P10', label: 'BI & AI', icon: Sparkles, phase: 'P10' },
       { to: '/programme', label: 'Programme tracker', icon: Rocket },

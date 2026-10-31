@@ -8,16 +8,8 @@
  */
 import pg from 'pg';
 import { bootService, config, publish, tx } from '@erp/platform';
-import { identityService, syncRoles } from '../services/identity/src/service.ts';
-import { organisationService } from '../services/organisation/src/service.ts';
-import { mastersService } from '../services/masters/src/service.ts';
-import { governanceService } from '../services/governance/src/service.ts';
-import { procurementService } from '../services/procurement/src/service.ts';
-import { jobworkService } from '../services/jobwork/src/service.ts';
-import { inventoryService } from '../services/inventory/src/service.ts';
-import { crmService } from '../services/crm/src/service.ts';
-import { commerceService } from '../services/commerce/src/service.ts';
-import { fulfilmentService } from '../services/fulfilment/src/service.ts';
+import { syncRoles } from '../services/identity/src/service.ts';
+import { SERVICE_DEFS } from './services.ts';
 import { hashPassword } from '../services/identity/src/security.ts';
 import { DEMO_PASSWORD, DEMO_USERS, linkPortalUsers, seedMasters, seedOrganisation, seedSalesTeam, seedUsers } from './seed-data.ts';
 import { seedOperations } from './seed-operations.ts';
@@ -56,7 +48,7 @@ await ensureDatabase();
 
 console.log('• Running migrations');
 const services = [];
-for (const def of [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService, inventoryService, crmService, commerceService, fulfilmentService]) {
+for (const def of SERVICE_DEFS) {
   services.push(await bootService(def, { pollMs: 200 }));
   console.log(`  ✓ ${def.name}`);
 }

@@ -3,16 +3,8 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import pg from 'pg';
 import { type RunningService, type ServiceName, bootService, config, setServicePorts, tx } from '@erp/platform';
-import { identityService, syncRoles } from '../services/identity/src/service.ts';
-import { organisationService } from '../services/organisation/src/service.ts';
-import { mastersService } from '../services/masters/src/service.ts';
-import { governanceService } from '../services/governance/src/service.ts';
-import { procurementService } from '../services/procurement/src/service.ts';
-import { jobworkService } from '../services/jobwork/src/service.ts';
-import { inventoryService } from '../services/inventory/src/service.ts';
-import { crmService } from '../services/crm/src/service.ts';
-import { commerceService } from '../services/commerce/src/service.ts';
-import { fulfilmentService } from '../services/fulfilment/src/service.ts';
+import { syncRoles } from '../services/identity/src/service.ts';
+import { SERVICE_DEFS } from '../scripts/services.ts';
 import { createGateway } from '../services/gateway/src/app.ts';
 import { hashPassword } from '../services/identity/src/security.ts';
 import { DEMO_PASSWORD, linkPortalUsers, seedMasters, seedOrganisation, seedSalesTeam, seedUsers } from '../scripts/seed-data.ts';
@@ -30,7 +22,7 @@ export async function bootAll(dbSuffix: string) {
   await c0.end();
 
   const services: RunningService[] = [];
-  for (const def of [governanceService, identityService, organisationService, mastersService, procurementService, jobworkService, inventoryService, crmService, commerceService, fulfilmentService])
+  for (const def of SERVICE_DEFS)
     services.push(await bootService(def, { databaseUrl: testUrl.toString(), pollMs: 100 }));
   const svc = (n: ServiceName) => services.find((s) => s.ctx.name === n)!;
   await syncRoles(svc('identity').ctx.pool);

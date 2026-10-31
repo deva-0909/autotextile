@@ -4,7 +4,7 @@ import { type BusEvent, type Client, type Pool, type ServiceContext, badRequest,
 import { randomBytes } from 'node:crypto';
 import { S, assertWarehouse, auditReq, gstSplit, localNumber, nextNumber, notifyCustomer, raiseException, requestApproval, resolveException, round2, round3, setting } from './common.ts';
 
-interface F {
+interface F { customer_gstin: string | null;
   id: string; number: string; order_id: string; order_no: string; customer_id: string; customer_name: string; customer_state_code: string | null; warehouse_id: string; warehouse_code: string; warehouse_name: string; warehouse_state_code: string;
   gst_registration_id: string; gstin: string; reservation_id: string | null; reservation_no: string | null; status: string; payment_terms: 'advance' | 'credit'; picked_kg: number; picked_rolls: number; packages: number | null; gross_kg: number | null;
   invoice_no: string | null; taxable: number; cgst: number; sgst: number; igst: number; invoice_total: number; amount_settled: number; gate_payment: string; gate_override_status: string;
@@ -151,7 +151,7 @@ export function fulfilmentRoutes(r: Router, { pool }: ServiceContext) {
         await c.query(`INSERT INTO invoice_lines (fulfilment_id, line_no, product_id, sku, product_name, hsn_code, gst_rate, rolls, kg, price_per_kg, taxable, tax, barcodes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
           [f.id, i + 1, l.product_id, l.sku, l.product_name, l.hsn_code, l.gst_rate, l.rolls, l.kg, l.price, round2(l.kg * l.price), round2((l.kg * l.price * l.gst_rate) / 100), l.barcodes]);
       // Accounts receivable and GST returns (P8) book the sale from this event.
-      await publish(c, S, 'fulfilment.invoiced', { fulfilment_id: f.id, order_id: f.order_id, invoice_no: number, gstin: f.gstin, customer_id: f.customer_id, taxable, ...split, total: round2(taxable + tax) });
+      await publish(c, S, 'fulfilment.invoiced', { fulfilment_id: f.id, order_id: f.order_id, invoice_no: number, invoice_date: new Date().toISOString().slice(0, 10), gstin: f.gstin, customer_id: f.customer_id, customer_name: f.customer_name, customer_gstin: f.customer_gstin, place_of_supply: f.customer_state_code, payment_terms: f.payment_terms, taxable, ...split, total: round2(taxable + tax) });
       await auditReq(c, req, 'fulfilment', f.id, 'invoiced', { after: { invoice_no: number, taxable, ...split } });
       const settled = await settle(c, { ...f, invoice_no: number, invoice_total: round2(taxable + tax), status: 'invoiced' });
       if (settled.gate_payment === 'pending') await notifyCustomer(c, f.customer_id, { title: `Invoice ${number} ready — ₹${round2(taxable + tax - Number(settled.amount_settled)).toLocaleString('en-IN')} to pay before dispatch`, link: `/portal/orders/${f.order_id}` });

@@ -263,6 +263,17 @@ export function stockRoutes(r: Router, { pool }: ServiceContext) {
     res.json({ ok: true });
   });
 
+  /** Owned stock at landed lot cost, by lot and place (warehouse, in transit or at a mill), for accounting valuation. */
+  r.get('/valuation', requirePermission('inventory.read'), async (_req, res) => {
+    res.json(await many(pool, `
+      SELECT l.id AS lot_id, l.lot_no, l.product_id, l.sku, l.product_name, l.received_date, l.cost_per_kg::float AS cost_per_kg, r.warehouse_id,
+        CASE WHEN r.state = 'at_mill' THEN 'at_mill' WHEN r.state = 'in_transit' THEN 'in_transit' ELSE 'warehouse' END AS place,
+        round(sum(r.weight_kg), 3)::float AS kg, count(*)::int AS rolls
+      FROM rolls r JOIN lots l ON l.id = r.lot_id
+      WHERE r.state NOT IN ('dispatched','consumed','written_off','rejected')
+      GROUP BY l.id, r.warehouse_id, 9 HAVING sum(r.weight_kg) > 0 ORDER BY l.sku, l.received_date`));
+  });
+
   r.get('/dashboard', requirePermission('inventory.read'), async (_req, res) => {
     const limits = await setting<number[]>('inventory.ageing_buckets', [30, 60, 90, 180, 365]);
     const old = limits[limits.length - 2] ?? 180;

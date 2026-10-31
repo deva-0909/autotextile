@@ -74,7 +74,7 @@ async function onPaid(c: Client, pay: Payment, utr: string | null) {
       await bookOrder(c, pay.order_id, Number(await setting('commerce.token_validity_days', 7)), 'gateway');
     }
   }
-  await publish(c, S, 'commerce.payment.received', { payment_id: pay.id, customer_id: pay.customer_id, order_id: pay.order_id, purpose: pay.purpose, ref_no: pay.ref_no, amount: Number(pay.amount) });
+  await publish(c, S, 'commerce.payment.received', { payment_id: pay.id, number: pay.number, utr, customer_name: pay.customer_name, customer_id: pay.customer_id, order_id: pay.order_id, purpose: pay.purpose, ref_no: pay.ref_no, amount: Number(pay.amount) });
 }
 
 export function publicPaymentRoutes(r: Router, { pool }: ServiceContext) {
@@ -154,6 +154,7 @@ export function paymentRoutes(r: Router, { pool }: ServiceContext) {
       await c.query(`UPDATE payments SET refunded_amount = $2, status = $3, updated_at = now() WHERE id = $1`, [p.id, refunded, refunded >= Number(p.amount) - 0.005 ? 'refunded' : 'partially_refunded']);
       await walletEntry(c, { customer_id: p.customer_id, customer_name: p.customer_name, entry_type: 'refund', amount: -b.amount, order_id: p.order_id, ref_type: 'refund', ref_no: r1.refundId, narration: `Refund of ${p.number}: ${b.reason}`, by_name: req.user!.name });
       await c.query(`INSERT INTO payment_events (payment_id, kind, detail) VALUES ($1, 'refund', $2)`, [p.id, JSON.stringify({ amount: b.amount, refund_id: r1.refundId })]);
+      await publish(c, S, 'commerce.payment.refunded', { payment_id: p.id, number: p.number, customer_id: p.customer_id, customer_name: p.customer_name, amount: b.amount, refund_id: r1.refundId, reason: b.reason });
       await auditReq(c, req, 'payment', p.id, 'refunded', { after: { amount: b.amount, refund_id: r1.refundId }, reason: b.reason });
       return { refund_id: r1.refundId, refunded_amount: refunded };
     });

@@ -7,6 +7,7 @@ import { type RunningService, type ServiceName, setServicePorts } from '@erp/pla
 import { DEMO_PASSWORD } from './seed-data.ts';
 import { runProcurementChecks } from '../services/procurement/src/automation.ts';
 import { runJobworkChecks } from '../services/jobwork/src/automation.ts';
+import { runFinanceChecks } from '../services/finance/src/automation.ts';
 import { runCrmChecks } from '../services/crm/src/automation.ts';
 
 export async function seedOperations(services: RunningService[]) {
@@ -47,6 +48,12 @@ export async function seedOperations(services: RunningService[]) {
     const salesSouth = await login('sales.south@textile.local');
 
     const wh = await call<{ id: string; code: string }[]>('organisation', admin, 'GET', '/warehouses');
+    // ---------- P8: TDS sections for mills (194C) and grey-fabric suppliers (194Q), before their bills post ----------
+    {
+      const all = (await call<{ items: { id: string; legal_name: string; party_type: string; pan: string | null }[] }>('masters', admin, 'GET', '/parties?pageSize=100')).items;
+      for (const p of all.filter((x) => ['mill', 'supplier'].includes(x.party_type)))
+        await call('finance', accounts, 'PUT', `/tds/parties/${p.id}`, { pan: p.pan ?? null, tds_section: p.party_type === 'mill' ? '194C' : '194Q' });
+    }
     const SRT = wh.find((w) => w.code === 'SRT')!.id;
     const KOL = wh.find((w) => w.code === 'KOL')!.id;
     const parties = (await call<{ items: { id: string; legal_name: string }[] }>('masters', admin, 'GET', '/parties?pageSize=100')).items;
@@ -332,6 +339,70 @@ export async function seedOperations(services: RunningService[]) {
     // Customer-specific token policy waiting for approval; a website registration waiting for review.
     await call('commerce', salesMgr, 'POST', '/token-policies', { name: 'Kolkata Hosiery — trusted buyer', scope: 'customer', scope_ref: party('Kolkata Hosiery Works'), basis: 'percent', value: 5, min_amount: 2000, validity_days: 10, refundable: true, cancellation_fee_pct: 0, reason: 'Five years of on-time payments' });
     await call('commerce', null, 'POST', '/public/registrations', { company_name: 'Erode Knit Wear', gstin: null, city: 'Erode', contact_name: 'P. Kannan', email: 'kannan@erodeknit.example', phone: '9443012345', message: 'Interested in interlock and pique for school uniforms' });
+
+    // ---------- P8: opening balances, bank, supplier payment, expenses, bank statement, GSTR-2B ----------
+    await drain();
+    const owner = await login('owner@textile.local');
+    const decideAll = async () => {
+      await drain();
+      const pend = await call<{ items: { id: string; source_service: string }[] }>('governance', owner, 'GET', '/approvals?f_status=pending&pageSize=100');
+      for (const a of pend.items.filter((x) => x.source_service === 'finance')) await call('governance', owner, 'POST', `/approvals/${a.id}/decide`, { decision: 'approved', comment: 'Checked' });
+      await drain();
+    };
+    const books = await call<{ id: string; state_code: string; gstin: string }[]>('finance', accounts, 'GET', '/books');
+    const surat = books.find((b) => b.state_code === '24')!;
+    const acc = await call<{ id: string; code: string }[]>('finance', accounts, 'GET', '/accounts');
+    const a = (code: string) => acc.find((x) => x.code === code)!.id;
+    // Opening stock: what is on hand now, less this year's purchases, plus the cost of what has been sold (about 85% of sales).
+    const val = await call<{ total_value: number }>('finance', accounts, 'GET', '/inventory-valuation');
+    const plYtd = await call<{ revenue_total: number; cost_of_sales: { code: string; amount: number }[] }>('finance', accounts, 'GET', `/reports/profit-and-loss?from=2026-04-01&to=${daysAgo(0)}`);
+    const bought = plYtd.cost_of_sales.filter((x) => ['5100', '5200', '5300'].includes(x.code)).reduce((s2, x) => s2 + x.amount, 0);
+    const openingStock = Math.max(0, Math.round((val.total_value - bought + plYtd.revenue_total * 0.85) / 1000) * 1000);
+    await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'opening', book_id: surat.id, date: '2026-04-01', narration: 'Opening balances as on 1 April 2026 (from the previous system, CA-certified)',
+      lines: [{ account_id: a('1200'), debit: 2500000 }, { account_id: a('1800'), debit: 350000 }, { account_id: a('1700'), debit: 150000 }, ...(openingStock ? [{ account_id: a('1400'), debit: openingStock }, { account_id: a('3200'), credit: openingStock }] : []), { account_id: a('3100'), credit: 2000000 }, { account_id: a('2400'), credit: 1000000 }] });
+    const ba = await call<{ id: string }>('finance', accounts, 'POST', '/bank-accounts', { account_id: a('1200'), book_id: surat.id, bank_name: 'ICICI Bank, Ring Road Surat', account_no: '000405012345', ifsc: 'ICIC0000004' });
+    await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(6), narration: 'Godown rent, Surat — October', reference: 'NEFT 2610-778', lines: [{ account_id: a('5500'), debit: 85000 }, { account_id: a('1200'), credit: 85000 }] });
+    await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(4), narration: 'DGVCL power bill — September', lines: [{ account_id: a('5510'), debit: 18450 }, { account_id: a('1200'), credit: 18450 }] });
+    // Pay the oldest supplier bill outstanding.
+    const apAge = await call<{ rows: { party_id: string; party_name: string; balance: number }[] }>('finance', accounts, 'GET', '/ageing/payables');
+    const payee = apAge.rows.find((r) => r.balance > 0);
+    let paid = 0;
+    if (payee) {
+      paid = Math.min(payee.balance, 95000);
+      await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(3), narration: `Part payment to ${payee.party_name}`, reference: 'NEFT ICICN52026103', lines: [{ account_id: a('2100'), debit: paid, party_id: payee.party_id }, { account_id: a('1200'), credit: paid }] });
+    }
+    // A small write-off typed by hand against a customer: allowed, but flagged for review.
+    await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'journal', book_id: surat.id, date: daysAgo(2), narration: 'Short payment written off on SO/2627/00001 freight', lines: [{ account_id: a('5900'), debit: 1180 }, { account_id: a('1300'), credit: 1180, party_id: party('Sri Murugan Garments') }] });
+    await decideAll();
+    // Gateway settlements into the bank, the payments above, charges, and a direct NEFT from a customer still to identify.
+    const gw = (await call<{ amount: number; status: string; utr: string | null }[]>('commerce', accounts, 'GET', '/payments')).filter((p) => p.status === 'success');
+    const fmt = (d: string) => d.split('-').reverse().join('/');
+    let bal = 2500000;
+    const rows: string[] = ['Txn Date,Description,Ref No,Debit,Credit,Balance'];
+    const line = (d: string, desc: string, ref: string, dr: number, cr: number) => { bal += cr - dr; rows.push(`${fmt(d)},${desc},${ref},${dr || ''},${cr || ''},${bal.toFixed(2)}`); };
+    line(daysAgo(6), 'NEFT-DR-SHREE LAXMI ESTATES-RENT', 'NEFT 2610-778', 85000, 0);
+    line(daysAgo(4), 'BILLDESK DGVCL', 'BD7781120', 18450, 0);
+    if (paid) line(daysAgo(3), `NEFT-DR-${payee!.party_name.toUpperCase()}`, 'NEFT ICICN52026103', paid, 0);
+    for (const g of gw) line(daysAgo(1), 'ICICI PG SETTLEMENT', g.utr ?? 'PGSETTLE', 0, Number(g.amount));
+    line(daysAgo(1), 'NEFT-CR-RUPA APPAREL HOUSE-ADV', 'SBIN426101155', 0, 50000);
+    line(daysAgo(0), 'SMS ALERT CHARGES', '', 59, 0);
+    await call('finance', accounts, 'POST', `/bank-accounts/${ba.id}/statements`, { file_name: `icici-${daysAgo(0).slice(0, 7)}.csv`, csv: rows.join('\n') });
+    // GSTR-2B for Surat: one supplier invoice matches, one differs, and one bill the supplier filed that we have not booked.
+    const months = [...new Set([daysAgo(45), daysAgo(15), daysAgo(0)].map((d) => d.slice(0, 7)))];
+    for (const m of months) {
+      const g = await call<{ inward: { doc_no: string; doc_date: string; party_gstin: string | null; party_name: string; taxable: number; cgst: number; sgst: number; igst: number; doc_type: string }[] }>('finance', accounts, 'GET', `/gst/returns?book=${surat.id}&month=${m}`);
+      const inv = g.inward.filter((x) => x.doc_type === 'invoice' && x.party_gstin);
+      if (!inv.length) continue;
+      const lines = inv.map((x, i) => ({ supplier_gstin: x.party_gstin!, supplier_name: x.party_name, invoice_no: x.doc_no, invoice_date: x.doc_date, taxable: x.taxable, igst: x.igst, cgst: i === 1 ? x.cgst + 250 : x.cgst, sgst: i === 1 ? x.sgst + 250 : x.sgst }));
+      lines.push({ supplier_gstin: inv[0]!.party_gstin!, supplier_name: inv[0]!.party_name, invoice_no: 'GYF/2627/0419', invoice_date: `${m}-12`, taxable: 42000, igst: 0, cgst: 1050, sgst: 1050 });
+      await call('finance', accounts, 'POST', '/gst/2b', { book_id: surat.id, month: m, lines });
+      break;
+    }
+    // Months with no trading since the opening balances are reviewed and locked.
+    const lastMonth = daysAgo(62).slice(0, 7);
+    for (const pr of await call<{ month: string; status: string }[]>('finance', accounts, 'GET', '/periods'))
+      if (pr.month.slice(0, 7) <= lastMonth && pr.status === 'open') await call('finance', accounts, 'POST', `/periods/${pr.month}/lock`, { value_stock: false, note: 'Reviewed with the CA' });
+    await runFinanceChecks(services.find((s) => s.ctx.name === 'finance')!.ctx.pool);
 
     await drain();
     await runProcurementChecks(services.find((s) => s.ctx.name === 'procurement')!.ctx.pool);

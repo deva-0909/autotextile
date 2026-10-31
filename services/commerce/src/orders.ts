@@ -168,11 +168,12 @@ export async function cancelOrder(c: Client, req: Request, id: string, reason: s
   if (o.status !== 'pending_company_approval') await callService(S, 'fulfilment', 'POST', `/plans/${o.id}/cancel`, { reason }).catch((e) => { if ((e as { status?: number }).status !== 404) throw e; });
   await c.query(`UPDATE orders SET status = 'cancelled', cancelled_reason = $2, cancelled_by_name = $3, cancelled_at = now(), updated_at = now() WHERE id = $1`, [o.id, reason, req.user!.name]);
   // A paid token stays as customer advance; a cancellation fee per the token policy is kept.
+  let fee = 0;
   if (o.token_paid_at && Number(o.token_amount) > 0) {
-    const fee = o.token_refundable ? round2((Number(o.token_amount) * Number(o.token_cancellation_fee_pct)) / 100) : Number(o.token_amount);
+    fee = o.token_refundable ? round2((Number(o.token_amount) * Number(o.token_cancellation_fee_pct)) / 100) : Number(o.token_amount);
     if (fee > 0) await walletEntry(c, { customer_id: o.customer_id, customer_name: o.customer_name, entry_type: 'cancellation_fee', amount: -fee, order_id: o.id, ref_type: 'order', ref_no: o.number, narration: o.token_refundable ? `Cancellation fee ${o.token_cancellation_fee_pct}% of token` : 'Non-refundable token forfeited', by_name: req.user!.name });
   }
-  await publish(c, S, 'commerce.order.cancelled', { order_id: o.id, number: o.number, reason });
+  await publish(c, S, 'commerce.order.cancelled', { order_id: o.id, number: o.number, reason, customer_id: o.customer_id, customer_name: o.customer_name, cancellation_fee: fee });
   await auditReq(c, req, 'sales_order', o.id, 'cancelled', { reason, before: { status: o.status } });
 }
 

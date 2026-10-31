@@ -1,7 +1,10 @@
 const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 const num = new Intl.NumberFormat('en-IN');
+const amt = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export const fmtINR = (n: number | null | undefined) => (n == null ? '—' : inr.format(n));
+/** Accounting amount: Indian grouping, two decimals, no symbol; zero shows as a dash. */
+export const fmtAmt = (n: number | null | undefined, zeroDash = true) => (n == null || (zeroDash && Math.abs(n) < 0.005) ? '—' : amt.format(n));
 export const fmtNum = (n: number | null | undefined, unit = '') => (n == null ? '—' : `${num.format(n)}${unit ? ` ${unit}` : ''}`);
 export const fmtDate = (s: string | null | undefined) =>
   s ? new Date(s.length === 10 ? `${s}T00:00:00` : s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
