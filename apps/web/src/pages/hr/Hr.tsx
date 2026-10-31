@@ -420,7 +420,7 @@ export function MyHrPage() {
   const [lv, setLv] = useState({ leave_type: 'CL', from_date: '', to_date: '', half_day: false, reason: '' });
   const [err, setErr] = useState<string | null>(null);
   const d = q.data;
-  const todayRec = d?.attendance.find((a) => a.day === new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10));
+  const todayRec = d?.attendance?.find((a) => a.day === new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10));
   const punch = async (kind: 'in' | 'out') => {
     const pos = await new Promise<GeolocationPosition | null>((res) => (navigator.geolocation ? navigator.geolocation.getCurrentPosition(res, () => res(null), { timeout: 4000 }) : res(null)));
     try { const r = await api.post<{ time: string }>('/hrms/me/punch', { kind, lat: pos?.coords.latitude ?? null, lng: pos?.coords.longitude ?? null }); toast({ tone: 'success', title: `Checked ${kind} at ${r.time}` }); invalidatePrefix(qc, 'hr-'); } catch (e) { toast({ tone: 'error', title: 'Not recorded', body: errMsg(e) }); }
