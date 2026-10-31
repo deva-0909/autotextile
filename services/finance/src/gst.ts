@@ -332,6 +332,22 @@ export function gstRoutes(r: Router, { pool }: ServiceContext) {
         dueId = (await one<{ id: string }>(c, `INSERT INTO gst_dues (book_id, kind, minor_head, as_of, reference, pay_in_month, igst, cgst, sgst, status, voucher_id, created_by_name) VALUES ($1,'outstanding','interest',$2,$3,$4,$5,$6,$7,'open',$8,$9) RETURNING id`,
           [book.id, `${b.paid_on.slice(0, 7)}-01`, label, b.interest_with_return ? b.period : nextMonth(b.period), interest.igst, interest.cgst, interest.sgst, v.id, req.user!.name]))!.id;
       }
+      // The return itself: output tax set off against input credit (in the order the law prescribes), then the cash
+      // ledger, and the rest paid from the bank. Without this the month's GST stays in the books as owed.
+      const g = ret as ReturnType<typeof gstr3b>;
+      const used = Object.fromEntries(HEADS.map((h) => [h, round2(Math.max(0, g.credit_brought_forward[h] + g.net_itc_4c[h] - g.credit_carried_forward[h]))])) as Credit;
+      const fromCash = round2(HEADS.reduce((t, h) => t + g.paid_from_cash_ledger[h], 0));
+      const cashPaid = round2(HEADS.reduce((t, h) => t + g.cash_payable[h], 0));
+      if (HEADS.some((h) => g.liability[h] > 0)) {
+        await post(c, { type: 'journal', book_id: book.id, date: b.paid_on, by: req.user!.name, approved_by: req.user!.name,
+          narration: `GSTR-3B ${b.period.slice(0, 7)}: output tax set off against input credit${fromCash ? ', cash ledger' : ''}${cashPaid ? ` and ₹${cashPaid.toLocaleString('en-IN')} paid by challan` : ''}${b.challan_ref ? ` (${b.challan_ref})` : ''}`,
+          source: { service: 'finance', type: 'gstr3b_setoff', id: `${book.id}:${b.period}` },
+          lines: [
+            { account: 'output_igst', debit: g.liability.igst }, { account: 'output_cgst', debit: g.liability.cgst }, { account: 'output_sgst', debit: g.liability.sgst },
+            { account: 'input_igst', credit: used.igst }, { account: 'input_cgst', credit: used.cgst }, { account: 'input_sgst', credit: used.sgst },
+            { account: 'gst_cash_ledger', credit: fromCash }, { account: 'bank_main', credit: cashPaid },
+          ] });
+      }
       // The late fee for a late GSTR-3B is paid with that return.
       const lfDue = await bookLateFee(c, req, book.id, `gstr3b:${book.id}:${b.period}`, `GSTR-3B ${b.period.slice(0, 7)} filed ${lf.days} day${lf.days === 1 ? '' : 's'} after ${due}${b.late_fee_override ? ` (${b.late_fee_reason})` : lf.nil ? ' (nil return)' : ''}`, fee, filedOn, b.period);
       await c.query(`INSERT INTO gst_return_payments (book_id, period, due_date, paid_on, arn, days_late, base_igst, base_cgst, base_sgst, interest_igst, interest_cgst, interest_sgst, interest_overridden, override_reason, interest_with_return, due_id, created_by_name,

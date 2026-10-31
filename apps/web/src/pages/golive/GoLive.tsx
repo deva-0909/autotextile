@@ -44,7 +44,7 @@ export function GoLivePage() {
 }
 
 // ---------------------------------------------------------------- migration
-const OBJ_LABEL: Record<string, string> = { parties: 'Customers & suppliers', opening_balances: 'Opening receivables & payables', opening_gl: 'Opening trial balance', opening_stock: 'Opening stock', open_pos: 'Open purchase orders', open_orders: 'Open sales orders', open_job_work: 'Open job work', gst_credit: 'GST credit carried forward', gst_cash: 'GST cash ledger', itc_reversals: 'Pending ITC reversals', gst_dues: 'GST interest, late fee and penalty' };
+const OBJ_LABEL: Record<string, string> = { parties: 'Customers & suppliers', opening_balances: 'Opening receivables & payables', opening_gl: 'Opening trial balance', opening_stock: 'Opening stock', open_pos: 'Open purchase orders', open_orders: 'Open sales orders', open_job_work: 'Open job work', gst_credit: 'GST credit carried forward', gst_cash: 'GST cash ledger', itc_reversals: 'Pending ITC reversals', gst_dues: 'GST interest, late fee and penalty', sales_history: 'Sales history', purchase_history: 'Purchase history' };
 export function MigrationPage() {
   const { can } = useAuth();
   const qc = useQueryClient();

@@ -484,8 +484,102 @@ export async function seedOperations(services: RunningService[]) {
     // happen, and stock on hand is valued at the period end, so cost of sales comes out right.
     const openingStock = Math.round(openingValue * 100) / 100;
     await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'opening', book_id: surat.id, date: '2026-04-01', narration: 'Opening balances as on 1 April 2026 (from the previous system, CA-certified)',
-      lines: [{ account_id: a('1200'), debit: 2500000 }, { account_id: a('1800'), debit: 350000 }, { account_id: a('1700'), debit: 150000 }, ...(openingStock ? [{ account_id: a('1400'), debit: openingStock }, { account_id: a('3200'), credit: openingStock }] : []), { account_id: a('3100'), credit: 2000000 }, { account_id: a('2400'), credit: 1000000 }] });
+      lines: [{ account_id: a('1200'), debit: 9500000 }, { account_id: a('1800'), debit: 350000 }, { account_id: a('1700'), debit: 150000 }, ...(openingStock ? [{ account_id: a('1400'), debit: openingStock }, { account_id: a('3200'), credit: openingStock }] : []), { account_id: a('3100'), credit: 2000000 }, { account_id: a('2400'), credit: 8000000 }] });
     const ba = await call<{ id: string }>('finance', accounts, 'POST', '/bank-accounts', { account_id: a('1200'), book_id: surat.id, bank_name: 'ICICI Bank, Ring Road Surat', account_no: '000405012345', ifsc: 'ICIC0000004' });
+    // ---------- Trading before go-live: April to the month before the ERP went live, from the previous system ----------
+    // Loaded the way the client will load theirs: sales and purchase history CSVs through Go-live → Data migration
+    // (posted on their own dates to sales, purchases, GST and party accounts), monthly overheads, and the GSTR-3B
+    // payments. Purchases match what was sold at cost, so today's physical stock is unaffected.
+    const goLive = `${daysAgo(60).slice(0, 7)}-01`;
+    const legacyMonths: string[] = [];
+    for (let d = new Date('2026-04-01T00:00:00Z'); d.toISOString().slice(0, 10) < goLive; d.setUTCMonth(d.getUTCMonth() + 1)) legacyMonths.push(d.toISOString().slice(0, 7));
+    const SKUS: Record<string, { cost: number; sell: number; supplier: string }> = {
+      'SJ-160-NVY': { cost: 245, sell: 292, supplier: 'Shree Ambica Knitters' }, 'RIB-240-NVY': { cost: 288, sell: 344, supplier: 'Shree Ambica Knitters' },
+      'SJ-180-BLK': { cost: 258, sell: 308, supplier: 'Shree Ambica Knitters' }, 'INT-220-RFD': { cost: 232, sell: 276, supplier: 'Velavan Knit Fab' },
+      'FLC-320-CHR': { cost: 305, sell: 364, supplier: 'Velavan Knit Fab' }, 'SJ-140-MEL': { cost: 212, sell: 252, supplier: 'Velavan Knit Fab' },
+      'PIQ-210-WHT': { cost: 276, sell: 329, supplier: 'Ganesh Yarn & Fabrics' }, 'SJL-200-WHT': { cost: 318, sell: 379, supplier: 'Ganesh Yarn & Fabrics' },
+    };
+    const skuList = Object.keys(SKUS);
+    const buyers: [string, number, number][] = [['Sri Murugan Garments', 40, 30], ['Kolkata Hosiery Works', 25, 20], ['Rupa Apparel House', 30, 20], ['Delhi Fashion Hub', 35, 15], ['Ludhiana Knit Exports', 55, 15]];
+    const pick = (i: number) => { let x = (i * 37) % 100; for (const b of buyers) { if (x < b[2]) return b; x -= b[2]; } return buyers[0]!; };
+    const day = (m: string, d: number) => `${m}-${String(Math.min(28, Math.max(1, d))).padStart(2, '0')}`;
+    const plusDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+    const salesRows = ['customer,invoice_no,invoice_date,sku,kg,rate_per_kg,gst_rate,paid_on'];
+    const buyRows = ['supplier,bill_no,bill_date,sku,kg,rate_per_kg,gst_rate,paid_on'];
+    const openSales: { customer: string; doc: string; date: string; total: number }[] = [];
+    const openBuys: { supplier: string; doc: string; date: string }[] = [];
+    let inv = 0, bill = 0;
+    for (const [mi, m] of legacyMonths.entries()) {
+      const bought = new Map<string, number>();
+      const count = 22 + (mi % 3) + Math.min(mi, 3);
+      for (let k = 0; k < count; k++) {
+        const n = mi * 40 + k;
+        const [cust, days] = pick(n);
+        const no = `OLD/2627/${String(++inv).padStart(4, '0')}`;
+        const date = day(m, 1 + Math.round((k * 27) / count));
+        const lines = 1 + (n % 3 === 0 ? 1 : 0);
+        let total = 0;
+        const paid = plusDays(date, days);
+        // Ludhiana's cheques bounced from June: those invoices are still owed.
+        const settled = paid < goLive && !(cust === 'Ludhiana Knit Exports' && date >= '2026-06-01');
+        for (let l = 0; l < lines; l++) {
+          const sku = skuList[(n * 3 + l * 5) % skuList.length]!;
+          const kg = 600 + ((n * 131 + l * 77) % 9) * 120;
+          const rate = SKUS[sku]!.sell + ((n + l) % 5) - 2;
+          salesRows.push(`${cust},${no},${date},${sku},${kg},${rate},5,${settled ? paid : ''}`);
+          bought.set(sku, (bought.get(sku) ?? 0) + kg);
+          total += kg * rate * 1.05;
+        }
+        if (!settled) openSales.push({ customer: cust, doc: no, date, total: Math.round(total * 100) / 100 });
+      }
+      // Bought what was sold, from each fabric's usual supplier, in two lots a month.
+      const bySupplier = new Map<string, [string, number][]>();
+      for (const [sku, kg] of bought) bySupplier.set(SKUS[sku]!.supplier, [...(bySupplier.get(SKUS[sku]!.supplier) ?? []), [sku, kg]]);
+      for (const [sup, items] of bySupplier) for (const half of [0, 1]) {
+        const no = `${sup.split(' ').map((w) => w[0]).join('')}/OLD/${String(++bill).padStart(4, '0')}`;
+        const date = day(m, half ? 16 : 3);
+        const paid = plusDays(date, 30);
+        const settled = paid < goLive;
+        for (const [sku, kg] of items) buyRows.push(`${sup},${no},${date},${sku},${Math.round(kg / 2)},${SKUS[sku]!.cost},5,${settled ? paid : ''}`);
+        if (!settled) openBuys.push({ supplier: sup, doc: no, date });
+      }
+    }
+    const migrate = async (object_type: string, csv: string) => {
+      const b = await call<{ id: string; invalid: number }>('golive', admin, 'POST', '/migration/batches', { object_type, csv, file_name: `${object_type}-previous-system.csv` });
+      if (b.invalid) console.error(`[seed] ${object_type}: ${b.invalid} rows did not validate`);
+      await call('golive', admin, 'POST', `/migration/batches/${b.id}/import`);
+      await drain();
+      await call('golive', admin, 'POST', `/migration/batches/${b.id}/reconcile`);
+    };
+    try {
+      await migrate('purchase_history', buyRows.join('\n'));
+      await migrate('sales_history', salesRows.join('\n'));
+      // Overheads in the previous system, month by month: salaries, rent, power, freight.
+      for (const m of legacyMonths) {
+        const end = day(m, 28);
+        await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: end, narration: `Salaries for ${m} (previous system)`, reference: `SAL-${m}`,
+          lines: [{ account_id: a('5400'), debit: 905000 }, { account_id: a('5410'), debit: 51500 }, { account_id: a('1200'), credit: 956500 }] });
+        await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: day(m, 5), narration: `Godown rent, Surat — ${m} (previous system)`, reference: `RENT-${m}`,
+          lines: [{ account_id: a('5500'), debit: 85000 }, { account_id: a('1200'), credit: 85000 }] });
+        await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: day(m, 12), narration: `DGVCL power and freight outward — ${m} (previous system)`, reference: `EXP-${m}`,
+          lines: [{ account_id: a('5510'), debit: 19800 }, { account_id: a('5310'), debit: 64000 }, { account_id: a('1200'), credit: 83800 }] });
+      }
+      // After go-live: collections on the older open invoices, and payments of the older open bills.
+      for (const [i, o] of openSales.entries()) {
+        if (o.customer === 'Ludhiana Knit Exports' || o.date >= plusDays(goLive, -20)) continue;
+        await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'receipt', book_id: surat.id, date: [plusDays(goLive, 3 + (i * 7) % 50), daysAgo(2)].sort()[0], narration: `Received from ${o.customer} against ${o.doc}`, reference: `NEFT-IN-${o.doc.slice(-4)}`,
+          lines: [{ account_id: a('1200'), debit: o.total }, { account_id: a('1300'), credit: o.total, party_id: party(o.customer), bill_ref: o.doc }] });
+      }
+      for (const [i, o] of openBuys.entries())
+        if (o.date < plusDays(goLive, -15)) await call('finance', accounts, 'POST', '/supplier-payments', { party_id: party(o.supplier), invoice_number: o.doc, date: [plusDays(goLive, 5 + (i * 5) % 45), daysAgo(2)].sort()[0], mode: 'neft', reference: `NEFT-OUT-${o.doc.slice(-4)}` });
+      await decideAll();
+      // GSTR-3B paid on the 20th of each following month, for every month the return is due.
+      for (const m of [...legacyMonths, ...[daysAgo(60), daysAgo(30)].map((d) => d.slice(0, 7))].filter((x, i, arr) => arr.indexOf(x) === i)) {
+        const paidOn = day(new Date(Date.parse(`${m}-01T00:00:00Z`) + 32 * 86_400_000).toISOString().slice(0, 7), 20);
+        if (paidOn > daysAgo(0)) continue;
+        await call('finance', accounts, 'POST', '/gst/payments', { book_id: surat.id, period: `${m}-01`, paid_on: paidOn, arn: `AA24${m.replace('-', '')}0${String(m.slice(5)).padStart(2, '0')}1`, challan_ref: `CPIN-${m.replace('-', '')}` }).catch((e) => console.error(`[seed] GSTR-3B ${m}: ${(e as Error).message}`));
+      }
+    } catch (e) { console.error(`[seed] history before go-live skipped: ${(e as Error).message}`); }
     await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(6), narration: 'Godown rent, Surat — October', reference: 'NEFT 2610-778', lines: [{ account_id: a('5500'), debit: 85000 }, { account_id: a('1200'), credit: 85000 }] });
     await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(4), narration: 'DGVCL power bill — September', lines: [{ account_id: a('5510'), debit: 18450 }, { account_id: a('1200'), credit: 18450 }] });
     // Pay the oldest supplier bill outstanding.

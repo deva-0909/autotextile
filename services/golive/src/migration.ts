@@ -22,6 +22,8 @@ export const TEMPLATES: Record<string, { label: string; columns: string[]; examp
   opening_stock: { label: 'Opening stock by lot and roll', columns: ['warehouse', 'sku', 'lot_ref', 'roll_kg', 'cost_per_kg', 'grade', 'received_date'], example: ['SRT', 'SJ-160-NVY', 'OLD-L-4411', '24.8', '238', 'A', '2026-02-20'], control: 'Total kg', help: 'One row per roll from the physical count. Rolls get new barcodes; print labels from the inward afterwards. received_date keeps ageing true.' },
   open_pos: { label: 'Open purchase orders', columns: ['supplier', 'legacy_po_no', 'order_date', 'deliver_to', 'expected_date', 'sku', 'pending_kg', 'rate_per_kg'], example: ['Shree Ambica Knitters', 'PO/2526/0912', '2026-03-18', 'SRT', '2026-04-10', 'SJ-160-GRY', '1200', '246'], control: 'Total pending kg', help: 'One row per PO line, with only the quantity still to be received. Rows with the same supplier and legacy_po_no become one PO, loaded as already approved and accepted. deliver_to is a warehouse code or a mill’s name or code.' },
   open_job_work: { label: 'Open job work at mills', columns: ['mill', 'legacy_challan_no', 'challan_date', 'process', 'expected_return_date', 'sku', 'kg_at_mill', 'cost_per_kg', 'rolls', 'lot_ref'], example: ['Surat Process House', 'JWC/2526/0388', '2026-03-05', 'REACTIVE_DYE', '2026-04-08', 'SJ-160-GRY', '850', '246', '34', 'GR-0412'], control: 'Total kg at mills', help: 'One row per challan line, with only the kg still at the mill. Rows with the same mill and legacy_challan_no become one job order the mill has already acknowledged. challan_date keeps the 365-day GST return clock true; cost_per_kg values the fabric when it comes back.' },
+  sales_history: { label: 'Sales history (invoices before go-live)', columns: ['customer', 'invoice_no', 'invoice_date', 'sku', 'kg', 'rate_per_kg', 'gst_rate', 'paid_on'], example: ['Sri Murugan Garments', 'OLD/2627/0312', '2026-06-14', 'SJ-160-NVY', '850', '298', '5', '2026-07-20'], control: 'Total invoice value incl. GST (₹)', help: 'One row per invoice line from the previous system. Rows with the same customer and invoice_no become one invoice, posted on its own date to sales, output GST and the customer’s account. paid_on (optional) also posts the receipt; leave it empty if the invoice is still unpaid.' },
+  purchase_history: { label: 'Purchase history (bills before go-live)', columns: ['supplier', 'bill_no', 'bill_date', 'sku', 'kg', 'rate_per_kg', 'gst_rate', 'paid_on'], example: ['Shree Ambica Knitters', 'SAK/2627/0144', '2026-06-02', 'SJ-160-NVY', '1200', '244', '5', '2026-07-01'], control: 'Total bill value incl. GST (₹)', help: 'One row per bill line from the previous system. Rows with the same supplier and bill_no become one bill, posted on its own date to purchases, input GST and the supplier’s account. paid_on (optional) also posts the payment.' },
   open_orders: { label: 'Open sales orders', columns: ['customer', 'legacy_order_no', 'sku', 'lot_no', 'pending_kg', 'price_per_kg', 'ship_to'], example: ['Sri Murugan Garments', 'SO/2526/1140', 'SJ-160-NVY', '', '300', '312', 'Tiruppur factory'], control: 'Total pending kg', help: 'One row per order line, with only the quantity still to be delivered, at the agreed price. Load opening stock first: each order reserves stock like a new order. Advances already received belong in the opening balances, so no new token is asked for.' },
 };
 
@@ -37,11 +39,11 @@ const PAN = /^[A-Z]{5}\d{4}[A-Z]$/;
 
 type Party = { id: string; code: string; legal_name: string; party_type: string };
 async function lookups(req: Request, type: string, rows: Record<string, string>[] = []) {
-  const out: { parties?: Party[]; products?: { id: string; sku: string }[]; warehouses?: { id: string; code: string }[]; lots?: { id: string; lot_no: string; product_id: string }[]; processes?: { code: string; name: string; status: string }[]; accounts?: { id: string; code: string; control: string | null; status: string; system_key: string | null }[]; books?: { id: string; gstin: string; is_primary: boolean }[] } = {};
-  if (['parties', 'opening_balances', 'open_pos', 'open_orders', 'open_job_work'].includes(type)) out.parties = (await as<{ items: Party[] }>(req, 'masters', 'GET', '/parties?pageSize=5000')).items;
+  const out: { parties?: Party[]; products?: { id: string; sku: string; hsn_code?: string | null }[]; warehouses?: { id: string; code: string }[]; lots?: { id: string; lot_no: string; product_id: string }[]; processes?: { code: string; name: string; status: string }[]; accounts?: { id: string; code: string; control: string | null; status: string; system_key: string | null }[]; books?: { id: string; gstin: string; is_primary: boolean }[] } = {};
+  if (['parties', 'opening_balances', 'open_pos', 'open_orders', 'open_job_work', 'sales_history', 'purchase_history'].includes(type)) out.parties = (await as<{ items: Party[] }>(req, 'masters', 'GET', '/parties?pageSize=5000')).items;
   if (type === 'open_job_work') out.processes = await as(req, 'jobwork', 'GET', '/process-templates');
   if (['gst_credit', 'gst_cash', 'itc_reversals', 'gst_dues'].includes(type)) out.books = await as(req, 'finance', 'GET', '/books');
-  if (['open_pos', 'open_orders', 'open_job_work'].includes(type)) out.products = (await as<{ items: { id: string; sku: string }[] }>(req, 'masters', 'GET', '/products?pageSize=2000')).items;
+  if (['open_pos', 'open_orders', 'open_job_work', 'sales_history', 'purchase_history'].includes(type)) out.products = (await as<{ items: { id: string; sku: string; hsn_code?: string | null }[] }>(req, 'masters', 'GET', '/products?pageSize=2000')).items;
   if (type === 'open_pos') out.warehouses = await as(req, 'organisation', 'GET', '/warehouses');
   if (type === 'open_orders') {
     out.lots = [];
@@ -94,6 +96,22 @@ function validate(type: string, rows: Record<string, string>[], L: Awaited<Retur
       const dr = Number(d.debit || 0), cr = Number(d.credit || 0);
       if (!(dr > 0) === !(cr > 0)) e.push('give either a debit or a credit');
       if (d.date && !isDate(d.date)) e.push('date must be YYYY-MM-DD');
+    } else if (type === 'sales_history' || type === 'purchase_history') {
+      const sale = type === 'sales_history';
+      const [who, no, date] = sale ? ['customer', 'invoice_no', 'invoice_date'] : ['supplier', 'bill_no', 'bill_date'];
+      const p = d[who] ? findParty(d[who]!) : undefined;
+      if (!p || (sale ? p.party_type !== 'customer' : !['supplier', 'manufacturer', 'mill', 'transporter'].includes(p.party_type))) e.push(`${who} "${d[who] ?? ''}" is not a ${sale ? 'customer' : 'supplier'} in Business partners`);
+      if (!d[no]) e.push(`${no} is required`);
+      if (!isDate(d[date] ?? '')) e.push(`${date} must be YYYY-MM-DD`);
+      else if (d[date]! > new Date().toISOString().slice(0, 10)) e.push(`${date} is in the future`);
+      if (d.paid_on && (!isDate(d.paid_on) || d.paid_on < (d[date] ?? ''))) e.push('paid_on must be YYYY-MM-DD, on or after the document date');
+      if (!L.products!.find((x) => x.sku === d.sku)) e.push(`sku ${d.sku ?? ''} is not in the fabric catalogue`);
+      num('kg', 0.01); num('rate_per_kg', 0.01);
+      if (!['0', '5', '12', '18', '28'].includes(String(d.gst_rate ?? '').replace(/\.0+$/, ''))) e.push('gst_rate must be 0, 5, 12, 18 or 28');
+      const g = `${(d[who] ?? '').toLowerCase()}|${d[no]}`;
+      const first = heads.get(g);
+      if (first && (first[date] !== d[date] || (first.paid_on ?? '') !== (d.paid_on ?? ''))) e.push(`${date} and paid_on must be the same on every line of ${d[no]}`);
+      if (!first) heads.set(g, d);
     } else if (type === 'open_pos') {
       const sup = d.supplier ? findParty(d.supplier) : undefined;
       if (!sup || !['supplier', 'manufacturer'].includes(sup.party_type)) e.push(`supplier "${d.supplier ?? ''}" is not a supplier or manufacturer in Business partners`);
@@ -191,6 +209,7 @@ function controlTotal(type: string, rows: Record<string, string>[]) {
   if (type === 'opening_gl') return r2(rows.reduce((s, d) => s + Number(d.debit || 0), 0));
   if (type === 'open_job_work') return r2(rows.reduce((s, d) => s + Number(d.kg_at_mill), 0));
   if (['gst_credit', 'gst_cash', 'itc_reversals', 'gst_dues'].includes(type)) return r2(rows.reduce((s, d) => s + Number(d.igst || 0) + Number(d.cgst || 0) + Number(d.sgst || 0), 0));
+  if (type === 'sales_history' || type === 'purchase_history') return r2(rows.reduce((s, d) => { const t = r2(Number(d.kg) * Number(d.rate_per_kg)); return s + t + r2((t * Number(d.gst_rate)) / 100); }, 0));
   if (type === 'open_pos' || type === 'open_orders') return r2(rows.reduce((s, d) => s + Number(d.pending_kg), 0));
   return r2(rows.reduce((s, d) => s + Number(d.roll_kg), 0));
 }
@@ -208,10 +227,10 @@ export function migrationRoutes(r: Router, { pool }: ServiceContext) {
 
   /** Upload: parse and validate every row. Invalid rows are listed with their reasons; nothing is loaded yet. */
   r.post('/migration/batches', requirePermission('golive.migration.manage'), async (req, res) => {
-    const b = parse(z.object({ object_type: z.enum(['parties', 'opening_balances', 'opening_gl', 'opening_stock', 'open_pos', 'open_orders', 'open_job_work', 'gst_credit', 'gst_cash', 'itc_reversals', 'gst_dues']), csv: z.string().min(5).max(5_000_000), file_name: optText(200) }), req.body);
+    const b = parse(z.object({ object_type: z.enum(['parties', 'opening_balances', 'opening_gl', 'opening_stock', 'open_pos', 'open_orders', 'open_job_work', 'gst_credit', 'gst_cash', 'itc_reversals', 'gst_dues', 'sales_history', 'purchase_history']), csv: z.string().min(5).max(5_000_000), file_name: optText(200) }), req.body);
     const t = TEMPLATES[b.object_type]!;
     const { head, rows } = parseCsv(b.csv);
-    const missing = t.columns.filter((c) => !head.includes(c) && !['gstin', 'pan', 'email', 'phone', 'credit_limit', 'segment', 'state_code', 'date', 'grade', 'received_date', 'order_date', 'lot_no', 'ship_to', 'rolls', 'lot_ref', 'igst', 'cgst', 'sgst', 'reference', 'pay_in_month'].includes(c));
+    const missing = t.columns.filter((c) => !head.includes(c) && !['gstin', 'pan', 'email', 'phone', 'credit_limit', 'segment', 'state_code', 'date', 'grade', 'received_date', 'order_date', 'lot_no', 'ship_to', 'rolls', 'lot_ref', 'igst', 'cgst', 'sgst', 'reference', 'pay_in_month', 'paid_on'].includes(c));
     if (missing.length) throw badRequest(`Missing columns: ${missing.join(', ')}`);
     if (!rows.length) throw badRequest('The file has no rows');
     if (rows.length > 5000) throw badRequest('Load at most 5,000 rows per batch');
@@ -318,6 +337,20 @@ export function migrationRoutes(r: Router, { pool }: ServiceContext) {
               igst: Number(d.igst || 0), cgst: Number(d.cgst || 0), sgst: Number(d.sgst || 0), reference: b.number });
             await mark(r1.id, out.existing ? 'skipped' : 'imported', out.number, out.existing ? 'Already loaded' : null);
           } catch (e) { await mark(r1.id, 'failed', null, (e as Error).message); }
+        }
+      } else if (b.object_type === 'sales_history' || b.object_type === 'purchase_history') {
+        const sale = b.object_type === 'sales_history';
+        const [who, no, date] = sale ? ['customer', 'invoice_no', 'invoice_date'] : ['supplier', 'bill_no', 'bill_date'];
+        const docs = new Map<string, typeof rows>();
+        for (const r1 of rows) { const k = `${r1.data[who]!.toLowerCase()}|${r1.data[no]}`; docs.set(k, [...(docs.get(k) ?? []), r1]); }
+        for (const rs of docs.values()) {
+          const d = rs[0]!.data;
+          try {
+            const out = await as<{ voucher_number: string; existing: boolean }>(req, 'finance', 'POST', '/legacy-documents', {
+              kind: sale ? 'sale' : 'purchase', party_id: party(d[who]!).id, doc_no: d[no], doc_date: d[date], settled_on: d.paid_on || null, settle_ref: d.paid_on ? `${b.number}` : null,
+              lines: rs.map((x) => ({ sku: x.data.sku, hsn: L.products!.find((p) => p.sku === x.data.sku)?.hsn_code ?? null, kg: Number(x.data.kg), rate: Number(x.data.rate_per_kg), gst_rate: Number(x.data.gst_rate) })) });
+            for (const x of rs) await mark(x.id, out.existing ? 'skipped' : 'imported', out.voucher_number, out.existing ? 'Already loaded' : null);
+          } catch (e) { for (const x of rs) await mark(x.id, 'failed', null, (e as Error).message); }
         }
       } else if (b.object_type === 'gst_credit' || b.object_type === 'gst_cash') {
         for (const r1 of rows) {
@@ -444,6 +477,11 @@ async function reconcile(req: Request, pool: ServiceContext['pool'], id: string)
     erp = r2(rv.filter((x) => x.voucher_status === 'posted').reduce((s, x) => s + x.igst + x.cgst + x.sgst, 0));
     detail.reversals = rv.length;
     detail.by_month = Object.fromEntries([...new Set(rv.map((x) => x.period.slice(0, 7)))].sort().map((m) => [m, rv.filter((x) => x.period.startsWith(m)).length]));
+  } else if (b.object_type === 'sales_history' || b.object_type === 'purchase_history') {
+    const refs = new Set(rows.map((r) => r.result_ref).filter(Boolean));
+    const v = (await as<{ number: string; amount: number; status: string }[]>(req, 'finance', 'GET', `/vouchers?type=${b.object_type === 'sales_history' ? 'sales' : 'purchase'}&source=golive`)).filter((x) => refs.has(x.number));
+    erp = r2(v.filter((x) => x.status === 'posted').reduce((s, x) => s + Number(x.amount), 0));
+    detail.documents = v.length;
   } else if (b.object_type === 'gst_credit' || b.object_type === 'gst_cash') {
     const gstins = new Set(rows.map((r) => r.result_ref));
     const cr = (await as<{ gstin: string; igst: number; cgst: number; sgst: number; voucher_number: string | null; voucher_status: string | null }[]>(req, 'finance', 'GET', `/gst/opening-${b.object_type === 'gst_credit' ? 'credit' : 'cash'}`)).filter((x) => gstins.has(x.gstin));
