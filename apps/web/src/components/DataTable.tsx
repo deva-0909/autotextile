@@ -280,7 +280,8 @@ export function SimpleTable<T>({ rows, columns, rowKey, onRowClick, empty, pageS
   useEffect(() => {
     if (!exporting || !tableRef.current) return;
     const t = tableRef.current;
-    const heads = [...t.querySelectorAll('thead th')].map((th) => (th as HTMLElement).innerText.trim());
+    // Header text as written, not as styled (headers are shown in capitals).
+    const heads = [...t.querySelectorAll('thead th')].map((th) => (th.textContent ?? '').replace(/\s+/g, ' ').trim());
     const keep = heads.map((h, i) => (h ? i : -1)).filter((i) => i >= 0);
     const lines = [keep.map((i) => csvEsc(heads[i]!)).join(',')];
     for (const tr of t.querySelectorAll('tbody tr')) {
@@ -335,7 +336,7 @@ export function SimpleTable<T>({ rows, columns, rowKey, onRowClick, empty, pageS
 
 export function FilterSelect({ value, onChange, options, placeholder }: { value?: string; onChange: (v: string) => void; options: { value: string; label: string }[]; placeholder: string }) {
   return (
-    <select value={value ?? ''} onChange={(e) => onChange(e.target.value)} className={clsx('input h-8 w-auto min-w-[140px] text-[13px]', value && 'border-brand-300 bg-brand-50/50 text-brand-800')}>
+    <select aria-label={placeholder} value={value ?? ''} onChange={(e) => onChange(e.target.value)} className={clsx('input h-8 w-auto min-w-[140px] text-[13px]', value && 'border-brand-300 bg-brand-50/50 text-brand-800')}>
       <option value="">{placeholder}</option>
       {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>

@@ -141,7 +141,7 @@ function Notifications() {
       trigger={(toggle) => (
         <button onClick={toggle} className="relative inline-flex size-9 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900" aria-label="Notifications">
           <Bell className="size-[18px]" />
-          {unread > 0 && <span className="absolute top-1.5 right-1.5 flex size-4 items-center justify-center rounded-full bg-rose-500 text-[9.5px] font-bold text-white">{unread > 9 ? '9+' : unread}</span>}
+          {unread > 0 && <span className="absolute top-1.5 right-1.5 flex size-4 items-center justify-center rounded-full bg-rose-600 text-[9.5px] font-bold text-white">{unread > 9 ? '9+' : unread}</span>}
         </button>
       )}
     >

@@ -92,7 +92,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
   const auto = useId();
   return (
     <Field label={label} error={error} hint={hint} required={required} className={className} htmlFor={id ?? auto}>
-      <select ref={ref} id={id ?? auto} required={required} aria-invalid={!!error} className={clsx('input', error && 'input-error')} {...rest}>
+      <select ref={ref} id={id ?? auto} required={required} aria-invalid={!!error} aria-label={!label ? (rest['aria-label'] ?? (typeof placeholder === 'string' ? placeholder : undefined) ?? (options?.find((o) => o.value === rest.value)?.label as string | undefined) ?? 'Choose') : undefined} className={clsx('input', error && 'input-error')} {...rest}>
         {placeholder !== undefined && <option value="">{placeholder}</option>}
         {options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         {children}

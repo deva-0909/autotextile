@@ -16,6 +16,9 @@
   --color-brand-800: #2a318d;
   --color-brand-900: #272e70;
 
+  /* Secondary text meets WCAG AA contrast (4.5:1) on white: Tailwind's default slate-400 is 2.6:1. */
+  --color-slate-400: #637590;
+
   /* Navigation surface */
   --color-nav-950: #0b1324;
   --color-nav-900: #111b31;
