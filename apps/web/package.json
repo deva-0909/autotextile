@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:vercel": "node ../../scripts/build-vercel.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.0",

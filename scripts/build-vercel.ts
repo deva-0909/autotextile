@@ -1,5 +1,5 @@
 /**
- * Builds the Vercel deployment as a Build Output API v3 tree in .vercel/output:
+ * Builds the Vercel deployment as a Build Output API v3 tree in .vercel/output (under the directory it is run from):
  *   static/            the web app (apps/web/dist)
  *   functions/api.func one Node function: the gateway and every service, bundled with esbuild
  *   config.json        routes (/api/* to the function, everything else to the single-page app) and the daily cron
@@ -12,7 +12,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, '.vercel/output');
+// Vercel reads the output from the project's Root Directory: the repository root, or apps/web if the project was
+// imported as the web app. `npm run build:vercel` runs from whichever it is, so write the output there.
+const out = path.join(process.cwd(), '.vercel/output');
 const fn = path.join(out, 'functions/api.func');
 
 fs.rmSync(out, { recursive: true, force: true });
