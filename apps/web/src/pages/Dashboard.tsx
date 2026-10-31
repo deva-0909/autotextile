@@ -86,10 +86,10 @@ export function DashboardPage() {
           <Kpi icon={<ClipboardCheck className="size-5" />} tone="amber" label="My pending requests" value={summary.data?.myPendingRequests} sub="Awaiting a checker" to="/approvals" />
         )}
         {f ? <>
-          <Kpi icon={<TrendingUp className="size-5" />} tone="emerald" label="Sales this year" value={fmtCompact(f.ytd.revenue)} sub={`Gross profit ${fmtCompact(f.ytd.gross_profit)}`} to="/finance/statements" />
+          <Kpi icon={<TrendingUp className="size-5" />} tone="emerald" label="Sales this year" value={fmtCompact(f.ytd.revenue)} sub={`Gross profit ${fmtCompact(f.ytd.gross_profit)}${f.ytd.revenue ? ` · ${((f.ytd.gross_profit / f.ytd.revenue) * 100).toFixed(1)}%` : ''}`} to="/finance/statements" />
           <Kpi icon={<HandCoins className="size-5" />} label="Receivables" value={fmtCompact(f.receivables)} sub={f.receivables_overdue ? `${fmtCompact(f.receivables_overdue)} overdue` : 'Nothing overdue'} to="/finance/receivables" />
           <Kpi icon={<Receipt className="size-5" />} tone="violet" label="Payables" value={fmtCompact(f.payables)} sub={f.payables_overdue ? `${fmtCompact(f.payables_overdue)} overdue` : 'Nothing overdue'} to="/finance/payables" />
-          <Kpi icon={<Landmark className="size-5" />} tone="sky" label="Cash & bank" value={fmtCompact(f.cash_and_bank)} sub={`GST payable ${fmtCompact(f.gst_payable)}`} to="/finance" />
+          <Kpi icon={<Landmark className="size-5" />} tone="sky" label="Cash & bank" value={fmtCompact(f.cash_and_bank)} sub={f.gst_payable >= 0 ? `GST payable ${fmtCompact(f.gst_payable)}` : `GST credit ${fmtCompact(-f.gst_payable)} to carry forward`} to="/finance" />
           <Kpi icon={<Boxes className="size-5" />} tone="brand" label="Stock value" value={fmtCompact(f.inventory)} sub="At cost, in the books" to="/inventory/stock" />
         </> : <>
           {can('org.warehouse.read') && <Kpi icon={<Warehouse className="size-5" />} label="Warehouses" value={warehouses.data?.length} sub={gst.data ? `${gst.data.length} GST registrations` : 'In your data scope'} to="/organisation/warehouses" />}

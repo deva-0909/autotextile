@@ -194,9 +194,13 @@ export async function seedOperations(services: RunningService[]) {
     const putaway = async (rolls: { barcode: string }[], per = 8) => {
       for (let i = 0; i < rolls.length; i += per) await call('inventory', stores, 'POST', '/putaway', { barcodes: rolls.slice(i, i + per).map((r) => r.barcode), location_id: bins[binIx++ % bins.length] });
     };
+    // Value of the stock carried in from before the year (weighed kg × cost), for the opening balance in the books.
+    let openingValue = 0;
     async function opening(sku_: string, n: number, base: number, cost: number, days: number, ref: string, opts: { total?: number; dye_lot?: string; shade?: string; price?: number } = {}) {
       const inw = await call('inventory', stores, 'POST', '/inwards', { warehouse_id: SRT, source_ref: ref, party_name: 'Opening stock', received_date: daysAgo(days), lines: [{ product_id: sku(sku_), expected_kg: opts.total ?? Math.round(n * base * 10) / 10, cost_per_kg: cost, lot_ref: opts.dye_lot ?? null }] });
-      const [rolls] = await scanInward(inw.id, [{ weights: weights(n, base, opts.total), dye_lot: opts.dye_lot, shade: opts.shade }]);
+      const w = weights(n, base, opts.total);
+      openingValue += w.reduce((t, x) => t + x, 0) * cost;
+      const [rolls] = await scanInward(inw.id, [{ weights: w, dye_lot: opts.dye_lot, shade: opts.shade }]);
       await call('inventory', stores, 'POST', `/inwards/${inw.id}/complete`, { note: 'Opening stock count' });
       await grade(rolls, (i) => (i % 9 === 4 ? 'B' : 'A'));
       await putaway(rolls);
@@ -245,6 +249,14 @@ export async function seedOperations(services: RunningService[]) {
       { weights: weights(24, 24.5, 588), dye_lot: 'SAK-R77', shade: 'NVY-2', gsm: 238, width: 36 },
     ]);
     await call('inventory', stores, 'POST', `/inwards/${grn.id}/complete`, {});
+    // The compacted rib back from Palladam: weighed in, checked and put away (it is stock again only once scanned).
+    const back = inwards.find((i) => i.source_type === 'job_return');
+    if (back) {
+      const [compacted] = await scanInward(back.id, [{ weights: weights(24, 20.75, 498), dye_lot: 'L-SRT-0412-C', shade: 'NVY-1' }]);
+      await call('inventory', stores, 'POST', `/inwards/${back.id}/complete`, { note: 'Compacted rib weighed in' });
+      await grade(compacted, (i) => (i % 8 === 3 ? 'B' : 'A'));
+      await putaway(compacted);
+    }
     await grade(sjRolls, (i) => (i === 7 ? 'reject' : i % 6 === 5 ? 'B' : 'A'), (i) => (i === 7 ? ['Holes', 'Oil stains'] : i % 6 === 5 ? ['Minor slubs'] : []));
     await grade(ribNew.slice(0, 18));
     await putaway(sjRolls.filter((_, i) => i !== 7).slice(0, 32));
@@ -468,11 +480,9 @@ export async function seedOperations(services: RunningService[]) {
     const surat = books.find((b) => b.state_code === '24')!;
     const acc = await call<{ id: string; code: string }[]>('finance', accounts, 'GET', '/accounts');
     const a = (code: string) => acc.find((x) => x.code === code)!.id;
-    // Opening stock: what is on hand now, less this year's purchases, plus the cost of what has been sold (about 85% of sales).
-    const val = await call<{ total_value: number }>('finance', accounts, 'GET', '/inventory-valuation');
-    const plYtd = await call<{ revenue_total: number; cost_of_sales: { code: string; amount: number }[] }>('finance', accounts, 'GET', `/reports/profit-and-loss?from=2026-04-01&to=${daysAgo(0)}`);
-    const bought = plYtd.cost_of_sales.filter((x) => ['5100', '5200', '5300'].includes(x.code)).reduce((s2, x) => s2 + x.amount, 0);
-    const openingStock = Math.max(0, Math.round((val.total_value - bought + plYtd.revenue_total * 0.85) / 1000) * 1000);
+    // Opening stock: the stock carried in from before 1 April, at its cost. This year's purchases are booked as they
+    // happen, and stock on hand is valued at the period end, so cost of sales comes out right.
+    const openingStock = Math.round(openingValue * 100) / 100;
     await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'opening', book_id: surat.id, date: '2026-04-01', narration: 'Opening balances as on 1 April 2026 (from the previous system, CA-certified)',
       lines: [{ account_id: a('1200'), debit: 2500000 }, { account_id: a('1800'), debit: 350000 }, { account_id: a('1700'), debit: 150000 }, ...(openingStock ? [{ account_id: a('1400'), debit: openingStock }, { account_id: a('3200'), credit: openingStock }] : []), { account_id: a('3100'), credit: 2000000 }, { account_id: a('2400'), credit: 1000000 }] });
     const ba = await call<{ id: string }>('finance', accounts, 'POST', '/bank-accounts', { account_id: a('1200'), book_id: surat.id, bank_name: 'ICICI Bank, Ring Road Surat', account_no: '000405012345', ifsc: 'ICIC0000004' });
