@@ -17,6 +17,7 @@ export const TEMPLATES: Record<string, { label: string; columns: string[]; examp
   opening_gl: { label: 'Opening trial balance', columns: ['account_code', 'debit', 'credit', 'date'], example: ['1200', '2500000', '0', '2026-04-01'], control: 'Total debits (₹)', help: 'One line per ledger account from the CA-certified trial balance. Leave out receivables, payables and stock: those come from their own batches and the difference account absorbs them. Debits must equal credits.' },
   gst_credit: { label: 'GST credit carried forward', columns: ['gstin', 'as_of_month', 'igst', 'cgst', 'sgst'], example: ['24AABCD1234E1Z5', '2026-04', '182500', '41250', '41250'], control: 'Total credit (₹)', help: 'One row per GSTIN: the electronic credit ledger closing balance from the last GSTR-3B filed in the old system. as_of_month is the first month run in the ERP; GSTR-3B brings the credit forward from then. Leave the input GST accounts out of the opening trial balance.' },
   gst_cash: { label: 'GST cash ledger balance', columns: ['gstin', 'as_of_month', 'igst', 'cgst', 'sgst'], example: ['24AABCD1234E1Z5', '2026-04', '12000', '3500', '3500'], control: 'Total cash balance (₹)', help: 'One row per GSTIN: the electronic cash ledger closing balance (tax heads only, not interest or fees). GSTR-3B uses it to pay tax left after credit, each head from its own balance.' },
+  gst_dues: { label: 'GST interest, late fee and penalty', columns: ['gstin', 'kind', 'minor_head', 'as_of_month', 'reference', 'pay_in_month', 'igst', 'cgst', 'sgst'], example: ['24AABCD1234E1Z5', 'outstanding', 'interest', '2026-04', 'GSTR-3B Feb 2026 (paid late)', '2026-04', '0', '1840', '1840'], control: 'Total amount (₹)', help: 'kind is cash_balance (money already in the interest, late fee, penalty or others head of the cash ledger) or outstanding (still owed: give the return period, notice or order as reference). minor_head is interest, late_fee, penalty or others. For owed interest and late fee, pay_in_month puts them in that month’s GSTR-3B table 5.1; leave it empty for penalties paid by DRC-03.' },
   itc_reversals: { label: 'Pending ITC reversals', columns: ['gstin', 'supplier', 'doc_no', 'doc_date', 'reason', 'reverse_in_month', 'igst', 'cgst', 'sgst'], example: ['24AABCD1234E1Z5', 'Shree Ambica Knitters', 'AMB/2526/771', '2025-10-14', 'rule_37', '2026-04', '0', '2950', '2950'], control: 'Total credit reversed (₹)', help: 'One row per bill whose credit must be reversed in a coming GSTR-3B. reason is rule_37 (supplier unpaid after 180 days; reclaimable once paid), rule_42_43 (common credit) or other. The credit is still in the carried-forward balance; it leaves in reverse_in_month.' },
   opening_stock: { label: 'Opening stock by lot and roll', columns: ['warehouse', 'sku', 'lot_ref', 'roll_kg', 'cost_per_kg', 'grade', 'received_date'], example: ['SRT', 'SJ-160-NVY', 'OLD-L-4411', '24.8', '238', 'A', '2026-02-20'], control: 'Total kg', help: 'One row per roll from the physical count. Rolls get new barcodes; print labels from the inward afterwards. received_date keeps ageing true.' },
   open_pos: { label: 'Open purchase orders', columns: ['supplier', 'legacy_po_no', 'order_date', 'deliver_to', 'expected_date', 'sku', 'pending_kg', 'rate_per_kg'], example: ['Shree Ambica Knitters', 'PO/2526/0912', '2026-03-18', 'SRT', '2026-04-10', 'SJ-160-GRY', '1200', '246'], control: 'Total pending kg', help: 'One row per PO line, with only the quantity still to be received. Rows with the same supplier and legacy_po_no become one PO, loaded as already approved and accepted. deliver_to is a warehouse code or a mill’s name or code.' },
@@ -39,7 +40,7 @@ async function lookups(req: Request, type: string, rows: Record<string, string>[
   const out: { parties?: Party[]; products?: { id: string; sku: string }[]; warehouses?: { id: string; code: string }[]; lots?: { id: string; lot_no: string; product_id: string }[]; processes?: { code: string; name: string; status: string }[]; accounts?: { id: string; code: string; control: string | null; status: string; system_key: string | null }[]; books?: { id: string; gstin: string; is_primary: boolean }[] } = {};
   if (['parties', 'opening_balances', 'open_pos', 'open_orders', 'open_job_work'].includes(type)) out.parties = (await as<{ items: Party[] }>(req, 'masters', 'GET', '/parties?pageSize=5000')).items;
   if (type === 'open_job_work') out.processes = await as(req, 'jobwork', 'GET', '/process-templates');
-  if (['gst_credit', 'gst_cash', 'itc_reversals'].includes(type)) out.books = await as(req, 'finance', 'GET', '/books');
+  if (['gst_credit', 'gst_cash', 'itc_reversals', 'gst_dues'].includes(type)) out.books = await as(req, 'finance', 'GET', '/books');
   if (['open_pos', 'open_orders', 'open_job_work'].includes(type)) out.products = (await as<{ items: { id: string; sku: string }[] }>(req, 'masters', 'GET', '/products?pageSize=2000')).items;
   if (type === 'open_pos') out.warehouses = await as(req, 'organisation', 'GET', '/warehouses');
   if (type === 'open_orders') {
@@ -123,6 +124,21 @@ function validate(type: string, rows: Record<string, string>[], L: Awaited<Retur
       const first = heads.get(g);
       if (first && (first.challan_date !== d.challan_date || first.process !== d.process || first.expected_return_date !== d.expected_return_date)) e.push(`challan_date, process and expected_return_date must be the same on every line of ${d.legacy_challan_no}`);
       if (!first) heads.set(g, d);
+    } else if (type === 'gst_dues') {
+      const gstin = (d.gstin ?? '').toUpperCase();
+      if (!L.books!.find((b) => b.gstin === gstin)) e.push(`gstin ${d.gstin ?? ''} is not one of your GST registrations`);
+      if (!['cash_balance', 'outstanding'].includes(d.kind ?? '')) e.push('kind must be cash_balance or outstanding');
+      if (!['interest', 'late_fee', 'penalty', 'others'].includes(d.minor_head ?? '')) e.push('minor_head must be interest, late_fee, penalty or others');
+      if (!/^\d{4}-\d{2}(-01)?$/.test(d.as_of_month ?? '')) e.push('as_of_month must be YYYY-MM');
+      if (d.kind === 'outstanding' && !d.reference) e.push('reference is required for amounts owed (return period, notice or order)');
+      if (d.pay_in_month) {
+        if (!/^\d{4}-\d{2}(-01)?$/.test(d.pay_in_month)) e.push('pay_in_month must be YYYY-MM');
+        else if (d.kind !== 'outstanding' || !['interest', 'late_fee'].includes(d.minor_head ?? '')) e.push('pay_in_month is only for owed interest and late fee (GSTR-3B table 5.1)');
+        else if (d.as_of_month && d.pay_in_month.slice(0, 7) < d.as_of_month.slice(0, 7)) e.push('pay_in_month is before as_of_month');
+      }
+      for (const k of ['igst', 'cgst', 'sgst']) num(k);
+      if (!(Number(d.igst || 0) + Number(d.cgst || 0) + Number(d.sgst || 0) > 0)) e.push('enter an amount');
+      const k = `${gstin}|${d.kind}|${d.minor_head}|${(d.reference || 'Opening balance').toLowerCase()}`; if (seen.has(k)) e.push(d.kind === 'cash_balance' && !d.reference ? 'one cash_balance row per minor head (or give each a reference)' : 'duplicate row in this file'); seen.add(k);
     } else if (type === 'itc_reversals') {
       const gstin = (d.gstin ?? '').toUpperCase();
       if (!L.books!.find((b) => b.gstin === gstin)) e.push(`gstin ${d.gstin ?? ''} is not one of your GST registrations`);
@@ -174,7 +190,7 @@ function controlTotal(type: string, rows: Record<string, string>[]) {
   if (type === 'opening_balances') return r2(rows.reduce((s, d) => s + Number(String(d.amount).replace(/,/g, '')), 0));
   if (type === 'opening_gl') return r2(rows.reduce((s, d) => s + Number(d.debit || 0), 0));
   if (type === 'open_job_work') return r2(rows.reduce((s, d) => s + Number(d.kg_at_mill), 0));
-  if (type === 'gst_credit' || type === 'gst_cash' || type === 'itc_reversals') return r2(rows.reduce((s, d) => s + Number(d.igst || 0) + Number(d.cgst || 0) + Number(d.sgst || 0), 0));
+  if (['gst_credit', 'gst_cash', 'itc_reversals', 'gst_dues'].includes(type)) return r2(rows.reduce((s, d) => s + Number(d.igst || 0) + Number(d.cgst || 0) + Number(d.sgst || 0), 0));
   if (type === 'open_pos' || type === 'open_orders') return r2(rows.reduce((s, d) => s + Number(d.pending_kg), 0));
   return r2(rows.reduce((s, d) => s + Number(d.roll_kg), 0));
 }
@@ -192,10 +208,10 @@ export function migrationRoutes(r: Router, { pool }: ServiceContext) {
 
   /** Upload: parse and validate every row. Invalid rows are listed with their reasons; nothing is loaded yet. */
   r.post('/migration/batches', requirePermission('golive.migration.manage'), async (req, res) => {
-    const b = parse(z.object({ object_type: z.enum(['parties', 'opening_balances', 'opening_gl', 'opening_stock', 'open_pos', 'open_orders', 'open_job_work', 'gst_credit', 'gst_cash', 'itc_reversals']), csv: z.string().min(5).max(5_000_000), file_name: optText(200) }), req.body);
+    const b = parse(z.object({ object_type: z.enum(['parties', 'opening_balances', 'opening_gl', 'opening_stock', 'open_pos', 'open_orders', 'open_job_work', 'gst_credit', 'gst_cash', 'itc_reversals', 'gst_dues']), csv: z.string().min(5).max(5_000_000), file_name: optText(200) }), req.body);
     const t = TEMPLATES[b.object_type]!;
     const { head, rows } = parseCsv(b.csv);
-    const missing = t.columns.filter((c) => !head.includes(c) && !['gstin', 'pan', 'email', 'phone', 'credit_limit', 'segment', 'state_code', 'date', 'grade', 'received_date', 'order_date', 'lot_no', 'ship_to', 'rolls', 'lot_ref', 'igst', 'cgst', 'sgst'].includes(c));
+    const missing = t.columns.filter((c) => !head.includes(c) && !['gstin', 'pan', 'email', 'phone', 'credit_limit', 'segment', 'state_code', 'date', 'grade', 'received_date', 'order_date', 'lot_no', 'ship_to', 'rolls', 'lot_ref', 'igst', 'cgst', 'sgst', 'reference', 'pay_in_month'].includes(c));
     if (missing.length) throw badRequest(`Missing columns: ${missing.join(', ')}`);
     if (!rows.length) throw badRequest('The file has no rows');
     if (rows.length > 5000) throw badRequest('Load at most 5,000 rows per batch');
@@ -284,6 +300,15 @@ export function migrationRoutes(r: Router, { pool }: ServiceContext) {
               lines: rs.map((x) => ({ product_id: L.products!.find((p) => p.sku === x.data.sku)!.id, kg_at_mill: Number(x.data.kg_at_mill), cost_per_kg: Number(x.data.cost_per_kg), rolls: x.data.rolls ? Number(x.data.rolls) : null, lot_ref: x.data.lot_ref || null })) });
             for (const r1 of rs) await mark(r1.id, out.existing ? 'skipped' : 'imported', out.number, out.existing ? 'Already loaded' : null);
           } catch (e) { for (const r1 of rs) await mark(r1.id, 'failed', null, (e as Error).message); }
+        }
+      } else if (b.object_type === 'gst_dues') {
+        for (const r1 of rows) {
+          const d = r1.data;
+          try {
+            const out = await as<{ number: string; existing: boolean }>(req, 'finance', 'POST', '/gst/dues', { gstin: d.gstin!.toUpperCase(), kind: d.kind, minor_head: d.minor_head, as_of: d.as_of_month, reference: d.reference || null,
+              pay_in_month: d.pay_in_month || null, igst: Number(d.igst || 0), cgst: Number(d.cgst || 0), sgst: Number(d.sgst || 0), migration_ref: b.number });
+            await mark(r1.id, out.existing ? 'skipped' : 'imported', out.number, out.existing ? 'Already loaded' : null);
+          } catch (e) { await mark(r1.id, 'failed', null, (e as Error).message); }
         }
       } else if (b.object_type === 'itc_reversals') {
         for (const r1 of rows) {
@@ -407,6 +432,12 @@ async function reconcile(req: Request, pool: ServiceContext['pool'], id: string)
     for (let i = 0; i < nums.length; i += 150) jobs.push(...(await as<{ items: typeof jobs }>(req, 'jobwork', 'GET', `/orders?pageSize=200&f_numbers=${encodeURIComponent(nums.slice(i, i + 150).join(','))}`)).items);
     erp = r2(jobs.filter((x) => x.status !== 'cancelled').reduce((s, x) => s + Number(x.kg_sent), 0));
     detail.job_orders = jobs.length;
+  } else if (b.object_type === 'gst_dues') {
+    const refs = new Set(rows.map((r) => r.result_ref));
+    const all = (await as<{ dues: { kind: string; minor_head: string; voucher_number: string | null; voucher_status: string | null; igst: number; cgst: number; sgst: number }[] }>(req, 'finance', 'GET', '/gst/dues')).dues.filter((x) => x.voucher_number && refs.has(x.voucher_number));
+    erp = r2(all.filter((x) => x.voucher_status === 'posted').reduce((s, x) => s + x.igst + x.cgst + x.sgst, 0));
+    detail.cash_balances = all.filter((x) => x.kind === 'cash_balance').length;
+    detail.owed = all.filter((x) => x.kind === 'outstanding').length;
   } else if (b.object_type === 'itc_reversals') {
     const refs = new Set(rows.map((r) => r.result_ref));
     const rv = (await as<{ voucher_number: string | null; voucher_status: string | null; igst: number; cgst: number; sgst: number; period: string }[]>(req, 'finance', 'GET', '/gst/itc-reversals')).filter((x) => x.voucher_number && refs.has(x.voucher_number));

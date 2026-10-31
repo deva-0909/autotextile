@@ -239,6 +239,44 @@ ${book.gstin},Shree Ambica Knitters,AMB/800,${recent},other,${month},0,0,0`;
     assert.deepEqual(g2.cash_ledger_brought_forward, g.cash_ledger_carried_forward, 'cash ledger rolls into the next month');
     assert.ok((await h.ok(t.accounts!, 'GET', '/finance/reports/trial-balance?from=2020-04-01')).balanced);
   });
+
+  test('interest, late fee and penalty: cash held by head, amounts owed in 3B table 5.1, settled from the same head first', async () => {
+    const book = (await h.ok(t.accounts!, 'GET', '/finance/books')).find((x: { is_primary: boolean }) => x.is_primary);
+    const month = new Date().toISOString().slice(0, 7);
+    const csv = `gstin,kind,minor_head,as_of_month,reference,pay_in_month,igst,cgst,sgst
+${book.gstin},cash_balance,interest,${month},,,0,500,500
+${book.gstin},outstanding,interest,${month},GSTR-3B Feb 2026 paid late,${month},0,1840,1840
+${book.gstin},outstanding,penalty,${month},DRC-07 order 112/2025,,10000,0,0
+${book.gstin},outstanding,late_fee,${month},,${month},0,50,50
+${book.gstin},cash_balance,penalty,${month},,${month},100,0,0`;
+    const b = await load(t.accounts!, 'gst_dues', csv);
+    assert.equal(b.valid, 3);
+    const rows = (await h.ok(t.accounts!, 'GET', `/golive/migration/batches/${b.id}`)).rows;
+    assert.match(rows.find((r: { row_no: number }) => r.row_no === 5).errors.join(' '), /reference is required/);
+    assert.match(rows.find((r: { row_no: number }) => r.row_no === 6).errors.join(' '), /only for owed interest and late fee/);
+    const imp = await h.ok(t.accounts!, 'POST', `/golive/migration/batches/${b.id}/import`);
+    assert.equal(imp.erp_total, 14680, JSON.stringify((await h.ok(t.accounts!, 'GET', `/golive/migration/batches/${b.id}`)).rows.map((r: { status: string; error: string }) => [r.status, r.error])));
+
+    const g = (await h.ok(t.accounts!, 'GET', `/finance/gst/returns?month=${month}&book=${book.id}`)).gstr3b;
+    assert.deepEqual(g.interest_5_1, { igst: 0, cgst: 1840, sgst: 1840 });
+    let dues = await h.ok(t.accounts!, 'GET', `/finance/gst/dues?book=${book.id}`);
+    assert.deepEqual(dues.cash[book.gstin].interest, { igst: 0, cgst: 500, sgst: 500 });
+    const interest = dues.dues.find((d: { minor_head: string; kind: string }) => d.kind === 'outstanding' && d.minor_head === 'interest');
+    const today = new Date().toISOString().slice(0, 10);
+    assert.equal((await h.call(t.accounts!, 'POST', `/finance/gst/dues/${interest.id}/settle`, { date: today })).status, 400, 'a challan is needed for the part the cash ledger does not cover');
+    const st = await h.ok(t.accounts!, 'POST', `/finance/gst/dues/${interest.id}/settle`, { date: today, challan_ref: 'CPIN 24261000123456' });
+    assert.deepEqual(st.from_cash, { igst: 0, cgst: 500, sgst: 500 });
+    assert.equal(st.from_challan, 2680);
+    dues = await h.ok(t.accounts!, 'GET', `/finance/gst/dues?book=${book.id}`);
+    assert.deepEqual(dues.cash[book.gstin].interest, { igst: 0, cgst: 0, sgst: 0 }, 'interest cash is used up');
+    const penalty = dues.dues.find((d: { minor_head: string; kind: string }) => d.kind === 'outstanding' && d.minor_head === 'penalty');
+    const sp = await h.ok(t.accounts!, 'POST', `/finance/gst/dues/${penalty.id}/settle`, { date: today, challan_ref: 'DRC-03 ARN AD2410' });
+    assert.equal(sp.from_challan, 10000, 'interest cash cannot pay a penalty');
+    assert.equal((await h.call(t.accounts!, 'POST', `/finance/gst/dues/${penalty.id}/settle`, { date: today, challan_ref: 'x' })).status, 409);
+    const again = await h.ok(t.accounts!, 'POST', `/golive/migration/batches/${(await load(t.accounts!, 'gst_dues', csv)).id}/import`);
+    assert.equal(again.difference, 0, 'a reload points at the amounts loaded the first time');
+    assert.ok((await h.ok(t.accounts!, 'GET', '/finance/reports/trial-balance?from=2020-04-01')).balanced);
+  });
 });
 
 describe('P11 UAT, training, cutover and hypercare', () => {

@@ -172,7 +172,7 @@ type Heads = Omit<Tot, 'taxable'>;
 interface GstRet { book: { id: string; gstin: string; code: string }; month: string;
   gstr1: { b2b: (Tot & { doc_no: string; doc_date: string; party_name: string; party_gstin: string; place_of_supply: string; transfer: boolean; value: number })[]; b2cs: (Tot & { place_of_supply: string; rate: number })[]; cdnr: (Tot & { doc_no: string; doc_date: string; party_name: string; party_gstin: string | null })[]; hsn: (Tot & { hsn: string; rate: number; qty: number })[] };
   gstr3b: { outward_3_1_a: Tot; reverse_charge_3_1_d: Tot; itc_4a: Tot; itc_reclaimed: Heads; itc_reversed_4b1: Heads; itc_reversed_4b2: Heads; net_itc_4c: Heads; liability: Heads; cash_payable: Heads; credit_brought_forward: Heads; credit_carried_forward: Heads;
-    cash_ledger_brought_forward: Heads; paid_from_cash_ledger: Heads; cash_ledger_carried_forward: Heads };
+    cash_ledger_brought_forward: Heads; paid_from_cash_ledger: Heads; cash_ledger_carried_forward: Heads; interest_5_1: Heads; late_fee_5_1: Heads };
   inward: (Tot & { id: number; doc_no: string; doc_date: string; party_name: string; party_gstin: string | null; doc_type: string })[]; itc_reconciliation: { lines: number; matched: number; issues: number } }
 const taxCols = <T extends Tot>() => [
   { key: 't', header: 'Taxable', align: 'right' as const, render: (r: T) => fmtAmt(r.taxable) },
@@ -220,6 +220,14 @@ export function GstPage() {
           <Card className="lg:col-span-2" title="ITC reversals" description="Credit reversed in table 4(B) month by month. Rule 37 reversals (supplier unpaid after 180 days) come back when the supplier is paid." padded={false}>
             <ReversalList bookId={bookId} />
           </Card>
+          {(hasAny(g.gstr3b.interest_5_1) || hasAny(g.gstr3b.late_fee_5_1)) && (
+            <Card className="lg:col-span-2" title="5.1 Interest and late fee carried over" description="Owed amounts from the legacy system planned for this return. They are paid in cash, never from credit; settle each below once paid.">
+              <TaxGrid rows={[['Interest', g.gstr3b.interest_5_1], ['Late fee', g.gstr3b.late_fee_5_1]]} />
+            </Card>
+          )}
+          <Card className="lg:col-span-2" title="Interest, late fee and penalty" description="Cash held in those heads of the cash ledger, and amounts still owed. Settling uses cash in the same head first; the rest is the challan." padded={false}>
+            <DuesList bookId={bookId} gstin={g.book.gstin} />
+          </Card>
         </div>
       ) : tab === 'gstr1' ? (
         <div className="space-y-4">
@@ -258,6 +266,41 @@ function TaxGrid({ rows }: { rows: [string, Tot | Heads][] }) {
   );
 }
 const hasAny = (h: Heads) => h.igst + h.cgst + h.sgst > 0;
+
+interface Due { id: string; gstin: string; kind: string; minor_head: string; reference: string; pay_in_month: string | null; igst: number; cgst: number; sgst: number; status: string; settled_on: string | null; from_challan: number; from_cash_igst: number; from_cash_cgst: number; from_cash_sgst: number; challan_ref: string | null; settle_voucher_number: string | null }
+function DuesList({ bookId, gstin }: { bookId: string; gstin: string }) {
+  const { can } = useAuth();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ['fin-gst-dues', bookId], queryFn: () => api.get<{ dues: Due[]; cash: Record<string, Record<string, Heads>> }>(`/finance/gst/dues?book=${bookId}`), enabled: !!bookId });
+  const [sel, setSel] = useState<Due | null>(null);
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [challan, setChallan] = useState('');
+  if (!q.data) return <Skeleton className="m-5 h-24" />;
+  const cash = q.data.cash[gstin] ?? {};
+  const total = (h: Heads) => h.igst + h.cgst + h.sgst;
+  const owed = q.data.dues.filter((d) => d.kind === 'outstanding');
+  return (
+    <>
+      <div className="flex flex-wrap gap-x-6 gap-y-1 border-b border-slate-100 px-5 py-3 text-[12.5px] text-slate-600">
+        <span className="font-semibold text-slate-700">Cash ledger, by head:</span>
+        {(['interest', 'late_fee', 'penalty', 'others'] as const).map((k) => <span key={k}>{humanize(k)} {fmtAmt(total(cash[k] ?? { igst: 0, cgst: 0, sgst: 0 }), false)}</span>)}
+      </div>
+      <SimpleTable rows={owed} rowKey={(d) => d.id} empty={<EmptyState title="Nothing owed" />} columns={[
+        { key: 'h', header: 'Head', render: (d) => humanize(d.minor_head) },
+        { key: 'r', header: 'For', render: (d) => <div><p>{d.reference}</p>{d.pay_in_month && <p className="text-[11.5px] text-slate-500">GSTR-3B {d.pay_in_month.slice(0, 7)} (table 5.1)</p>}</div> },
+        { key: 'a', header: 'Amount', align: 'right', render: (d) => fmtAmt(d.igst + d.cgst + d.sgst, false) },
+        { key: 's', header: 'Status', render: (d) => d.status === 'settled'
+          ? <div><Badge tone="success">Paid {d.settled_on ? fmtDate(d.settled_on) : ''}</Badge><p className="mt-0.5 text-[11.5px] text-slate-500">{fmtAmt(d.from_cash_igst + d.from_cash_cgst + d.from_cash_sgst, false)} from cash ledger{d.from_challan ? ` · ${fmtAmt(d.from_challan, false)} challan ${d.challan_ref}` : ''}</p></div>
+          : can('finance.gst.manage') ? <Button size="sm" onClick={() => { setSel(d); setChallan(''); }}>Settle</Button> : <Badge tone="warning">Owed</Badge> },
+      ]} />
+      <Modal open={!!sel} onClose={() => setSel(null)} title={`Settle ${sel ? humanize(sel.minor_head).toLowerCase() : ''} for ${sel?.reference ?? ''}`} description="Cash already in the same head of the cash ledger is used first. Give the challan for any remainder paid from the bank."
+        footer={<><Button onClick={() => setSel(null)}>Cancel</Button><Button variant="primary" onClick={async () => { try { await api.post(`/finance/gst/dues/${sel!.id}/settle`, { date, challan_ref: challan || null }); setSel(null); invalidatePrefix(qc, 'fin-'); } catch (e) { toast({ tone: 'error', title: 'Not settled', body: errMsg(e) }); } }}>Settle</Button></>}>
+        <div className="space-y-3"><Input label="Paid on" type="date" value={date} onChange={(e) => setDate(e.target.value)} /><Input label="Challan (CPIN/CIN), if paid from the bank" value={challan} onChange={(e) => setChallan(e.target.value)} /></div>
+      </Modal>
+    </>
+  );
+}
 
 interface Reversal { id: string; gstin: string; supplier_name: string; doc_no: string; doc_date: string; reason: string; period: string; reclaim_period: string | null; igst: number; cgst: number; sgst: number; status: string; voucher_number: string | null; reclaim_voucher_number: string | null }
 function ReversalList({ bookId }: { bookId: string }) {

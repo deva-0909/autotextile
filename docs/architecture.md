@@ -135,6 +135,10 @@ Make synchronous calls first, then audit and publish.
   credit, each head only from its own balance. **ITC reversals** (`POST /gst/itc-reversals`) post out of Input GST in
   their month (Rule 37 to *ITC reversed — reclaimable*, others to expense) and appear in 4(B); a Rule 37 reclaim posts
   the credit back and shows in 4(A)(5)/4(D)(1) of the month of payment.
+  **Interest, late fee, penalty and others** (`POST /gst/dues`) are either cash held in that minor head (Dr GST cash
+  ledger) or an amount owed (Cr *GST interest, late fee and penalty payable*). Owed interest and late fee can be placed
+  in a month's table 5.1. Settling (`POST /gst/dues/:id/settle`) uses cash in the same minor and tax head first, as the
+  cash ledger rules require, and the rest is a challan payment from the bank.
 - **Reconciliation reads back.** After loading, golive reads the created records (parties, opening vouchers by
   number, inwards by source reference and weighed kg) and compares them with the file’s control totals. Sign-off must
   come from a different user from the one who loaded the batch.

@@ -41,7 +41,7 @@ type Ledgers = { credit: Credit; cash: Credit };
 type Reversals = { rule_42_43: Credit; others: Credit; reclaimed: Credit };
 const ZERO = (): Credit => ({ igst: 0, cgst: 0, sgst: 0 });
 const HEADS = ['igst', 'cgst', 'sgst'] as const;
-function gstr3b(out: TL[], inw: TL[], bf: Ledgers = { credit: ZERO(), cash: ZERO() }, rev: Reversals = { rule_42_43: ZERO(), others: ZERO(), reclaimed: ZERO() }) {
+function gstr3b(out: TL[], inw: TL[], bf: Ledgers = { credit: ZERO(), cash: ZERO() }, rev: Reversals = { rule_42_43: ZERO(), others: ZERO(), reclaimed: ZERO() }, dues: { interest: Credit; late_fee: Credit } = { interest: ZERO(), late_fee: ZERO() }) {
   const inv = totals(out.filter((t) => t.doc_type !== 'credit_note'));
   const cn = totals(out.filter((t) => t.doc_type === 'credit_note'));
   const outward = { taxable: round2(inv.taxable - cn.taxable), igst: round2(inv.igst - cn.igst), cgst: round2(inv.cgst - cn.cgst), sgst: round2(inv.sgst - cn.sgst) };
@@ -64,6 +64,7 @@ function gstr3b(out: TL[], inw: TL[], bf: Ledgers = { credit: ZERO(), cash: ZERO
   const cash = Object.fromEntries(HEADS.map((h) => [h, round2(pay[h] - fromCash[h])])) as Credit;
   const cashCf = Object.fromEntries(HEADS.map((h) => [h, round2(bf.cash[h] - fromCash[h])])) as Credit;
   return { outward_3_1_a: outward, reverse_charge_3_1_d: rcm, itc_4a: itc, itc_reclaimed: rev.reclaimed, itc_reversed_4b1: rev.rule_42_43, itc_reversed_4b2: rev.others, net_itc_4c: net,
+    interest_5_1: dues.interest, late_fee_5_1: dues.late_fee,
     credit_brought_forward: bf.credit, liability: liab, cash_ledger_brought_forward: bf.cash, paid_from_cash_ledger: fromCash, cash_payable: cash, credit_carried_forward: credit, cash_ledger_carried_forward: cashCf };
 }
 
@@ -72,6 +73,23 @@ async function reversalsFor(pool: ServiceContext['pool'], bookId: string, m: str
     `SELECT reason, period::text, reclaim_period::text, igst::float, cgst::float, sgst::float FROM gst_itc_reversals WHERE book_id = $1 AND (period = $2 OR reclaim_period = $2)`, [bookId, m]);
   const add = (pick: (r: typeof rows[number]) => boolean) => { const c = ZERO(); for (const r of rows.filter(pick)) for (const h of HEADS) c[h] = round2(c[h] + r[h]); return c; };
   return { rule_42_43: add((r) => r.period === m && r.reason === 'rule_42_43'), others: add((r) => r.period === m && r.reason !== 'rule_42_43'), reclaimed: add((r) => r.reclaim_period === m) };
+}
+
+/** Carried-over interest and late fee planned for this month's return (table 5.1); paid in cash, never from credit. */
+async function duesFor(pool: ServiceContext['pool'], bookId: string, m: string) {
+  const rows = await many<{ minor_head: string; igst: number; cgst: number; sgst: number }>(pool, `SELECT minor_head, igst::float, cgst::float, sgst::float FROM gst_dues WHERE book_id = $1 AND kind = 'outstanding' AND minor_head IN ('interest','late_fee') AND pay_in_month = $2`, [bookId, m]);
+  const sumOf = (k: string) => { const c = ZERO(); for (const r of rows.filter((x) => x.minor_head === k)) for (const h of HEADS) c[h] = round2(c[h] + r[h]); return c; };
+  return { interest: sumOf('interest'), late_fee: sumOf('late_fee') };
+}
+
+/** Cash held per minor head and tax head: what was carried over, less what settlements have used. */
+async function minorCash(c: ServiceContext['pool'] | Parameters<typeof post>[0], bookId: string) {
+  const rows = await many<{ minor_head: string; igst: number; cgst: number; sgst: number }>(c, `
+    SELECT minor_head, sum(CASE WHEN kind = 'cash_balance' THEN igst ELSE -from_cash_igst END)::float AS igst, sum(CASE WHEN kind = 'cash_balance' THEN cgst ELSE -from_cash_cgst END)::float AS cgst,
+      sum(CASE WHEN kind = 'cash_balance' THEN sgst ELSE -from_cash_sgst END)::float AS sgst FROM gst_dues WHERE book_id = $1 GROUP BY minor_head`, [bookId]);
+  const out: Record<string, Credit> = {};
+  for (const k of ['interest', 'late_fee', 'penalty', 'others']) { const r = rows.find((x) => x.minor_head === k); out[k] = r ? { igst: round2(r.igst), cgst: round2(r.cgst), sgst: round2(r.sgst) } : ZERO(); }
+  return out;
 }
 
 /** Credit and cash ledger balances at the start of a month: the legacy carry-forwards, rolled through every month since. */
@@ -100,7 +118,7 @@ export function gstRoutes(r: Router, { pool }: ServiceContext) {
     const all = await lines(pool, b.id, m);
     const out = all.filter((t) => t.direction === 'outward'), inw = all.filter((t) => t.direction === 'inward');
     const recon = await one(pool, `SELECT count(*)::int AS lines, count(*) FILTER (WHERE status = 'matched')::int AS matched, count(*) FILTER (WHERE status <> 'matched')::int AS issues FROM gstr2b_lines WHERE book_id = $1 AND period = $2`, [b.id, m]);
-    res.json({ book: b, month: m, gstr1: gstr1(out), gstr3b: gstr3b(out, inw, await broughtForward(pool, b.id, m), await reversalsFor(pool, b.id, m)), inward: inw, itc_reconciliation: recon });
+    res.json({ book: b, month: m, gstr1: gstr1(out), gstr3b: gstr3b(out, inw, await broughtForward(pool, b.id, m), await reversalsFor(pool, b.id, m), await duesFor(pool, b.id, m)), inward: inw, itc_reconciliation: recon });
   });
 
   /**
@@ -147,6 +165,72 @@ export function gstRoutes(r: Router, { pool }: ServiceContext) {
    * (supplier unpaid after 180 days) and others in 4(B)(2). The credit leaves Input GST in that month; Rule 37
    * reversals sit in a reclaimable account until the supplier is paid and the credit is reclaimed.
    */
+  /**
+   * Interest, late fee, penalty and others: cash held in those minor heads of the cash ledger, and amounts still owed.
+   * Owed amounts are settled from cash in the same minor and tax head first; the rest is paid by challan from the bank.
+   */
+  r.get('/gst/dues', requirePermission('finance.read'), async (req, res) => {
+    const bs = (await books(pool)).filter((b) => !req.query.book || b.id === req.query.book);
+    const rows = await many(pool, `SELECT d.id, d.book_id, b.gstin, d.kind, d.minor_head, d.as_of::text, d.reference, d.pay_in_month::text, d.igst::float, d.cgst::float, d.sgst::float, d.status, d.settled_on::text,
+      d.from_cash_igst::float, d.from_cash_cgst::float, d.from_cash_sgst::float, d.from_challan::float, d.challan_ref, v.number AS voucher_number, v.status AS voucher_status, sv.number AS settle_voucher_number, d.migration_ref
+      FROM gst_dues d JOIN books b ON b.id = d.book_id LEFT JOIN vouchers v ON v.id = d.voucher_id LEFT JOIN vouchers sv ON sv.id = d.settle_voucher_id
+      WHERE d.book_id = ANY($1) ORDER BY b.gstin, d.kind DESC, d.minor_head, d.reference`, [bs.map((b) => b.id)]);
+    res.json({ dues: rows, cash: Object.fromEntries(await Promise.all(bs.map(async (b) => [b.gstin, await minorCash(pool, b.id)]))) });
+  });
+  r.post('/gst/dues', requirePermission('finance.gst.manage'), async (req, res) => {
+    const amt = z.number().min(0).max(1e10);
+    const b = parse(z.object({ gstin: z.string().length(15), kind: z.enum(['cash_balance', 'outstanding']), minor_head: z.enum(['interest', 'late_fee', 'penalty', 'others']), as_of: month,
+      reference: optText(120), pay_in_month: month.nullable().optional(), igst: amt, cgst: amt, sgst: amt, migration_ref: optText(40) }), req.body);
+    const total = round2(b.igst + b.cgst + b.sgst);
+    if (!(total > 0)) throw badRequest('Enter an amount');
+    if (b.kind === 'outstanding' && !b.reference) throw badRequest('Give the return period, notice or order the amount is owed for');
+    if (b.pay_in_month && (b.kind !== 'outstanding' || !['interest', 'late_fee'].includes(b.minor_head))) throw badRequest('Only owed interest and late fee are paid through GSTR-3B table 5.1');
+    if (b.pay_in_month && b.pay_in_month < b.as_of) throw badRequest('pay_in_month is before the carry-over month');
+    const book = (await books(pool)).find((x) => x.gstin === b.gstin.toUpperCase());
+    if (!book) throw badRequest(`${b.gstin} is not one of your GST registrations`);
+    const ref = b.reference ?? 'Opening balance';
+    const label = b.minor_head.replace('_', ' ');
+    const out = await tx(pool, async (c) => {
+      const ex = await one<{ id: string; number: string | null; igst: number; cgst: number; sgst: number }>(c, `SELECT d.id, v.number, d.igst::float, d.cgst::float, d.sgst::float FROM gst_dues d LEFT JOIN vouchers v ON v.id = d.voucher_id WHERE d.book_id = $1 AND d.kind = $2 AND d.minor_head = $3 AND d.reference = $4`, [book.id, b.kind, b.minor_head, ref]);
+      if (ex) {
+        if (ex.igst === round2(b.igst) && ex.cgst === round2(b.cgst) && ex.sgst === round2(b.sgst)) return { id: ex.id, number: ex.number, existing: true };
+        throw conflict(`${label} ${b.kind === 'cash_balance' ? 'cash balance' : 'due'} "${ref}" for ${book.gstin} is already loaded with different figures`);
+      }
+      const v = await post(c, { type: 'opening', book_id: book.id, date: b.as_of, by: req.user!.name, approved_by: 'migration sign-off',
+        narration: b.kind === 'cash_balance' ? `GST cash ledger — ${label} head, carried over (IGST ${b.igst} · CGST ${b.cgst} · SGST ${b.sgst})` : `GST ${label} owed for ${ref}, carried over (IGST ${b.igst} · CGST ${b.cgst} · SGST ${b.sgst})`,
+        source: { service: 'finance', type: 'gst_due_opening', id: `${book.id}:${b.kind}:${b.minor_head}:${ref}`, ref: b.migration_ref ?? null },
+        lines: b.kind === 'cash_balance' ? [{ account: 'gst_cash_ledger', debit: total }, { account: 'opening_difference', credit: total }] : [{ account: 'opening_difference', debit: total }, { account: 'gst_dues_payable', credit: total }] });
+      const row = await one<{ id: string }>(c, `INSERT INTO gst_dues (book_id, kind, minor_head, as_of, reference, pay_in_month, igst, cgst, sgst, status, voucher_id, migration_ref, created_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+        [book.id, b.kind, b.minor_head, b.as_of, ref, b.pay_in_month ?? null, round2(b.igst), round2(b.cgst), round2(b.sgst), b.kind === 'cash_balance' ? 'balance' : 'open', v.id, b.migration_ref ?? null, req.user!.name]);
+      await auditReq(c, req, 'gst_due', row!.id, 'imported', { after: b });
+      return { id: row!.id, number: v.number, existing: false };
+    });
+    res.status(201).json(out);
+  });
+  r.post('/gst/dues/:id/settle', requirePermission('finance.gst.manage'), async (req, res) => {
+    const b = parse(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), challan_ref: optText(60) }), req.body);
+    const out = await tx(pool, async (c) => {
+      const d = await one<{ id: string; book_id: string; kind: string; minor_head: string; status: string; reference: string; igst: number; cgst: number; sgst: number }>(c, `SELECT *, igst::float, cgst::float, sgst::float FROM gst_dues WHERE id = $1 FOR UPDATE`, [req.params.id]);
+      if (!d) throw notFound('GST due');
+      if (d.kind !== 'outstanding' || d.status !== 'open') throw conflict('Only open amounts owed can be settled');
+      await c.query('SELECT 1 FROM gst_dues WHERE book_id = $1 FOR UPDATE', [d.book_id]);
+      const avail = (await minorCash(c, d.book_id))[d.minor_head]!;
+      const fromCash = Object.fromEntries(HEADS.map((h) => [h, round2(Math.max(0, Math.min(avail[h], d[h])))])) as Credit;
+      const cashTotal = round2(fromCash.igst + fromCash.cgst + fromCash.sgst);
+      const challan = round2(d.igst + d.cgst + d.sgst - cashTotal);
+      if (challan > 0 && !b.challan_ref) throw badRequest(`₹${challan.toLocaleString('en-IN')} is not covered by the cash ledger; give the challan (CPIN/CIN) it was paid with`);
+      const v = await post(c, { type: 'payment', book_id: d.book_id, date: b.date, by: req.user!.name, approved_by: req.user!.name,
+        narration: `GST ${d.minor_head.replace('_', ' ')} for ${d.reference} paid${cashTotal ? ` · ₹${cashTotal.toLocaleString('en-IN')} from the cash ledger` : ''}${challan ? ` · ₹${challan.toLocaleString('en-IN')} by challan ${b.challan_ref}` : ''}`,
+        source: { service: 'finance', type: 'gst_due_settlement', id: d.id },
+        lines: [{ account: 'gst_dues_payable', debit: round2(d.igst + d.cgst + d.sgst) }, { account: 'gst_cash_ledger', credit: cashTotal }, { account: 'bank_main', credit: challan }] });
+      await c.query(`UPDATE gst_dues SET status = 'settled', settled_on = $2, settle_voucher_id = $3, from_cash_igst = $4, from_cash_cgst = $5, from_cash_sgst = $6, from_challan = $7, challan_ref = $8 WHERE id = $1`,
+        [d.id, b.date, v.id, fromCash.igst, fromCash.cgst, fromCash.sgst, challan, b.challan_ref ?? null]);
+      await auditReq(c, req, 'gst_due', d.id, 'settled', { after: { ...b, from_cash: fromCash, challan } });
+      return { number: v.number, from_cash: fromCash, from_challan: challan };
+    });
+    res.json(out);
+  });
+
   r.get('/gst/itc-reversals', requirePermission('finance.read'), async (req, res) => {
     const params: unknown[] = [];
     const where: string[] = [];
