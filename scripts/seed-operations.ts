@@ -520,8 +520,8 @@ export async function seedOperations(services: RunningService[]) {
         const lines = 1 + (n % 3 === 0 ? 1 : 0);
         let total = 0;
         const paid = plusDays(date, days);
-        // Ludhiana's cheques bounced from June: those invoices are still owed.
-        const settled = paid < goLive && !(cust === 'Ludhiana Knit Exports' && date >= '2026-06-01');
+        // Ludhiana's cheques for the last month before go-live bounced: those invoices are still owed (credit is blocked).
+        const settled = paid < goLive && !(cust === 'Ludhiana Knit Exports' && m === legacyMonths[legacyMonths.length - 1]);
         for (let l = 0; l < lines; l++) {
           const sku = skuList[(n * 3 + l * 5) % skuList.length]!;
           const kg = 600 + ((n * 131 + l * 77) % 9) * 120;
