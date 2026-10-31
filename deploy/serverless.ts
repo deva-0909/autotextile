@@ -65,6 +65,8 @@ const database = () => (resolved ??= resolveDatabase().catch((e) => { resolved =
 
 type Booted = { gateway: ReturnType<typeof createGateway>; services: RunningService[] };
 let booted: Promise<Booted> | null = null;
+let lastSetupCheck = Date.now();
+let resetting: Promise<void> | null = null;
 
 /**
  * First start on an empty database: migrate and load the demo data before serving (about 10 seconds, once).
@@ -175,6 +177,14 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     return;
   }
   const { gateway, services } = await (booted ??= boot().catch((e) => { booted = null; throw e; }));
+  // A warm instance re-checks the setup marker at most once a minute, so deleting it (to reload the demo) takes effect
+  // without waiting for a cold start.
+  if (Date.now() - lastSetupCheck > 60_000) {
+    lastSetupCheck = Date.now();
+    const pool = services.find((s) => s.ctx.name === 'identity')!.ctx.pool;
+    const ok = await pool.query(`SELECT to_regclass('identity.setup_state') IS NOT NULL AND EXISTS (SELECT 1 FROM identity.setup_state) AS ok`).then((r) => r.rows[0].ok as boolean, () => false);
+    if (!ok) { await (resetting ??= ensureSetUp((await database()).session).finally(() => { resetting = null; })); }
+  }
   if (url.startsWith('/api/_cron')) {
     if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
       res.statusCode = 401;
