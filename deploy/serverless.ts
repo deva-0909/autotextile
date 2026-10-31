@@ -32,7 +32,7 @@ import { dispatchMessages } from '../services/workflow/src/messaging.ts';
 import { setupDatabase } from '../scripts/setup-lib.ts';
 
 /**
- * Supabase connection: either DATABASE_URL (transaction pooler, user erp_owner.<ref>) is set, or it is worked out from
+ * Supabase connection: either DATABASE_URL (transaction pooler, user erp_identity.<ref>) is set, or it is worked out from
  * SUPABASE_PROJECT_REF, SUPABASE_REGION and DB_PASSWORD by trying the region's pooler clusters (a project lives on one
  * of them; the other answers "tenant not found"). The session-mode URL (port 5432) is used for setup only.
  */
@@ -52,7 +52,7 @@ async function resolveDatabase() {
     try {
       await c.connect();
       await c.end();
-      const base = `postgres://erp_owner.${ref}:${encodeURIComponent(password)}@${host}`;
+      const base = `postgres://erp_identity.${ref}:${encodeURIComponent(password)}@${host}`;
       return { transaction: `${base}:6543/postgres`, session: `${base}:5432/postgres` };
     } catch (e) {
       errors.push(`${host}: ${(e as Error).message}`);
@@ -71,7 +71,7 @@ let booted: Promise<Booted> | null = null;
  * A session-level advisory lock makes concurrent cold starts wait for the first one instead of seeding twice.
  */
 async function ensureSetUp(session: string) {
-  const c = new pg.Client({ connectionString: session.replace('erp_owner', 'erp_identity'), ssl: /localhost|127\.0\.0\.1/.test(session) ? undefined : { rejectUnauthorized: false } });
+  const c = new pg.Client({ connectionString: session.replace(/\/\/erp_owner/, '//erp_identity'), ssl: /localhost|127\.0\.0\.1/.test(session) ? undefined : { rejectUnauthorized: false } });
   await c.connect();
   try {
     const ready = async () => (await c.query(`SELECT to_regclass('identity.users') IS NOT NULL AND EXISTS (SELECT 1 FROM identity.users) AS ok`).catch(() => ({ rows: [{ ok: false }] }))).rows[0].ok;

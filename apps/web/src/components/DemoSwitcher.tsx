@@ -3,7 +3,8 @@ import { clsx } from 'clsx';
 import { Building2, Check, ChevronUp, Loader2, Search, UsersRound, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, type SessionUser } from '../lib/api';
+import { ApiError, api, type SessionUser } from '../lib/api';
+import { useToast } from './overlay';
 import { useAuth } from '../lib/auth';
 
 /** Users offered by the server in demo mode (DEMO_MODE=1). The endpoint does not exist otherwise. */
@@ -23,7 +24,9 @@ function useSwitch() {
   const { signIn } = useAuth();
   const qc = useQueryClient();
   const nav = useNavigate();
+  const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
+  /** Resolves true when the switch happened; failures are shown, not swallowed. */
   const go = async (email: string) => {
     setBusy(email);
     try {
@@ -31,6 +34,10 @@ function useSwitch() {
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== 'demo-users' });
       signIn(r);
       nav('/', { replace: true });
+      return true;
+    } catch (e) {
+      toast({ tone: 'error', title: 'Could not switch user', body: e instanceof ApiError ? e.message : 'The server did not answer. Try again in a moment.' });
+      return false;
     } finally {
       setBusy(null);
     }
@@ -96,7 +103,7 @@ export function DemoSwitcher() {
             {groups.map(([g, list]) => (
               <div key={g} className="mb-1">
                 <p className="px-2.5 pt-2 pb-1 text-[10.5px] font-semibold tracking-wider text-slate-400 uppercase">{g}</p>
-                {list.map((u) => <UserRow key={u.email} u={u} active={u.email.toLowerCase() === user.email.toLowerCase()} busy={busy === u.email} onPick={() => void go(u.email).then(() => setOpen(false))} />)}
+                {list.map((u) => <UserRow key={u.email} u={u} active={u.email.toLowerCase() === user.email.toLowerCase()} busy={busy === u.email} onPick={() => void go(u.email).then((ok) => ok && setOpen(false))} />)}
               </div>
             ))}
           </div>
