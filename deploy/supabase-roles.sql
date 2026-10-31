@@ -1,28 +1,30 @@
 -- Database roles for hosting on Supabase (or any Postgres behind a transaction pooler).
 -- Run once as the project's `postgres` user, replacing __PASSWORD__ with a strong password (the same one goes into
--- DATABASE_URL on Vercel as erp_owner.<project-ref>:<password>@<pooler-host>:6543/postgres, DB_ROLE_PER_SERVICE=1).
+-- Vercel as DB_PASSWORD, or into DATABASE_URL as erp_identity.<project-ref>:<password>@<pooler-host>:6543/postgres).
 --
--- Each service logs in as erp_<service>. The role fixes its search_path to the service's schema (a transaction pooler
--- does not keep per-connection settings) and switches to erp_owner, which owns every schema and table, so setup and
--- cross-schema seeding work exactly as they do locally.
+-- The whole backend logs in as one role, erp_identity, which acts as erp_owner (owner of every schema and table).
+-- Each service sets its own schema search path per transaction (packages/platform/src/db.ts), so one login role is
+-- enough. A login role per service would give the pooler one connection pool per role, which exhausts a small
+-- database's connection slots; any per-service roles left from earlier versions are therefore switched off below.
 
 DO $$
 DECLARE
-  svc text;
+  r text;
   pwd text := '__PASSWORD__';
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'erp_owner') THEN
     CREATE ROLE erp_owner NOLOGIN;
   END IF;
   EXECUTE format('GRANT CREATE, CONNECT, TEMPORARY ON DATABASE %I TO erp_owner', current_database());
-  FOREACH svc IN ARRAY ARRAY['identity','organisation','masters','governance','procurement','jobwork','inventory','crm','commerce','fulfilment','finance','workflow','hrms','insights','golive'] LOOP
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'erp_' || svc) THEN
-      EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', 'erp_' || svc, pwd);
-    ELSE
-      EXECUTE format('ALTER ROLE %I LOGIN PASSWORD %L', 'erp_' || svc, pwd);
-    END IF;
-    EXECUTE format('GRANT erp_owner TO %I', 'erp_' || svc);
-    EXECUTE format('ALTER ROLE %I SET search_path = %I, public', 'erp_' || svc, svc);
-    EXECUTE format('ALTER ROLE %I SET role = erp_owner', 'erp_' || svc);
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'erp_identity') THEN
+    EXECUTE format('CREATE ROLE erp_identity LOGIN PASSWORD %L', pwd);
+  ELSE
+    EXECUTE format('ALTER ROLE erp_identity LOGIN PASSWORD %L', pwd);
+  END IF;
+  GRANT erp_owner TO erp_identity;
+  ALTER ROLE erp_identity SET search_path = identity, public;
+  ALTER ROLE erp_identity SET role = erp_owner;
+  FOR r IN SELECT rolname FROM pg_roles WHERE rolname LIKE 'erp\_%' AND rolname NOT IN ('erp_identity', 'erp_owner') AND rolcanlogin LOOP
+    EXECUTE format('ALTER ROLE %I NOLOGIN', r);
   END LOOP;
 END $$;

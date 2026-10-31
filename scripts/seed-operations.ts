@@ -350,6 +350,103 @@ export async function seedOperations(services: RunningService[]) {
     await call('commerce', salesMgr, 'POST', '/token-policies', { name: 'Kolkata Hosiery — trusted buyer', scope: 'customer', scope_ref: party('Kolkata Hosiery Works'), basis: 'percent', value: 5, min_amount: 2000, validity_days: 10, refundable: true, cancellation_fee_pct: 0, reason: 'Five years of on-time payments' });
     await call('commerce', null, 'POST', '/public/registrations', { company_name: 'Erode Knit Wear', gstin: null, city: 'Erode', contact_name: 'P. Kannan', email: 'kannan@erodeknit.example', phone: '9443012345', message: 'Interested in interlock and pique for school uniforms' });
 
+    // ---------- History: earlier weeks of trading, so registers, ageing, GST and dashboards have depth ----------
+    // Each story runs through the same APIs as real use. A failure is logged and the rest of the seed carries on.
+    const story = async (name: string, f: () => Promise<unknown>) => { try { await f(); } catch (e) { console.error(`[seed] history "${name}" skipped: ${(e as Error).message}`); } };
+    const decideIfPending = async (refId: string) => {
+      await drain();
+      const list = await call<{ items: { id: string; ref_id: string }[] }>('governance', admin, 'GET', '/approvals?f_status=pending&pageSize=100');
+      const ap = list.items.find((x) => x.ref_id === refId);
+      if (ap) await call('governance', admin, 'POST', `/approvals/${ap.id}/decide`, { decision: 'approved', comment: 'Within the agreed rate contract' });
+      await drain();
+    };
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    /** A purchase from order to stock: PO, receipt, weighed rolls, QC, put-away, the supplier's bill posted and approved for payment. */
+    const buy = async (h: { supplier: string; ref: string; ordered: number; received: number; billNo: string; lines: { sku: string; kg: number; rate: number; desc: string; rolls: number; base: number; dye_lot: string; shade: string; price: number }[] }) => {
+      const po = await call('procurement', purchase, 'POST', '/purchase-orders', { supplier_id: party(h.supplier), deliver_to_type: 'warehouse', deliver_to_id: SRT, expected_date: daysAgo(h.received), freight_terms: 'Freight included',
+        lines: h.lines.map((l) => ({ product_id: sku(l.sku), qty_kg: l.kg, rate_per_kg: l.rate })) });
+      await call('procurement', purchase, 'POST', `/purchase-orders/${po.id}/submit`);
+      await decideIfPending(po.id);
+      await call('procurement', purchase, 'POST', `/purchase-orders/${po.id}/send`);
+      const d = await call('procurement', purchase, 'GET', `/purchase-orders/${po.id}`);
+      const kgOf = (l: (typeof h.lines)[number]) => Math.round(l.rolls * l.base * 10) / 10;
+      await call('procurement', purchase, 'POST', `/purchase-orders/${po.id}/receipts`, { receipt_date: daysAgo(h.received), challan_no: `${h.ref}/DC`, lr_number: `${h.ref}/LR`,
+        lines: d.lines.map((pl: { id: string }, i: number) => ({ po_line_id: pl.id, received_kg: kgOf(h.lines[i]!), rejected_kg: 0, rolls: h.lines[i]!.rolls })) });
+      await drain();
+      const inward = (await call<{ id: string; source_type: string }[]>('inventory', stores, 'GET', '/inwards?status=open')).find((i) => i.source_type === 'po_receipt')!;
+      const rolls = await scanInward(inward.id, h.lines.map((l) => ({ weights: weights(l.rolls, l.base, kgOf(l)), dye_lot: l.dye_lot, shade: l.shade })));
+      await call('inventory', stores, 'POST', `/inwards/${inward.id}/complete`, {});
+      for (const [i, rs] of rolls.entries()) {
+        await grade(rs, (k) => (k % 11 === 6 ? 'B' : 'A'));
+        await putaway(rs);
+        await call('inventory', purchase, 'POST', `/lots/${rs[0]!.lot_id}/price`, { price_per_kg: h.lines[i]!.price });
+      }
+      const inter = d.tax_type === 'inter' || d.tax_type === 'inter_state' || d.tax_type === 'igst';
+      const lines = h.lines.map((l) => ({ description: l.desc, hsn_code: '6006', qty_kg: kgOf(l), rate: l.rate, gst_rate: 5 }));
+      const taxable = r2(lines.reduce((s, l) => s + l.qty_kg * l.rate, 0));
+      const half = r2(taxable * 0.025), igst = r2(taxable * 0.05);
+      const inv = await call('procurement', purchase, 'POST', '/invoices', { supplier_id: party(h.supplier), invoice_number: h.billNo, invoice_date: daysAgo(h.received), po_id: po.id, taxable_value: taxable,
+        cgst: inter ? 0 : half, sgst: inter ? 0 : half, igst: inter ? igst : 0, total_value: r2(taxable + (inter ? igst : 2 * half)), lines });
+      await call('procurement', admin, 'POST', `/invoices/${inv.id}/post`, {});
+      await call('procurement', accounts, 'POST', `/invoices/${inv.id}/approve-payment`);
+      await drain();
+      return rolls.map((rs) => rs[0]!.lot_id);
+    };
+    /** Pays a posted supplier bill from the bank (finance settles the payable; procurement marks the invoice paid). */
+    const paySupplier = (supplier: string, billNo: string, daysBack: number, utr: string) =>
+      call('finance', accounts, 'POST', '/supplier-payments', { party_id: party(supplier), invoice_number: billNo, date: daysAgo(daysBack), mode: 'neft', reference: utr });
+
+    const lotsPiq: string[] = [], lotsNvy: string[] = [], lotsFlc: string[] = [];
+    await story('Ganesh pique purchase', async () => {
+      lotsPiq.push(...(await buy({ supplier: 'Ganesh Yarn & Fabrics', ref: 'GYF', ordered: 52, received: 48, billNo: 'GYF/2627/0388',
+        lines: [{ sku: 'PIQ-210-WHT', kg: 800, rate: 274, desc: 'Pique 210 GSM white', rolls: 32, base: 24.6, dye_lot: 'GYF-P31', shade: 'WHT', price: 322 }] })));
+      await paySupplier('Ganesh Yarn & Fabrics', 'GYF/2627/0388', 18, 'NEFT ICICN52026091');
+    });
+    await story('Ambica jersey and rib purchase', async () => {
+      lotsNvy.push(...(await buy({ supplier: 'Shree Ambica Knitters', ref: 'SAK/H2', ordered: 36, received: 33, billNo: 'SAK/26-27/0371',
+        lines: [{ sku: 'SJ-160-NVY', kg: 1000, rate: 244, desc: 'Single jersey 160 GSM navy', rolls: 40, base: 24.8, dye_lot: 'SAK-N109', shade: 'NVY-109', price: 288 },
+          { sku: 'RIB-240-NVY', kg: 400, rate: 286, desc: '2x2 rib 240 GSM navy', rolls: 16, base: 24.6, dye_lot: 'SAK-R71', shade: 'NVY-2', price: 334 }] })));
+      await paySupplier('Shree Ambica Knitters', 'SAK/26-27/0371', 6, 'NEFT ICICN52026127');
+    });
+    await story('Velavan fleece purchase', async () => {
+      lotsFlc.push(...(await buy({ supplier: 'Velavan Knit Fab', ref: 'VKF/H3', ordered: 24, received: 20, billNo: 'VKF-2627-1041',
+        lines: [{ sku: 'FLC-320-CHR', kg: 600, rate: 304, desc: 'Fleece 320 GSM charcoal', rolls: 24, base: 25.1, dye_lot: 'VKF-F12', shade: 'CHR-3', price: 356 }] })));
+      // Approved for payment, due later this month: shows in the payables forecast.
+    });
+
+    /** A sale from order to cash: order, token (if the customer is on advance terms), pick, pack, invoice, payment, dispatch and delivery. */
+    const sell = async (s: { customer: string; buyer?: string; lot: string; product: string; kg: number; pay: 'before_dispatch' | 'after_delivery' | 'none'; deliver: boolean; lr: string; utr: string }) => {
+      const o = await call<{ id: string; number: string; status: string; payment?: { link_token: string } }>('commerce', salesMgr, 'POST', '/orders', { customer_id: party(s.customer), lines: [{ product_id: sku(s.product), lot_id: s.lot, kg: s.kg }], notes: 'Phone order' });
+      if (o.status === 'pending_payment' && o.payment?.link_token) await simulatePay(o.payment.link_token);
+      else if (o.status !== 'booked') throw new Error(`${o.number} is ${o.status}`);
+      await drain();
+      const f = (await call<{ id: string }[]>('fulfilment', dispatcher, 'GET', `/fulfilments?order=${o.id}`))[0]!;
+      const pick = (await call<{ pick_list: { barcode: string; weight_kg: number }[] }>('fulfilment', dispatcher, 'GET', `/fulfilments/${f.id}`)).pick_list;
+      for (const r of pick) await call('fulfilment', dispatcher, 'POST', `/fulfilments/${f.id}/pick`, { barcode: r.barcode, weight_kg: r.weight_kg });
+      const kg = pick.reduce((t, r) => t + Number(r.weight_kg), 0);
+      await call('fulfilment', dispatcher, 'POST', `/fulfilments/${f.id}/pack`, { packages: Math.ceil(pick.length / 4), gross_kg: Math.ceil(kg + 6) });
+      const inv = await call<{ invoice_no: string; total: number; settled: number; gate_payment: string }>('fulfilment', accounts, 'POST', `/fulfilments/${f.id}/invoice`);
+      const due = r2(inv.total - inv.settled);
+      const receive = () => call('commerce', accounts, 'POST', '/payments/offline', { customer_id: party(s.customer), amount: due, mode: 'rtgs', reference: s.utr, received_on: daysAgo(0), purpose: 'invoice', ref_no: inv.invoice_no });
+      if (s.pay === 'before_dispatch' && inv.gate_payment === 'pending' && due > 0) {
+        await receive();
+        await drain();
+        await call('fulfilment', dispatcher, 'POST', `/fulfilments/${f.id}/refresh-payment`);
+      }
+      if (inv.gate_payment === 'pending' && s.pay !== 'before_dispatch') return; // dispatch waits for the money
+      const sh = await call<{ shipment_id: string }>('fulfilment', dispatcher, 'POST', `/fulfilments/${f.id}/dispatch`, { transporter_id: party('VRL Logistics'), transporter_name: 'VRL Logistics', mode: 'PTL', lr_number: s.lr, vehicle_no: 'GJ05BX7012', eway_bill_no: `3812${s.lr.replace(/\D/g, '').padStart(8, '0').slice(-8)}` });
+      await call('fulfilment', dispatcher, 'POST', `/shipments/${sh.shipment_id}/milestones`, { milestone: 'in_transit', location: 'Vadodara hub' });
+      if (s.deliver) {
+        await call('fulfilment', dispatcher, 'POST', `/shipments/${sh.shipment_id}/pod`, { received_by: 'Stores in-charge', kg_received: r2(kg), condition: 'ok', remarks: 'Received in good condition' });
+        if (s.pay === 'after_delivery' && due > 0) await receive();
+      }
+      await drain();
+    };
+    await story('Sri Murugan pique on credit, delivered and paid', () => lotsPiq[0] ? sell({ customer: 'Sri Murugan Garments', lot: lotsPiq[0], product: 'PIQ-210-WHT', kg: 300, pay: 'after_delivery', deliver: true, lr: 'VRL-770412', utr: 'HDFCR52026102511' }) : Promise.resolve());
+    await story('Rupa Apparel jersey, paid before dispatch', () => lotsNvy[0] ? sell({ customer: 'Rupa Apparel House', lot: lotsNvy[0], product: 'SJ-160-NVY', kg: 250, pay: 'before_dispatch', deliver: true, lr: 'VRL-770655', utr: 'SBINR52026102877' }) : Promise.resolve());
+    await story('Kolkata Hosiery fleece, in transit', () => lotsFlc[0] ? sell({ customer: 'Kolkata Hosiery Works', lot: lotsFlc[0], product: 'FLC-320-CHR', kg: 200, pay: 'before_dispatch', deliver: false, lr: 'VRL-771020', utr: 'UTIBR52026103042' }) : Promise.resolve());
+    await story('Sri Murugan rib, invoiced and on the way', () => lotsNvy[1] ? sell({ customer: 'Sri Murugan Garments', lot: lotsNvy[1], product: 'RIB-240-NVY', kg: 150, pay: 'none', deliver: false, lr: 'VRL-771101', utr: '' }) : Promise.resolve());
+
     // ---------- P8: opening balances, bank, supplier payment, expenses, bank statement, GSTR-2B ----------
     await drain();
     const owner = await login('owner@textile.local');
@@ -409,7 +506,7 @@ export async function seedOperations(services: RunningService[]) {
       break;
     }
     // Months with no trading since the opening balances are reviewed and locked.
-    const lastMonth = daysAgo(62).slice(0, 7);
+    const lastMonth = daysAgo(95).slice(0, 7);
     for (const pr of await call<{ month: string; status: string }[]>('finance', accounts, 'GET', '/periods'))
       if (pr.month.slice(0, 7) <= lastMonth && pr.status === 'open') await call('finance', accounts, 'POST', `/periods/${pr.month}/lock`, { value_stock: false, note: 'Reviewed with the CA' });
     await runFinanceChecks(services.find((s) => s.ctx.name === 'finance')!.ctx.pool);
@@ -448,9 +545,9 @@ export async function seedOperations(services: RunningService[]) {
       await call('hrms', hr, 'POST', `/employees/${e.id}/lifecycle`, { action: 'start_probation', effective_date: joined });
       if (name !== 'Rekha Solanki') await call('hrms', hr, 'POST', `/employees/${e.id}/lifecycle`, { action: 'confirm', effective_date: joined });
     }
-    // Attendance for last month and this month to date: mostly present, a few late arrivals, absences and Sunday work.
+    // Attendance for the last two months and this month to date: mostly present, a few late arrivals, absences and Sunday work.
     const days: string[] = [];
-    for (let d = new Date(`${daysAgo(30).slice(0, 7)}-01T00:00:00Z`); d.toISOString().slice(0, 10) < daysAgo(0); d.setUTCDate(d.getUTCDate() + 1)) days.push(d.toISOString().slice(0, 10));
+    for (let d = new Date(`${daysAgo(60).slice(0, 7)}-01T00:00:00Z`); d.toISOString().slice(0, 10) < daysAgo(0); d.setUTCDate(d.getUTCDate() + 1)) days.push(d.toISOString().slice(0, 10));
     const offOf = Object.fromEntries(staff.map((x) => [x[0], x[7]]));
     for (const [di, day] of days.entries()) {
       const dowN = new Date(`${day}T00:00:00Z`).getUTCDay();
@@ -476,15 +573,19 @@ export async function seedOperations(services: RunningService[]) {
     const lv = pendingApprovals.items.find((a) => a.ref_id === sourav.id);
     if (lv) await call('governance', ownerTok, 'POST', `/approvals/${lv.id}/decide`, { decision: 'approved', comment: 'Approved; Arjun covers East leads' });
     await drain();
-    // Last month's payroll: prepared, approved and paid (finance posts the salary and the bank transfer).
-    const payMonth = daysAgo(30).slice(0, 7);
-    await call('hrms', hr, 'POST', `/payroll/${payMonth}/prepare`);
-    await call('hrms', hr, 'POST', `/payroll/${payMonth}/submit`);
-    await drain();
-    const prApproval = (await call<{ items: { id: string; approval_type: string }[] }>('governance', ownerTok, 'GET', '/approvals?f_status=pending&pageSize=100')).items.find((a) => a.approval_type === 'payroll_run');
-    if (prApproval) await call('governance', ownerTok, 'POST', `/approvals/${prApproval.id}/decide`, { decision: 'approved', comment: 'Checked against attendance' });
-    await drain();
-    await call('hrms', hr, 'POST', `/payroll/${payMonth}/pay`, { paid_on: `${daysAgo(0).slice(0, 7)}-01` });
+    // The last two months' payroll: prepared, approved and paid (finance posts the salary and the bank transfer).
+    const runPayroll = async (payMonth: string, paidOn: string) => {
+      await call('hrms', hr, 'POST', `/payroll/${payMonth}/prepare`);
+      await call('hrms', hr, 'POST', `/payroll/${payMonth}/submit`);
+      await drain();
+      const prApproval = (await call<{ items: { id: string; approval_type: string }[] }>('governance', ownerTok, 'GET', '/approvals?f_status=pending&pageSize=100')).items.find((a) => a.approval_type === 'payroll_run');
+      if (prApproval) await call('governance', ownerTok, 'POST', `/approvals/${prApproval.id}/decide`, { decision: 'approved', comment: 'Checked against attendance' });
+      await drain();
+      await call('hrms', hr, 'POST', `/payroll/${payMonth}/pay`, { paid_on: paidOn });
+      await drain();
+    };
+    try { await runPayroll(daysAgo(60).slice(0, 7), `${daysAgo(30).slice(0, 7)}-01`); } catch (e) { console.error(`[seed] history payroll skipped: ${(e as Error).message}`); }
+    await runPayroll(daysAgo(30).slice(0, 7), `${daysAgo(0).slice(0, 7)}-01`);
     // A warehouse operator has resigned; the exit checklist and a handover task are open.
     await call('hrms', hr, 'POST', `/employees/${emp['Sunil Rathod']}/lifecycle`, { action: 'resign', effective_date: daysAgo(5), last_working_day: inDays(25), reason: 'Moving back to his village' });
     // Recruitment for the Kolkata warehouse.

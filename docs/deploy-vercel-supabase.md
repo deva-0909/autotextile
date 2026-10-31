@@ -7,8 +7,9 @@ only the PostgreSQL database. Locally nothing changes: `npm run setup` and `npm 
 ## How it differs from running locally
 
 - **Database roles.** Vercel reaches Supabase through its connection pooler (IPv4) in transaction mode, which does not
-  keep per-connection settings. Each service therefore logs in as its own role `erp_<service>` whose search path is
-  fixed in the database (`deploy/supabase-roles.sql`); all roles act as `erp_owner`, which owns the schemas.
+  keep per-connection settings. The whole backend logs in as one role, `erp_identity` (acting as `erp_owner`, which owns
+  the schemas), and each service sets its schema search path inside every transaction. One login role matters: the
+  pooler keeps a separate pool per role, and fifteen roles exhausted the free plan's 60 connection slots.
 - **No background processes.** The event bus is drained after every change and before reads; the services' periodic
   checks and the message dispatcher run in the background after requests (at most every 10 minutes) and from a daily
   Vercel Cron call to `/api/_cron`.
@@ -37,11 +38,15 @@ only the PostgreSQL database. Locally nothing changes: `npm run setup` and `npm 
    | `DEMO_MODE` | `1` (role switcher and password-free demo sign-in) |
 
    The function finds the right pooler host from the project reference and region. Alternatively set `DATABASE_URL`
-   to `postgres://erp_owner.<ref>:<password>@<pooler-host>:6543/postgres`.
+   to `postgres://erp_identity.<ref>:<password>@<pooler-host>:6543/postgres`.
 3. **Open the app.** The first visit loads the demo data. To reset it later:
    `curl -X POST "https://<your-app>.vercel.app/api/_setup?reset=1" -H "Authorization: Bearer <SETUP_SECRET>"`.
 
-Every push to `main` redeploys automatically.
+Every push to `main` redeploys automatically. Share the production address (`https://<project>.vercel.app`), not a
+deployment-specific preview link: a preview keeps running the code it was built from.
+
+To reload the demo data without SETUP_SECRET, delete the completion marker in the Supabase SQL editor
+(`DELETE FROM identity.setup_state;`); the next request resets every schema and seeds again (about a minute).
 
 ## Demo mode
 

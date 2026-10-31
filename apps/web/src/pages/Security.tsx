@@ -277,7 +277,7 @@ export function RolesPage() {
         breadcrumbs={[{ label: 'Security' }, { label: 'Roles & permissions' }]}
         actions={can('identity.role.manage') && <Button icon={<Plus className="size-4" />} onClick={() => setCreating(true)}>New role</Button>}
       />
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_1fr]">
         <Card padded={false} className="h-fit">
           <ul className="scrollbar-thin max-h-[calc(100vh-220px)] overflow-y-auto py-1.5">
             {roles.data?.map((r) => (
@@ -301,25 +301,27 @@ export function RolesPage() {
           >
             {selected.code === 'super_admin' && <div className="px-5 pt-4"><Notice tone="info" icon={<ShieldCheck className="size-4" />}>Super Admin always holds every permission, including ones added in later phases.</Notice></div>}
             {selected.permissions.length === 0 && selected.code.match(/customer|supplier|transporter|mill_user/) && <div className="px-5 pt-4"><Notice tone="info">Portal roles get their permissions when the partner portals ship (P2, P3, P6, P7).</Notice></div>}
-            <div className="divide-y divide-slate-100">
-              {modules.map((m) => (
-                <section key={m} className="px-5 py-4">
-                  <h3 className="mb-2 text-[12px] font-semibold tracking-wide text-slate-500 uppercase">{m}</h3>
-                  <ul className="space-y-1">
-                    {perms.data!.filter((p) => p.module === m).map((p) => {
-                      const on = draft.has(p.code);
-                      return (
-                        <li key={p.code} className="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-slate-50">
-                          <input type="checkbox" className="size-4 accent-brand-600" checked={on} disabled={!manage} onChange={() => toggle(p.code)} aria-label={p.label} />
-                          <span className="flex-1 text-[13.5px] text-slate-800">{p.label}</span>
-                          {p.sensitive && <Badge tone="warning">Sensitive</Badge>}
-                          <span className="hidden font-mono text-[11px] text-slate-400 md:inline">{p.code}</span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </section>
-              ))}
+            <div className="gap-x-6 px-4 py-3 md:columns-2 2xl:columns-3">
+              {modules.map((m) => {
+                const list = perms.data!.filter((p) => p.module === m);
+                return (
+                  <section key={m} className="mb-3 break-inside-avoid">
+                    <h3 className="mb-1 flex items-center justify-between px-1.5 text-[11px] font-semibold tracking-wide text-slate-500 uppercase">{m}<span className="font-normal tracking-normal text-slate-400 normal-case">{list.filter((p) => draft.has(p.code)).length}/{list.length}</span></h3>
+                    <ul>
+                      {list.map((p) => {
+                        const on = draft.has(p.code);
+                        return (
+                          <li key={p.code} title={p.code} className="flex items-center gap-2 rounded px-1.5 py-[3px] hover:bg-slate-50">
+                            <input type="checkbox" className="size-3.5 shrink-0 accent-brand-600" checked={on} disabled={!manage} onChange={() => toggle(p.code)} aria-label={p.label} />
+                            <span className={clsx('min-w-0 flex-1 truncate text-[12.5px]', on ? 'text-slate-800' : 'text-slate-500')}>{p.label}</span>
+                            {p.sensitive && <Badge tone="warning">Sensitive</Badge>}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                );
+              })}
             </div>
           </Card>
         )}

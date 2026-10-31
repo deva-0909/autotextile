@@ -73,28 +73,26 @@ export function ChartOfAccountsPage() {
   const [book, setBook] = useState('all');
   const q = useQuery({ queryKey: ['fin-accounts', book], queryFn: () => api.get<Account[]>(`/finance/accounts?book=${book}`) });
   const [adding, setAdding] = useState(false);
+  const [type, setType] = useState<string>(TYPE_ORDER[0]!);
   return (
     <>
       <PageHeader title="Chart of accounts" description="Accounts marked “system” receive automatic postings and cannot be removed. Control accounts carry a customer or supplier on every line." breadcrumbs={[{ label: 'Finance', to: '/finance' }, { label: 'Chart of accounts' }]}
         actions={<div className="flex gap-2"><BookPicker value={book} onChange={setBook} />{can('finance.config.manage') && <Button icon={<Plus className="size-4" />} onClick={() => setAdding(true)}>Add account</Button>}</div>} />
-      {!q.data ? <Skeleton className="h-96" /> : (
-        <div className="space-y-4">
-          {TYPE_ORDER.map((t) => {
-            const rows = q.data.filter((a) => a.type === t);
-            const total = rows.reduce((s, a) => s + a.balance * (['asset', 'expense'].includes(t) ? 1 : -1), 0);
-            return (
-              <Card key={t} title={humanize(t === 'income' ? 'income' : `${t}s`)} padded={false} actions={<span className="text-[13px] font-semibold tabular">{fmtINR(total)}</span>}>
-                <SimpleTable rows={rows} rowKey={(a) => a.id} onRowClick={(a) => nav(`/finance/ledger/${a.id}${book !== 'all' ? `?book=${book}` : ''}`)} columns={[
-                  { key: 'c', header: 'Code', width: '90px', render: (a) => <span className="font-mono text-[12.5px]">{a.code}</span> },
-                  { key: 'n', header: 'Account', render: (a) => <div className="flex items-center gap-2"><span className={a.status !== 'active' ? 'text-slate-400 line-through' : ''}>{a.name}</span>{a.system_key && <Badge tone="neutral">system</Badge>}{a.control && <Badge tone="violet">{a.control.replace('_', '-')} control</Badge>}{a.is_bank && <Badge tone="info">bank</Badge>}</div> },
-                  { key: 'g', header: 'Group', render: (a) => <span className="text-[12.5px] text-slate-500">{a.group_name}</span> },
-                  { key: 'b', header: 'Balance', align: 'right', render: (a) => <span className="tabular">{fmtAmt(Math.abs(a.balance))} {Math.abs(a.balance) > 0.005 && <span className="text-[11px] text-slate-400">{a.balance > 0 ? 'Dr' : 'Cr'}</span>}</span> },
+      {!q.data ? <Skeleton className="h-96" /> : (() => {
+        const totalOf = (t: string) => q.data.filter((a) => a.type === t).reduce((s, a) => s + a.balance * (['asset', 'expense'].includes(t) ? 1 : -1), 0);
+        const rows = q.data.filter((a) => a.type === type);
+        return (
+          <Card padded={false}>
+            <Tabs className="px-3" value={type} onChange={setType} tabs={TYPE_ORDER.map((t) => ({ value: t, label: <span>{humanize(t === 'income' ? 'income' : `${t}s`)} <span className="ml-1 text-[12px] font-normal text-slate-400 tabular">{fmtINR(totalOf(t))}</span></span>, count: q.data.filter((a) => a.type === t).length }))} />
+            <SimpleTable rows={rows} rowKey={(a) => a.id} onRowClick={(a) => nav(`/finance/ledger/${a.id}${book !== 'all' ? `?book=${book}` : ''}`)} columns={[
+                { key: 'c', header: 'Code', width: '90px', render: (a) => <span className="font-mono text-[12.5px]">{a.code}</span> },
+                { key: 'n', header: 'Account', render: (a) => <div className="flex items-center gap-2"><span className={a.status !== 'active' ? 'text-slate-400 line-through' : ''}>{a.name}</span>{a.system_key && <Badge tone="neutral">system</Badge>}{a.control && <Badge tone="violet">{a.control.replace('_', '-')} control</Badge>}{a.is_bank && <Badge tone="info">bank</Badge>}</div> },
+                { key: 'g', header: 'Group', render: (a) => <span className="text-[12.5px] text-slate-500">{a.group_name}</span> },
+                { key: 'b', header: 'Balance', align: 'right', render: (a) => <span className="tabular">{fmtAmt(Math.abs(a.balance))} {Math.abs(a.balance) > 0.005 && <span className="text-[11px] text-slate-400">{a.balance > 0 ? 'Dr' : 'Cr'}</span>}</span> },
                 ]} />
-              </Card>
-            );
-          })}
-        </div>
-      )}
+          </Card>
+        );
+      })()}
       <AddAccountModal open={adding} onClose={() => setAdding(false)} />
     </>
   );

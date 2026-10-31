@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { clsx } from 'clsx';
 import { AlertTriangle, CalendarRange, Hash, Pencil, Plus, SlidersHorizontal } from 'lucide-react';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -27,7 +28,7 @@ export function ConfigurationPage() {
         breadcrumbs={[{ label: 'Organisation' }, { label: 'Configuration' }]}
       />
       <Tabs
-        className="mb-6"
+        className="mb-4"
         value={tab}
         onChange={(t) => setParams({ tab: t })}
         tabs={[
@@ -56,19 +57,34 @@ function Rules() {
   const { can } = useAuth();
   const q = useQuery({ queryKey: ['settings'], queryFn: () => api.get<Setting[]>('/organisation/settings') });
   const [edit, setEdit] = useState<Setting | null>(null);
+  const [cat, setCat] = useState<string | null>(null);
   if (!q.data) return <Skeleton className="h-96" />;
   const groups = [...new Set(q.data.map((s) => s.category))];
+  const g = cat && groups.includes(cat) ? cat : groups[0]!;
+  const ca = q.data.filter((s) => s.requires_ca_validation).length;
   return (
-    <div className="space-y-6">
-      <Notice tone="warning" icon={<AlertTriangle className="size-4" />} title="Values are placeholders until confirmed">
-        Items flagged “CA validation” must be confirmed by the client’s chartered accountant before production (Decisions & Risks register).
-      </Notice>
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        {groups.map((g) => (
+    <div className="space-y-4">
+      {ca > 0 && <Notice tone="warning" icon={<AlertTriangle className="size-4" />}>
+        {ca} values flagged “CA validation” are placeholders until the client’s chartered accountant confirms them (Decisions & Risks register).
+      </Notice>}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[240px_1fr]">
+        <Card padded={false} className="h-fit">
+          <ul className="py-1.5">
+            {groups.map((x) => {
+              const n = q.data!.filter((s) => s.category === x);
+              return (
+                <li key={x}><button onClick={() => setCat(x)} className={clsx('flex w-full items-center justify-between gap-2 px-4 py-2 text-left text-[13px]', x === g ? 'bg-brand-50 font-semibold text-brand-800' : 'text-slate-700 hover:bg-slate-50')}>
+                  <span className="truncate">{x}</span><span className="text-[11.5px] font-normal text-slate-400">{n.length}{n.some((s) => s.requires_ca_validation) ? ' · CA' : ''}</span>
+                </button></li>
+              );
+            })}
+          </ul>
+        </Card>
+        {[g].map((g) => (
           <Card key={g} title={g} padded={false}>
             <ul className="divide-y divide-slate-100">
               {q.data!.filter((s) => s.category === g).map((s) => (
-                <li key={s.key} className="flex items-center gap-4 px-5 py-3">
+                <li key={s.key} className="flex items-center gap-4 px-4 py-2.5">
                   <div className="min-w-0 flex-1">
                     <p className="flex flex-wrap items-center gap-2 text-[13.5px] font-medium text-slate-900">
                       {s.label}
