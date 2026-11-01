@@ -9,6 +9,7 @@ import { fmtDate, fmtDateTime, fmtINR, fmtNum, humanize } from '../../lib/format
 import { SimpleTable } from '../../components/DataTable';
 import { ConfirmDialog, Drawer, Modal, useToast } from '../../components/overlay';
 import { useParties, useProducts } from '../../components/business';
+import { DocumentPreviewButton, type DocData } from '../../components/DocumentPreview';
 import { Badge, Button, Card, Checkbox, EmptyState, ErrorState, Input, KeyValue, Notice, PageHeader, Segmented, Select, Skeleton, Stat, StatusBadge, Tabs, Textarea } from '../../components/ui';
 
 const errMsg = (e: unknown) => (e as Error).message;
@@ -101,6 +102,39 @@ interface OSummary { plan: { status: string; decision_mode: string | null; decis
 interface ODetail extends ORow { customer_gstin: string | null; source_ref: string | null; taxable: number; tax_estimate: number; token_policy_text: string | null; token_refundable: boolean; token_cancellation_fee_pct: number; token_due_at: string | null; company_approved_by_name: string | null; ship_to: string | null; notes: string | null; cancelled_reason: string | null; cancelled_by_name: string | null; wallet_balance: number;
   lines: OLine[]; payments: OPay[]; wallet: OWallet[]; extensions: OExt[]; fulfilment: OSummary | null }
 
+/**
+ * The order as the customer receives it. On advance terms it is a proforma invoice (what to pay before dispatch);
+ * otherwise an order confirmation. Neither is a tax invoice: that is issued at dispatch with the actual rolls.
+ */
+function orderDoc(o: ODetail): DocData {
+  const advance = o.payment_terms === 'advance';
+  return {
+    title: advance ? 'Proforma invoice' : 'Sales order confirmation', number: o.number, date: o.created_at.slice(0, 10), status: o.status,
+    seller: { name: 'Demo Textile Trading Pvt Ltd', lines: ['Ring Road, Surat, Gujarat'] },
+    party: { label: 'Bill to', name: o.customer_name, gstin: o.customer_gstin, state: o.customer_gstin ? o.customer_gstin.slice(0, 2) : null, lines: [o.ship_to ? `Ship to: ${o.ship_to}` : null] },
+    meta: [
+      { label: 'Payment terms', value: humanize(o.payment_terms) },
+      ...(Number(o.token_amount) ? [{ label: advance ? 'Advance to pay now' : 'Token', value: fmtINR(Number(o.token_amount)) }] : []),
+      ...(o.token_due_at ? [{ label: 'Advance due by', value: fmtDate(o.token_due_at) }] : []),
+      { label: 'Placed by', value: o.placed_by_name ?? 'Customer portal' },
+      ...(o.source_ref ? [{ label: 'Customer ref', value: o.source_ref }] : []),
+    ],
+    lines: o.lines.map((l) => ({ description: `${l.sku} — ${l.product_name}`, note: l.lot_no ? `Lot ${l.lot_no}` : 'Lot allocated at dispatch', qty: Number(l.kg), uom: 'kg', rate: Number(l.price_per_kg), gst_rate: Number(l.gst_rate), taxable: Number(l.taxable), amount: Number(l.taxable) })),
+    totals: [
+      { label: 'Taxable value', value: Number(o.taxable) },
+      { label: 'GST', value: Number(o.tax_estimate) },
+      { label: 'Order total', value: Number(o.total_estimate), strong: true },
+      ...(advance && Number(o.token_amount) ? [{ label: 'Advance payable now', value: Number(o.token_amount) }, { label: 'Balance before dispatch', value: Math.max(0, Number(o.total_estimate) - Number(o.token_amount)) }] : []),
+    ],
+    notes: o.notes,
+    terms: [
+      o.token_policy_text ? `Advance: ${o.token_policy_text}${o.token_refundable ? `; refundable less ${o.token_cancellation_fee_pct}% if the order is cancelled.` : '; not refundable.'}` : null,
+      'Weights are invoiced as actually dispatched; shade and GSM within normal tolerance. GST is charged as CGST + SGST within Gujarat, IGST outside.',
+    ].filter(Boolean).join('\n'),
+    footer: advance ? 'Proforma invoice: not a tax invoice. The GST tax invoice is issued at dispatch.' : 'Order confirmation: not a tax invoice. The GST tax invoice is issued at dispatch.',
+  };
+}
+
 const CANCELLABLE = ['pending_company_approval', 'awaiting_allocation', 'pending_payment', 'booked'];
 
 export function CommerceOrderDetailPage() {
@@ -123,6 +157,7 @@ export function CommerceOrderDetailPage() {
       <PageHeader title={`Order ${o.number}`} meta={<StatusBadge status={o.status} />} description={`${o.customer_name} · ${humanize(o.channel)}${o.source_ref ? ` from ${o.source_ref}` : ''} · placed by ${o.placed_by_name ?? 'system'} on ${fmtDateTime(o.created_at)}`}
         breadcrumbs={[{ label: 'B2B commerce' }, { label: 'Sales orders', to: '/commerce/orders' }, { label: o.number }]}
         actions={<div className="flex gap-2">
+          <DocumentPreviewButton label={o.payment_terms === 'advance' ? 'Proforma invoice' : 'Order confirmation'} draft={o.status === 'pending_company_approval'} d={orderDoc(o)} />
           {can('fulfilment.read') && <Link to={`/fulfilment/orders/${o.id}`}><Button>Allocation & dispatch</Button></Link>}
           {can('commerce.payment.manage') && !['cancelled', 'expired'].includes(o.status) && <Button icon={<Link2 className="size-4" />} onClick={() => setLink(true)}>Payment link</Button>}
           {can('commerce.order.manage') && o.status === 'booked' && <Button onClick={() => setExtend(true)}>Extend hold</Button>}
