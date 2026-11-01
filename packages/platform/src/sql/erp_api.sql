@@ -4,7 +4,8 @@
 -- run optimistically: each statement is tried in a scratch run that is always rolled back (so the code sees real
 -- results, including its own earlier changes), and at the end every change is replayed in one atomic call. The
 -- replay checks that rows read for update, and rows returned by changes, are as the code saw them; if anything
--- changed in between, the call fails with SQLSTATE 40001 and the caller retries the whole transaction.
+-- changed in between, the call fails with SQLSTATE PT409 and the caller retries the whole transaction. Not 40001:
+-- PostgREST retries serialization failures itself, and a conflict that repeats on every retry would loop there forever.
 --
 -- Generated keys must come out the same in the scratch run and the replay, so column defaults use erp_uuid() and
 -- erp_nextval(), which hand back the values recorded in earlier runs (in order) before generating new ones.
@@ -35,7 +36,7 @@ BEGIN
   IF i < jsonb_array_length(q) THEN
     e := q->i;
     -- A recorded value for another sequence means the replay took a different path: let the caller retry.
-    IF e->>0 <> seq::text THEN RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'erp_conflict', DETAIL = 'sequence order changed'; END IF;
+    IF e->>0 <> seq::text THEN RAISE EXCEPTION USING ERRCODE = 'PT409', MESSAGE = 'erp_conflict', DETAIL = 'sequence order changed'; END IF;
     v := (e->>1)::bigint;
   ELSE
     v := nextval(seq);  -- sequences are not rolled back, so a recorded value is never handed out again
@@ -87,7 +88,7 @@ BEGIN
       IF want IS NOT NULL AND jsonb_typeof(want) = 'object' THEN
         h := public.erp_hash(rows);
         IF (want ? 'rc' AND (want->>'rc')::bigint <> rc) OR (want ? 'h' AND want->>'h' <> h) THEN
-          RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'erp_conflict', DETAIL = format('step %s changed since it was read', i);
+          RAISE EXCEPTION USING ERRCODE = 'PT409', MESSAGE = 'erp_conflict', DETAIL = format('step %s changed since it was read', i);
         END IF;
       END IF;
       IF coalesce((st->>'r')::boolean, false) THEN

@@ -26,6 +26,7 @@ export function fromZod(err: ZodError) {
 
 /** Maps Postgres constraint errors to user-facing messages. */
 export function fromPg(err: { code?: string; constraint?: string; detail?: string }): AppError | null {
+  if (err.code === 'PT409' || err.code === '40001') return conflict('Someone else changed this at the same moment. Please try again.');
   if (err.code === '23505') return conflict(`Already exists${err.detail ? `: ${err.detail.replace(/^Key /, '')}` : ''}`);
   if (err.code === '23503') return conflict('This record is referenced by, or refers to, another record');
   if (err.code === '23514') return badRequest(`Value violates rule ${err.constraint ?? ''}`.trim());

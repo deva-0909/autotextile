@@ -100,7 +100,8 @@ export class RpcError extends Error {
   code?: string; detail?: string; hint?: string;
   constructor(message: string, code?: string, detail?: string, hint?: string) { super(message); this.code = code; this.detail = detail; this.hint = hint; }
 }
-const isConflict = (e: unknown) => (e as { code?: string })?.code === '40001';
+// PT409 from erp_run (PostgREST answers it as HTTP 409 and does not retry it); 40001 from Postgres itself.
+const isConflict = (e: unknown) => ['PT409', '40001'].includes((e as { code?: string })?.code ?? '');
 
 // ------------------------------------------------------------------ transports
 /** HTTPS to Supabase: POST /rest/v1/rpc/erp_run with the server-only key. */
