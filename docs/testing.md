@@ -28,8 +28,9 @@ To run the same suite against Supabase (Actions → Tests → Run workflow → d
 
 The tests use the transaction pooler like the hosted app (one login, the schema set per transaction, three connections
 per service), so they share the project's connection limit with whatever else runs there. Each test file builds its own database
-over the network, which takes several minutes from GitHub's runners to Mumbai, so a full run takes about an hour;
-three files run at a time.
+over the network, which takes several minutes from GitHub's runners to Mumbai, so a full run takes about an hour and a half.
+Files run one at a time: each test database gets its own pooler pool, and running several at once uses up the
+connections the live demo needs.
 Afterwards the test databases are left for the next run to replace; drop them with `DROP DATABASE` if you like, and
 `DROP ROLE erp_test` once you no longer need it.
 

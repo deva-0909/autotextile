@@ -79,6 +79,11 @@ jobs:
             echo "Running against the throwaway Postgres in this run"
           fi
       - name: Unit and integration tests
-        # Against Supabase, three test files run at a time (each on its own database) to keep the run within limits.
+        # One file at a time everywhere: on Supabase each test database gets its own pooler pool (about 15 server
+        # connections), and several at once would take the connections the live demo needs.
+        run: npm test
+      - name: Demo data loads cleanly (the same setup the live demo runs on a reload)
+        if: env.USE_SUPABASE != 'true'
         run: |
-          if [ "$USE_SUPABASE" = "true" ]; then node --test --test-concurrency=3 "tests/**/*.test.ts"; else npm test; fi
+          npm run setup -- --reset 2>&1 | tee setup.log
+          if grep -nE '\[seed\].*(skipped|failed|did not validate|error)|Error:' setup.log; then echo "::error::The demo data did not load cleanly (see above)"; exit 1; fi
