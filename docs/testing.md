@@ -31,7 +31,7 @@ per service), so they share the project's connection limit with whatever else ru
 over the network, which takes several minutes from GitHub's runners to Mumbai, so a full run takes about an hour and a half.
 Files run one at a time: each test database gets its own pooler pool, and running several at once uses up the
 connections the live demo needs.
-Afterwards the test databases are left for the next run to replace; drop them with `DROP DATABASE` if you like, and
+The run drops its test databases at the end (and any left by an earlier run); 
 `DROP ROLE erp_test` once you no longer need it.
 
 ## Locally
