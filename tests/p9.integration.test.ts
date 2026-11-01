@@ -254,6 +254,7 @@ describe('P9 HRMS and payroll', () => {
     assert.ok(row.last_net > 0 && row.last_payslip_id, 'latest payslip linked');
     assert.equal((await h.call(t.sales!, 'GET', '/hrms/salary-register')).status, 403);
     // Personnel file: HR files and reads it; others who can see documents do not.
+    assert.ok((await h.ok(t.hr!, 'GET', '/masters/document-types')).some((x: { code: string; applies_to: string[] }) => x.code === 'OFFER_LETTER' && x.applies_to.includes('employee')), 'HR can choose a document type');
     const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
     const q = new URLSearchParams({ title: 'Offer letter', document_type: 'OFFER_LETTER', entity_type: 'employee', entity_id: emp.id });
     const doc = await h.ok(t.hr!, 'POST', `/governance/documents?${q}`, pdf, { 'content-type': 'application/pdf', 'x-file-name': 'offer.pdf' });

@@ -17,7 +17,9 @@ const TABLES: { path: string; table: string; entity: string; order: string; sche
 
 export function referenceRoutes(r: Router, { pool }: ServiceContext) {
   for (const t of TABLES) {
-    r.get(`/${t.path}`, requirePermission('masters.reference.read', 'masters.product.read', 'masters.party.read'), async (_req, res) => {
+    // Anyone who files documents (HR included) needs the list of document types to choose from.
+    const readers = ['masters.reference.read', 'masters.product.read', 'masters.party.read', ...(t.path === 'document-types' ? ['governance.document.upload', 'governance.document.read'] : [])];
+    r.get(`/${t.path}`, requirePermission(...readers), async (_req, res) => {
       res.json(await many(pool, `SELECT * FROM ${t.table} ORDER BY ${t.order}`));
     });
     r.post(`/${t.path}`, requirePermission('masters.reference.manage'), async (req, res) => {

@@ -490,7 +490,10 @@ export async function seedOperations(services: RunningService[]) {
     // Loaded the way the client will load theirs: sales and purchase history CSVs through Go-live → Data migration
     // (posted on their own dates to sales, purchases, GST and party accounts), monthly overheads, and the GSTR-3B
     // payments. Purchases match what was sold at cost, so today's physical stock is unaffected.
-    const goLive = `${daysAgo(60).slice(0, 7)}-01`;
+    // Trading moved to the ERP at the start of the month its own sales begin; HR and payroll moved a month earlier
+    // (the payroll below covers that month), so the previous system's books stop there for salaries.
+    const goLive = `${daysAgo(30).slice(0, 7)}-01`;
+    const erpPayrollMonth = daysAgo(60).slice(0, 7);
     const legacyMonths: string[] = [];
     for (let d = new Date('2026-04-01T00:00:00Z'); d.toISOString().slice(0, 10) < goLive; d.setUTCMonth(d.getUTCMonth() + 1)) legacyMonths.push(d.toISOString().slice(0, 7));
     const SKUS: Record<string, { cost: number; sell: number; supplier: string }> = {
@@ -559,12 +562,14 @@ export async function seedOperations(services: RunningService[]) {
       // Overheads in the previous system, month by month: salaries, rent, power, freight.
       for (const m of legacyMonths) {
         const end = day(m, 28);
-        await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: end, narration: `Salaries for ${m} (previous system)`, reference: `SAL-${m}`,
+        if (m < erpPayrollMonth) await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: end, narration: `Salaries for ${m} (previous system)`, reference: `SAL-${m}`,
           lines: [{ account_id: a('5400'), debit: 905000 }, { account_id: a('5410'), debit: 51500 }, { account_id: a('1200'), credit: 956500 }] });
         await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: day(m, 5), narration: `Godown rent, Surat — ${m} (previous system)`, reference: `RENT-${m}`,
           lines: [{ account_id: a('5500'), debit: 85000 }, { account_id: a('1200'), credit: 85000 }] });
-        await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: day(m, 12), narration: `DGVCL power and freight outward — ${m} (previous system)`, reference: `EXP-${m}`,
-          lines: [{ account_id: a('5510'), debit: 19800 }, { account_id: a('5310'), debit: 64000 }, { account_id: a('1200'), credit: 83800 }] });
+        // The last month's power bill is paid after go-live, in the ERP (below).
+        const power = m === legacyMonths[legacyMonths.length - 1] ? 0 : 19800;
+        await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: day(m, 12), narration: `${power ? 'DGVCL power and freight' : 'Freight'} outward — ${m} (previous system)`, reference: `EXP-${m}`,
+          lines: [...(power ? [{ account_id: a('5510'), debit: power }] : []), { account_id: a('5310'), debit: 64000 }, { account_id: a('1200'), credit: 64000 + power }] });
       }
       // After go-live: customers pay the invoices open at cutover when due (Ludhiana's bounced cheques stay unpaid),
       // and the older open bills are paid.
@@ -584,7 +589,7 @@ export async function seedOperations(services: RunningService[]) {
       }
     } catch (e) { console.error(`[seed] history before go-live skipped: ${(e as Error).message}`); }
     await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(6), narration: 'Godown rent, Surat — October', reference: 'NEFT 2610-778', lines: [{ account_id: a('5500'), debit: 85000 }, { account_id: a('1200'), credit: 85000 }] });
-    await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(4), narration: 'DGVCL power bill — September', lines: [{ account_id: a('5510'), debit: 18450 }, { account_id: a('1200'), credit: 18450 }] });
+    await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(4), narration: `DGVCL power bill — ${new Date(`${legacyMonths[legacyMonths.length - 1] ?? daysAgo(30).slice(0, 7)}-01T00:00:00Z`).toLocaleString('en-IN', { month: 'long', timeZone: 'UTC' })}`, lines: [{ account_id: a('5510'), debit: 18450 }, { account_id: a('1200'), credit: 18450 }] });
     // Pay the oldest supplier bill outstanding.
     const apAge = await call<{ rows: { party_id: string; party_name: string; balance: number }[] }>('finance', accounts, 'GET', '/ageing/payables');
     const payee = apAge.rows.find((r) => r.balance > 0);
