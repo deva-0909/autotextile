@@ -13,6 +13,7 @@ import { runContractChecks } from '../services/workflow/src/contracts.ts';
 import { dispatchMessages } from '../services/workflow/src/messaging.ts';
 import { runScheduled } from '../services/workflow/src/engine.ts';
 import { runCrmChecks } from '../services/crm/src/automation.ts';
+import { seedLeadDesk } from './seed-leads.ts';
 
 export async function seedOperations(services: RunningService[]) {
   const ports: Partial<Record<ServiceName, number>> = {};
@@ -311,7 +312,7 @@ export async function seedOperations(services: RunningService[]) {
     await call('crm', salesWest, 'POST', `/leads/${delhi.id}/activities`, { kind: 'whatsapp', summary: 'Shared interlock RFD photos and GSM report', next_action_at: at(-1), next_action: 'Chase for sample feedback' });
     await call('crm', salesWest, 'POST', `/leads/${lead('Ritika Jain').id}/activities`, { kind: 'email', summary: 'Sent pique swatch card', next_action_at: at(2) });
     await call('crm', salesWest, 'POST', `/leads/${lost.id}/activities`, { kind: 'call', summary: 'Wants price below ₹240 for jersey', next_action_at: at(1) });
-    await call('crm', salesWest, 'POST', `/leads/${lost.id}/stage`, { stage: 'lost', lost_reason: 'Price: buying from a local knitter at ₹236', competitor: 'Local knitter' });
+    await call('crm', salesWest, 'POST', `/leads/${lost.id}/stage`, { stage: 'lost', objection: 'Price', lost_reason: 'Buying from a local knitter at ₹236', competitor: 'Local knitter' });
     await call('crm', salesMgr, 'POST', `/leads/${big.id}/stage`, { stage: 'nurture', nurture_reason: 'Budget approval in January', next_action_at: at(30) });
 
     // Customers, credit and quotations.
@@ -767,6 +768,8 @@ export async function seedOperations(services: RunningService[]) {
     await dispatchMessages(wf);
     await runScheduled(wf);
 
+    await drain();
+    try { await seedLeadDesk({ call: call as never, login, crm: services.find((s) => s.ctx.name === 'crm')!.ctx.pool, party, drain }); } catch (e) { console.error(`[seed] lead management demo skipped: ${(e as Error).message}`); }
     await drain();
     await runProcurementChecks(services.find((s) => s.ctx.name === 'procurement')!.ctx.pool);
     await runJobworkChecks(services.find((s) => s.ctx.name === 'jobwork')!.ctx.pool);

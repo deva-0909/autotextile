@@ -37,6 +37,9 @@ import { TransferDetailPage, TransfersPage } from './pages/inventory/Transfers';
 import { MillIssuesPage, ReservationsPage, StocktakeDetailPage, StocktakesPage } from './pages/inventory/Operations';
 import { LeadDetailPage, LeadsPage } from './pages/crm/Leads';
 import { AllocationPage } from './pages/crm/Allocation';
+import { LeadSettingsPage, LeadToolsPage, MyDayPage } from './pages/crm/LeadDesk';
+import { LeadReportsPage } from './pages/crm/LeadReports';
+import { AgentCommission, AgentDetailPage, AgentHome, AgentPortalLayout, AgentsPage } from './pages/crm/Agents';
 import { PriceApprovalsPage, QuotationBuilderPage, QuotationDetailPage, QuotationsPage } from './pages/crm/Quotations';
 import { CreditDetailPage, CreditPage, Customer360Page, CustomersPage, CrmDashboard, PerformancePage } from './pages/crm/Customers';
 import { MillClaims, MillHome, MillJob, MillJobs, PortalLayout, SupplierHome, SupplierOrder } from './pages/portal/Portal';
@@ -107,6 +110,19 @@ export default function App() {
           <Route path="*" element={<Navigate to="/shop" replace />} />
         </Routes>
       </CustomerPortalLayout>
+    );
+  }
+
+  // Commission agents see only their own buyers and commission.
+  if (user.partyId && user.permissions.includes('portal.agent.access')) {
+    return (
+      <AgentPortalLayout>
+        <Routes>
+          <Route path="/portal" element={<AgentHome />} />
+          <Route path="/portal/commission" element={<AgentCommission />} />
+          <Route path="*" element={<Navigate to="/portal" replace />} />
+        </Routes>
+      </AgentPortalLayout>
     );
   }
 
@@ -190,6 +206,12 @@ export default function App() {
         <Route path="/crm/leads" element={<Guard perms={['crm.read']}><LeadsPage /></Guard>} />
         <Route path="/crm/leads/:id" element={<Guard perms={['crm.read']}><LeadDetailPage /></Guard>} />
         <Route path="/crm/allocation" element={<Guard perms={['crm.read']}><AllocationPage /></Guard>} />
+        <Route path="/crm/my-day" element={<Guard perms={['crm.lead.manage', 'crm.lead.read_all']}><MyDayPage /></Guard>} />
+        <Route path="/crm/lead-tools" element={<Guard perms={['crm.lead.assign']}><LeadToolsPage /></Guard>} />
+        <Route path="/crm/reports" element={<Guard perms={['crm.read']}><LeadReportsPage /></Guard>} />
+        <Route path="/crm/settings" element={<Guard perms={['crm.read']}><LeadSettingsPage /></Guard>} />
+        <Route path="/crm/agents" element={<Guard perms={['crm.read']}><AgentsPage /></Guard>} />
+        <Route path="/crm/agents/:id" element={<Guard perms={['crm.read']}><AgentDetailPage /></Guard>} />
         <Route path="/crm/customers" element={<Guard perms={['crm.read']}><CustomersPage /></Guard>} />
         <Route path="/crm/customers/:id" element={<Guard perms={['crm.read']}><Customer360Page /></Guard>} />
         <Route path="/crm/quotations" element={<Guard perms={['crm.read']}><QuotationsPage /></Guard>} />

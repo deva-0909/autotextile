@@ -34,7 +34,7 @@ test('TOTP matches RFC 6238 test vector and tolerates one step of drift', () => 
 
 test('baseline roles only reference catalog permissions', () => {
   for (const r of BASELINE_ROLES) for (const p of r.permissions) assert.ok(ALL_PERMISSION_CODES.includes(p), `${r.code} → ${p}`);
-  assert.equal(BASELINE_ROLES.length, 22);
+  assert.equal(BASELINE_ROLES.length, 23);
 });
 
 test('fabric attribute validation', () => {

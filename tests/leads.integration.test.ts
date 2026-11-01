@@ -194,7 +194,7 @@ describe('Assignment', () => {
   });
 
   test('response target: breach alert, then one automatic reassignment', async () => {
-    const l = await newLead({ name: 'Slow Lead', state_code: '33' });
+    const l = await newLead({ name: 'Slow Lead', state_code: '33', est_value: 1500000 }); // the large-enquiry rule has two people
     const d0 = await h.ok(t.mgr!, 'GET', `/crm/leads/${l.id}`);
     assert.ok(d0.sla_due_at);
     await sql(`UPDATE leads SET assigned_at = now() - interval '50 minutes', created_at = now() - interval '50 minutes' WHERE id = $1`, [l.id]);

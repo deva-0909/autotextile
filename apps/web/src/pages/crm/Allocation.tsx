@@ -11,8 +11,8 @@ import { Drawer, Modal, useToast } from '../../components/overlay';
 import { Avatar, Badge, Button, Card, Checkbox, EmptyState, Input, Notice, PageHeader, Select, Skeleton, Switch, Tabs, Textarea } from '../../components/ui';
 import { useSources } from './Leads';
 
-interface Member { user_id: string; name: string; email: string | null; cities: string[]; states: string[]; categories: string[]; sources: string[]; languages: string[]; specialisations: string[]; min_value: number | null; max_value: number | null; max_active_leads: number | null; max_discount_pct: number | null; weekly_off: number[]; active: boolean; last_assigned_at: string | null; available: boolean; availability: string; active_leads: number; attendance: { status: string; on_break: boolean; note: string | null } | null }
-interface Rule { id: string; name: string; priority: number; conditions: { cities?: string[]; states?: string[]; sources?: string[]; categories?: string[]; languages?: string[]; min_value?: number | null; max_value?: number | null }; strategy: 'round_robin' | 'least_loaded'; member_ids: string[]; member_names: string[] | null; status: string }
+interface Member { user_id: string; name: string; email: string | null; cities: string[]; states: string[]; categories: string[]; sources: string[]; languages: string[]; specialisations: string[]; min_value: number | null; max_value: number | null; max_active_leads: number | null; max_discount_pct: number | null; weekly_off: number[]; active: boolean; last_assigned_at: string | null; available: boolean; availability: string; active_leads: number; attendance: { status: string; on_break: boolean; note: string | null } | null; shift_start: string | null; shift_end: string | null; shift_name: string | null; performance?: { assigned: number; contact_rate: number; conversion_rate: number; score: number } }
+interface Rule { id: string; name: string; priority: number; conditions: { cities?: string[]; states?: string[]; sources?: string[]; categories?: string[]; languages?: string[]; min_value?: number | null; max_value?: number | null }; strategy: 'round_robin' | 'least_loaded' | 'best_performer'; member_ids: string[]; member_names: string[] | null; status: string }
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const list = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
 const today = () => new Date().toISOString().slice(0, 10);
@@ -57,7 +57,7 @@ function Today() {
             <div key={m.user_id} className={clsx('card p-4', !m.available && 'bg-slate-50')}>
               <div className="flex items-center gap-3">
                 <Avatar name={m.name} />
-                <div className="min-w-0 flex-1"><p className="font-medium text-slate-900">{m.name}</p><p className={clsx('text-[12.5px]', m.available ? 'text-emerald-700' : 'text-slate-500')}>{m.available ? 'Taking leads' : m.availability}</p></div>
+                <div className="min-w-0 flex-1"><p className="font-medium text-slate-900">{m.name}</p><p className={clsx('text-[12.5px]', m.available ? 'text-emerald-700' : 'text-slate-500')}>{m.available ? 'Taking leads' : m.availability}</p><p className="text-[11.5px] text-slate-500">{m.shift_start ? `Hours ${m.shift_start.slice(0, 5)}–${m.shift_end?.slice(0, 5)} (${m.shift_name ?? 'from HR'})` : 'Hours not set in HR'}{m.performance && m.performance.assigned > 0 ? ` · ${m.performance.contact_rate}% contact, ${m.performance.conversion_rate}% won` : ''}</p></div>
                 <Badge tone={m.available ? 'success' : 'neutral'} dot>{m.available ? 'Available' : 'Skipped'}</Badge>
               </div>
               <div className="mt-3 text-[12px] text-slate-600">
@@ -122,7 +122,7 @@ function RuleModal({ rule, onClose, onDone }: { rule: Rule | null; onClose: () =
       <div className="grid grid-cols-2 gap-3">
         <Input className="col-span-2" label="Name" required value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} />
         <Input label="Priority" type="number" hint="Lower runs first" value={v.priority} onChange={(e) => setV({ ...v, priority: e.target.value })} />
-        <Select label="Strategy" value={v.strategy} onChange={(e) => setV({ ...v, strategy: e.target.value as Rule['strategy'] })} options={[{ value: 'round_robin', label: 'Round robin (longest waiting)' }, { value: 'least_loaded', label: 'Least loaded (fewest open leads)' }]} />
+        <Select label="Strategy" value={v.strategy} onChange={(e) => setV({ ...v, strategy: e.target.value as Rule['strategy'] })} options={[{ value: 'round_robin', label: 'Round robin (longest waiting)' }, { value: 'least_loaded', label: 'Least loaded (fewest open leads)' }, { value: 'best_performer', label: 'Best performer (contact and conversion rate)' }]} />
         <Input label="States (GST codes)" placeholder="33, 29" value={v.states} onChange={(e) => setV({ ...v, states: e.target.value })} />
         <Input label="Cities" placeholder="Tiruppur, Erode" value={v.cities} onChange={(e) => setV({ ...v, cities: e.target.value })} />
         <Input label="Sources" placeholder="INDIAMART, META" value={v.sources} onChange={(e) => setV({ ...v, sources: e.target.value })} />

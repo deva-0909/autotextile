@@ -1,5 +1,5 @@
 import {
-  ArrowRightLeft, BadgeIndianRupee, CircleDollarSign, ClipboardPen, Contact, Inbox, Map as MapIcon, PackageCheck, PackageOpen, ScanLine, Shuffle, Tag, Target,
+  ArrowRightLeft, BadgeIndianRupee, Handshake, ChartColumn, SlidersHorizontal, Wrench, CircleDollarSign, ClipboardPen, Contact, Inbox, Map as MapIcon, PackageCheck, PackageOpen, ScanLine, Shuffle, Tag, Target,
   AlarmClock, BookMarked, Boxes, Building2, ClipboardCheck, ClipboardList, Cog, Factory, FileSearch, FileStack, Gauge, History, KeyRound, Layers,
   LayoutDashboard, LineChart, Medal, Package, Receipt, Rocket, ScanText, ShieldAlert, ShieldCheck, ShoppingCart, Truck, UserCog, Users, Warehouse,
   Workflow, Wallet, Radar, FileBarChart, BrainCircuit, Bot, HeartPulse, TriangleAlert, ListTodo, UserCircle, MessagesSquare, FileSignature, ArrowRightLeft as Handover, CalendarCheck, CalendarDays, Briefcase, IndianRupee, Users2, ListChecks, BookOpen, FileSpreadsheet, Landmark, Percent, ScrollText, Scale, LockKeyhole, Siren, HandCoins, ArrowDownToLine, CreditCard, UserPlus, MessageSquareWarning, Undo2, Store, GraduationCap, LifeBuoy, Milestone, PanelsTopLeft, Send, type LucideIcon,
@@ -95,13 +95,18 @@ export const NAV: NavGroup[] = [
     icon: Target,
     items: [
       { to: '/crm', label: 'Sales overview', icon: LineChart, perms: ['crm.read'] },
+      { to: '/crm/my-day', label: 'My day', icon: CalendarCheck, perms: ['crm.lead.manage'] },
       { to: '/crm/leads', label: 'Lead inbox', icon: Inbox, perms: ['crm.read'] },
+      { to: '/crm/lead-tools', label: 'Lead tools', icon: Wrench, perms: ['crm.lead.assign'] },
+      { to: '/crm/reports', label: 'Sales reports', icon: ChartColumn, perms: ['crm.read'] },
       { to: '/crm/customers', label: 'Customers', icon: Contact, perms: ['crm.read'] },
       { to: '/crm/quotations', label: 'Quotations', icon: FileStack, perms: ['crm.read'] },
       { to: '/crm/price-approvals', label: 'Price approvals', icon: BadgeIndianRupee, perms: ['crm.price.approve', 'crm.lead.read_all'] },
       { to: '/crm/credit', label: 'Customer credit', icon: CircleDollarSign, perms: ['crm.read'] },
       { to: '/crm/allocation', label: 'Lead allocation', icon: Shuffle, perms: ['crm.read'] },
       { to: '/crm/performance', label: 'Targets & performance', icon: Target, perms: ['crm.read'] },
+      { to: '/crm/agents', label: 'Agents', icon: Handshake, perms: ['crm.read'] },
+      { to: '/crm/settings', label: 'Lead settings', icon: SlidersHorizontal, perms: ['crm.config.manage'] },
     ],
   },
   {

@@ -115,7 +115,7 @@ function EmployeeModal({ onClose, onDone }: { onClose: () => void; onDone: (id: 
   );
 }
 
-interface EDetail extends ERow { email: string | null; phone: string | null; pan: string | null; uan: string | null; esic_no: string | null; bank_account: string | null; ifsc: string | null; shift_code: string | null; shift_name: string | null; weekly_off: number; pt_state: string; overtime_eligible: boolean; probation_months: number; confirmed_on: string | null; last_working_day: string | null; exit_reason: string | null;
+interface EDetail extends ERow { email: string | null; phone: string | null; pan: string | null; uan: string | null; esic_no: string | null; bank_account: string | null; ifsc: string | null; shift_code: string | null; shift_name: string | null; shift_start: string | null; shift_end: string | null; work_start: string | null; work_end: string | null; weekly_off: number; pt_state: string; overtime_eligible: boolean; probation_months: number; confirmed_on: string | null; last_working_day: string | null; exit_reason: string | null;
   events: { id: number; kind: string; detail: string | null; effective_date: string | null; by_name: string; at: string }[]; checklist: { id: string; stage: string; item: string; done: boolean; done_by_name: string | null }[];
   salary: { effective_from: string; basic: number; hra: number; conveyance: number; special: number; other: number; pf_applicable: boolean }[]; balances: { leave_type: string; name: string; entitled: number; used: number }[];
   leaves: { id: string; number: string; leave_type: string; from_date: string; to_date: string; days: number; status: string; reason: string }[]; attendance: { day: string; status: string; in_time: string | null; out_time: string | null; late_minutes: number; overtime_minutes: number }[]; comp_off: { available: number } }
@@ -153,7 +153,8 @@ export function EmployeeDetailPage() {
       <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ value: 'profile', label: 'Profile' }, { value: 'attendance', label: 'Attendance' }, { value: 'leave', label: 'Leave', count: e.leaves.length }, ...(can('hrms.payroll.manage') ? [{ value: 'salary' as const, label: 'Salary' }] : []), ...(can('hrms.employee.manage') ? [{ value: 'documents' as const, label: 'Documents' }] : []), { value: 'history', label: 'History' }]} />
       {tab === 'profile' ? (
         <div className="grid gap-4 lg:grid-cols-3">
-          <Card className="lg:col-span-2" title="Details"><KeyValue columns={2} items={[{ label: 'Mobile', value: e.phone ?? '—' }, { label: 'Email', value: e.email ?? '—' }, { label: 'Joined', value: fmtDate(e.date_of_joining) }, { label: 'Confirmed', value: e.confirmed_on ? fmtDate(e.confirmed_on) : `Probation ${e.probation_months} months` }, { label: 'Shift', value: e.shift_name ?? '—' }, { label: 'Weekly off', value: DAYS[e.weekly_off] }, { label: 'PAN', value: e.pan ?? '—', mono: true }, { label: 'UAN', value: e.uan ?? '—', mono: true }, { label: 'Salary account', value: e.bank_account ? `••••${e.bank_account.slice(-4)} · ${e.ifsc}` : '—', mono: true }, { label: 'Professional tax state', value: e.pt_state }, { label: 'Paid overtime', value: e.overtime_eligible ? 'Yes (2× hourly rate)' : 'No — comp-off for off-day work' }, { label: 'ERP login', value: e.user_id ? 'Linked' : 'None' }]} /></Card>
+          <Card className="lg:col-span-2" title="Details"><KeyValue columns={2} items={[{ label: 'Mobile', value: e.phone ?? '—' }, { label: 'Email', value: e.email ?? '—' }, { label: 'Joined', value: fmtDate(e.date_of_joining) }, { label: 'Confirmed', value: e.confirmed_on ? fmtDate(e.confirmed_on) : `Probation ${e.probation_months} months` }, { label: 'Shift', value: e.shift_name ?? '—' }, { label: 'Working hours', value: e.work_start ? `${e.work_start.slice(0, 5)}–${e.work_end?.slice(0, 5)} (own hours)` : e.shift_start ? `${e.shift_start.slice(0, 5)}–${e.shift_end?.slice(0, 5)} (shift)` : '—' }, { label: 'Weekly off', value: DAYS[e.weekly_off] }, { label: 'PAN', value: e.pan ?? '—', mono: true }, { label: 'UAN', value: e.uan ?? '—', mono: true }, { label: 'Salary account', value: e.bank_account ? `••••${e.bank_account.slice(-4)} · ${e.ifsc}` : '—', mono: true }, { label: 'Professional tax state', value: e.pt_state }, { label: 'Paid overtime', value: e.overtime_eligible ? 'Yes (2× hourly rate)' : 'No — comp-off for off-day work' }, { label: 'ERP login', value: e.user_id ? 'Linked' : 'None' }]} /></Card>
+          {can('hrms.attendance.manage') && <HoursCard e={e} onDone={() => { refresh(); q.refetch(); }} />}
           <Card title={`${humanize(stage)} checklist`} description={`${list.filter((c) => c.done).length} of ${list.length} done`}>
             <ul className="space-y-2">{list.map((c) => <li key={c.id}><button type="button" disabled={!can('hrms.employee.manage')} className="flex w-full items-start gap-2 text-left text-[13px]" onClick={async () => { await api.post(`/hrms/checklist/${c.id}`, { done: !c.done }); refresh(); }}>{c.done ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" /> : <Circle className="mt-0.5 size-4 shrink-0 text-slate-300" />}<span className={c.done ? 'text-slate-500 line-through' : ''}>{c.item}{c.done_by_name && <span className="ml-1 text-[11.5px] no-underline">· {c.done_by_name}</span>}</span></button></li>)}</ul>
           </Card>
@@ -576,5 +577,23 @@ export function HolidaysPage() {
         <div className="space-y-3">{err && <Notice tone="danger">{err}</Notice>}<Textarea label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} /></div>
       </Modal>
     </>
+  );
+}
+
+/** HR sets the shift and, where needed, the employee's own hours. Sales leads go only to people inside their hours. */
+function HoursCard({ e, onDone }: { e: { id: string; shift_code: string | null; work_start: string | null; work_end: string | null; user_id: string | null }; onDone: () => void }) {
+  const toast = useToast();
+  const [v, setV] = useState({ shift_code: e.shift_code ?? 'GEN', own: !!e.work_start, work_start: e.work_start?.slice(0, 5) ?? '09:30', work_end: e.work_end?.slice(0, 5) ?? '18:30' });
+  return (
+    <Card title="Working hours" description={e.user_id ? 'Also used by Sales: new leads reach this person only inside these hours.' : 'Shift for attendance, lateness and overtime.'}>
+      <div className="space-y-3">
+        <Select label="Shift" value={v.shift_code} onChange={(x) => setV({ ...v, shift_code: x.target.value })} options={[{ value: 'GEN', label: 'General 9:30–18:30' }, { value: 'WH1', label: 'Warehouse 8:00–16:30' }, { value: 'WH2', label: 'Warehouse 14:00–22:30' }]} />
+        <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={v.own} onChange={(x) => setV({ ...v, own: x.target.checked })} />Own hours for this employee</label>
+        {v.own && <div className="grid grid-cols-2 gap-3"><Input label="From" type="time" value={v.work_start} onChange={(x) => setV({ ...v, work_start: x.target.value })} /><Input label="To" type="time" value={v.work_end} onChange={(x) => setV({ ...v, work_end: x.target.value })} /></div>}
+        <Button variant="primary" onClick={async () => {
+          try { await api.put(`/hrms/employees/${e.id}/hours`, { shift_code: v.shift_code, work_start: v.own ? v.work_start : null, work_end: v.own ? v.work_end : null }); toast({ tone: 'success', title: 'Working hours saved' }); onDone(); } catch (err) { toast({ tone: 'error', title: (err as Error).message }); }
+        }}>Save hours</Button>
+      </div>
+    </Card>
   );
 }
