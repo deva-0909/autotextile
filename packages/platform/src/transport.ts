@@ -27,6 +27,9 @@ interface QueryResult { rows: Record<string, unknown>[]; rowCount: number }
 
 /** Calls made to erp_run so far in this process, by mode (for measuring). */
 export const apiCalls = { dry: 0, commit: 0 };
+/** With ERP_API_STATS=1: scratch runs counted by statement shape, to see what costs calls. */
+export const apiStats = new Map<string, number>();
+const shapeOf = (q: string) => stripComments(q).replace(/'(?:[^']|'')*'/g, '?').replace(/\s+/g, ' ').slice(0, 90);
 export const transportMode = () => (process.env.DB_TRANSPORT ?? 'pg') as 'pg' | 'rpc' | 'http';
 
 /** Per-transaction context: whether the transaction called another service (then it is not safe to retry). */
@@ -159,6 +162,7 @@ export class RpcPool {
   async query(sql: string, params?: unknown[]): Promise<QueryResult> {
     const text = interpolate(sql, params);
     const c = classify(text);
+    if (process.env.ERP_API_STATS) { const k = `[single] ${shapeOf(text)}`; apiStats.set(k, (apiStats.get(k) ?? 0) + 1); }
     if (c.kind === 'begin' || c.kind === 'commit' || c.kind === 'rollback') return { rows: [], rowCount: 0 };
     if (c.kind === 'savepoint' || c.kind === 'release' || c.kind === 'rollback_to') throw new RpcError('Savepoints need a transaction');
     const out = await this.run({ mode: 'commit', steps: [{ s: this.schema, q: text, k: c.kind as Kind, r: true } as never] });
@@ -217,6 +221,7 @@ export class RpcClient {
 
   /** Scratch run of the changes so far plus `step` (rolled back), returning the step's result. */
   private async dry(step: Step | null) {
+    if (process.env.ERP_API_STATS && step) apiStats.set(shapeOf(step.q), (apiStats.get(shapeOf(step.q)) ?? 0) + 1);
     const steps = [...this.replaySteps(), ...(step ? [{ s: step.s, q: step.q, k: step.k, r: true }] : [])];
     const out = await this.pool.run({ mode: 'dry', steps: steps as never, uuids: this.uuids, seqs: this.seqs });
     this.uuids = out.uuids ?? this.uuids;

@@ -100,9 +100,10 @@ jobs:
         if: env.USE_SUPABASE != 'true'
         env:
           DB_TRANSPORT: rpc
+          ERP_API_STATS: '1'
         run: |
           start=$(date +%s)
-          npm run setup -- --reset 2>&1 | tee setup-rpc.log | grep -E "Database API calls|✔|✖" || true
+          npm run setup -- --reset 2>&1 | tee setup-rpc.log | grep -E "Database API calls|STAT|✔|✖" || true
           echo "Demo load through the web API took $(( $(date +%s) - start )) s"
           if grep -nE '\[seed\].*(skipped|failed|did not validate|error)|Error:' setup-rpc.log; then echo "::error::The demo data did not load cleanly through the web API"; exit 1; fi
       - name: Drop the test databases on Supabase (also leftovers from earlier runs)
