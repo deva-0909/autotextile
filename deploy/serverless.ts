@@ -119,7 +119,21 @@ async function ensureSetUpHttp() {
     const s = await complete();
     if (s.done) return;
     console.log(`[setup] ${s.started ? 'incomplete setup found: starting again' : 'empty database'}: migrating and loading demo data`);
-    await setupDatabase({ reset: s.started, log: (l) => console.log(`[setup] ${l}`) });
+    // Loading the whole demo makes ~18,000 database calls: over the web API that takes longer than a function may
+    // run. When direct-connection details are configured, the load alone uses a short-lived pool that is closed
+    // straight afterwards; the app's own requests stay on the web API.
+    const direct = !!(process.env.DATABASE_URL || (process.env.SUPABASE_PROJECT_REF && process.env.DB_PASSWORD));
+    const saved = { t: process.env.DB_TRANSPORT, u: process.env.DATABASE_URL };
+    if (direct) {
+      process.env.DATABASE_URL = (await database()).transaction;
+      process.env.DB_TRANSPORT = 'pg';
+      console.log('[setup] using a temporary direct connection for the load');
+    }
+    try {
+      await setupDatabase({ reset: s.started, log: (l) => console.log(`[setup] ${l}`) });
+    } finally {
+      if (direct) { process.env.DB_TRANSPORT = saved.t; if (saved.u === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = saved.u; }
+    }
   } finally {
     await p.query(`DELETE FROM public.erp_locks WHERE name = 'setup' AND holder = $1`, [me]).catch(() => {});
   }
