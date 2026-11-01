@@ -65,9 +65,15 @@ export async function seedCoverage(o: { call: Call; login: (email: string) => Pr
   await step('refund', async () => {
     // Only online (gateway) payments are refunded here; bank and cash ones are refunded through Finance.
     const ps = list(await call<{ id: string; status: string; amount: number; gateway: string }[]>('commerce', await as('accounts@textile.local'), 'GET', '/payments?pageSize=200'));
-    const p = ps.find((x) => x.status === 'success' && x.gateway !== 'offline' && Number(x.amount) > 2000);
-    if (!p) throw new Error('no successful online payment');
-    await call('commerce', await as('accounts@textile.local'), 'POST', `/payments/${p.id}/refund`, { amount: 1500, reason: 'Freight charged twice on the order; refund of the extra freight' });
+    // A refund cannot exceed the customer's money not yet set against invoices: try each online payment in turn.
+    for (const p of ps.filter((x) => x.status === 'success' && x.gateway !== 'offline'))
+      for (const amount of [1500, 500]) {
+        try {
+          await call('commerce', await as('accounts@textile.local'), 'POST', `/payments/${p.id}/refund`, { amount, reason: 'Freight charged twice on the order; refund of the extra freight' });
+          return;
+        } catch (e) { if (!/→ (409|400)/.test((e as Error).message)) throw e; }
+      }
+    console.log('[seed] coverage: no customer has unapplied money to refund; refund demo left out');
   });
 
   await step('reservation extension', async () => {
