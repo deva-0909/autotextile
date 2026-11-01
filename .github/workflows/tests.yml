@@ -38,14 +38,14 @@ jobs:
     env:
       USE_SUPABASE: ${{ github.event_name == 'workflow_dispatch' && inputs.database == 'supabase' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - name: Postgres 17 client (the backup and restore test needs pg_dump to match the server)
-        run: sudo apt-get install -y -qq postgresql-client-17 && echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-17 && echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
       - name: Typecheck
         run: npx tsc --noEmit -p . && npx tsc --noEmit -p apps/web
       - name: Choose the database
