@@ -116,6 +116,11 @@ async function drainAll(services: RunningService[]) {
   if (resetting) return;
   if (draining) return draining;
   draining = (async () => {
+    // Another instance may be loading the demo (it holds the setup lock): consuming its events here, half-way through,
+    // breaks the load. Skip this round; the shared check does not wait.
+    const idp = services.find((s) => s.ctx.name === 'identity')!.ctx.pool;
+    const free = await idp.query(`SELECT pg_try_advisory_xact_lock_shared(hashtext('erp:setup')) AS free`).then((r) => r.rows[0].free as boolean, () => false);
+    if (!free) return;
     // Two rounds: handlers publish events that other services consume.
     for (let round = 0; round < 2; round++)
       for (const s of services) await s.consumer?.drain().catch((e) => console.error(`[drain:${s.ctx.name}]`, (e as Error).message));

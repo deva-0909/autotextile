@@ -284,6 +284,9 @@ export async function seedOperations(services: RunningService[]) {
     // ---------- P5: leads from every channel, allocation, pipeline, quotations, credit, targets ----------
     const team = await call<{ user_id: string; name: string }[]>('crm', salesMgr, 'GET', '/team');
     const member = (n: string) => team.find((m) => m.name === n)!.user_id;
+    // The demo can be reloaded on any day: if today is the team's weekly off (Sunday), nobody would be available and the
+    // new leads would stay unassigned, so the rest of the team is marked present today.
+    for (const m of team) if (m.name !== 'Sourav Ghosh') await call('crm', salesMgr, 'PUT', '/attendance', { user_id: m.user_id, day: daysAgo(0), status: 'present', note: 'Working today' });
     await call('crm', salesMgr, 'PUT', '/attendance', { user_id: member('Sourav Ghosh'), day: daysAgo(0), status: 'leave', note: 'Family function' });
     const sources = await call<{ code: string; webhook_key: string }[]>('crm', salesMgr, 'GET', '/sources');
     const hook = (code: string) => sources.find((x) => x.code === code)!.webhook_key;
