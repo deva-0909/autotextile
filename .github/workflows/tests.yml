@@ -44,6 +44,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Postgres 17 client (the backup and restore test needs pg_dump to match the server)
+        run: sudo apt-get install -y -qq postgresql-client-17 && echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
       - name: Typecheck
         run: npx tsc --noEmit -p . && npx tsc --noEmit -p apps/web
       - name: Choose the database

@@ -186,16 +186,18 @@ describe('P9 HRMS and payroll', () => {
     await h.ok(t.hr!, 'PUT', '/hrms/attendance', { day: `${month}-03`, entries: [{ employee_id: e.id, status: 'absent' }] });
     await h.ok(t.hr!, 'PUT', '/hrms/attendance', { day: sunday, entries: [{ employee_id: e.id, status: 'present', in_time: '10:00', out_time: '15:00' }] });
     assert.equal((await h.ok(t.east!, 'GET', '/hrms/me')).comp_off.available, 1);
-    // Leave: applied by the employee, approved by a checker; CRM sees the person on leave.
-    const lv = await h.ok(t.east!, 'POST', '/hrms/leave', { leave_type: 'CL', from_date: today, to_date: today, reason: 'Doctor visit' });
+    // Leave: applied by the employee, approved by a checker; CRM sees the person on leave. Leave on a weekly off (Sunday)
+    // is refused, so on a Sunday the leave is for Monday.
+    const leaveDay = new Date().getUTCDay() === 0 ? addDays(1) : today;
+    const lv = await h.ok(t.east!, 'POST', '/hrms/leave', { leave_type: 'CL', from_date: leaveDay, to_date: leaveDay, reason: 'Doctor visit' });
     await approve(lv.id);
     const me = await h.ok(t.east!, 'GET', '/hrms/me');
-    assert.equal(me.balances.find((b: { leave_type: string }) => b.leave_type === 'CL').used, new Date().getUTCDay() === 0 ? 0 : 1);
-    if (new Date().getUTCDay() !== 0) {
-      const crmAtt = await h.ok(t.mgr!, 'GET', `/crm/attendance?day=${today}`);
+    assert.equal(me.balances.find((b: { leave_type: string }) => b.leave_type === 'CL').used, 1);
+    {
+      const crmAtt = await h.ok(t.mgr!, 'GET', `/crm/attendance?day=${leaveDay}`);
       assert.equal(crmAtt.find((x: { user_id: string }) => x.user_id === ids['sales.east@textile.local'])?.status, 'leave');
     }
-    assert.equal((await h.call(t.east!, 'POST', '/hrms/leave', { leave_type: 'CL', from_date: today, to_date: today, reason: 'again' })).status, 409, 'overlap refused');
+    assert.equal((await h.call(t.east!, 'POST', '/hrms/leave', { leave_type: 'CL', from_date: leaveDay, to_date: leaveDay, reason: 'again' })).status, 409, 'overlap refused');
     // Payroll for last month: one day's loss of pay, statutory deductions, approval, then accounts.
     const prep = await h.ok(t.hr!, 'POST', `/hrms/payroll/${month}/prepare`);
     assert.equal(prep.employees, 1);

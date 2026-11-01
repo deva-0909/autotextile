@@ -88,8 +88,10 @@ describe('P8 accounting', () => {
     assert.equal(b2b, 2);
     assert.equal(cn, 1);
     assert.equal(itc, 5000);
-    // Output IGST 7,500 − 3,000 credit note = 4,500; CGST/SGST credit of 5,000 can be set off against IGST only in the same month.
-    assert.ok(cash >= 0 && cash <= 4500);
+    // Output IGST 7,500 − 3,000 credit note = 4,500 when the credit note (dated today) falls in the invoices' month; early
+    // in a month the invoices are last month's and their 7,500 stands. CGST/SGST credit sets off IGST only in the same month.
+    const cap = daysAgo(2).slice(0, 7) === today.slice(0, 7) ? 4500 : 7500;
+    assert.ok(cash >= 0 && cash <= cap, `cash payable ${cash} should be between 0 and ${cap}`);
     const json = await h.ok(t.accounts!, 'GET', `/finance/gst/gstr1-json?book=${sur.id}&month=${daysAgo(10).slice(0, 7)}`);
     assert.equal(json.gstin, sur.gstin);
     assert.equal(json.b2b[0].ctin, '33ABCFS1234K1Z5');

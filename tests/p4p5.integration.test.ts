@@ -261,6 +261,8 @@ describe('P4 inventory', () => {
 
 describe('P5 CRM', () => {
   test('allocation follows rules, skips absent people and records why', async () => {
+    // Everyone is in today, whatever the day (attendance overrides the team's Sunday weekly off).
+    for (const n of ['Selvi Raman', 'Arjun Mehta', 'Sourav Ghosh']) await h.ok(t.mgr!, 'PUT', '/crm/attendance', { user_id: ids[n], day: daysAgo(0), status: 'present' });
     const lead = await h.ok(t.mgr!, 'POST', '/crm/leads', { source_code: 'INDIAMART', name: 'Murali K', company: 'Kovai Knits', mobile: '+91 98430 11111', city: 'Coimbatore', state_code: '33', est_value: 200000 });
     let d = await h.ok(t.mgr!, 'GET', `/crm/leads/${lead.id}`);
     assert.equal(d.owner_name, 'Selvi Raman', 'South rule');
