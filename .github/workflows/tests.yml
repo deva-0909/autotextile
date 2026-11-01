@@ -60,8 +60,18 @@ jobs:
         run: |
           if [ "$USE_SUPABASE" = "true" ]; then
             if [ -z "$TEST_DATABASE_URL" ]; then echo "::error::Add the TEST_DATABASE_URL repository secret to run against Supabase"; exit 1; fi
+            # Supabase projects sit on one of two pooler clusters (aws-0-… or aws-1-…); the other answers
+            # "tenant/user not found". Use whichever accepts the login. Credentials are never printed.
+            url=""
+            for cand in "$TEST_DATABASE_URL" "$(echo "$TEST_DATABASE_URL" | sed 's/@aws-1-/@aws-X-/; s/@aws-0-/@aws-1-/; s/@aws-X-/@aws-0-/')"; do
+              echo "::add-mask::$cand"
+              host=$(echo "$cand" | sed -E 's|^[^@]*@([^:/]+).*|\1|')
+              if out=$(psql "${cand/sslmode=no-verify/sslmode=require}" -tAc 'select current_user' 2>&1); then echo "Connected through $host as $out"; url="$cand"; break; fi
+              echo "Could not connect through $host: $(echo "$out" | sed -E 's|//[^@]*@|//***@|g' | head -2)"
+            done
+            if [ -z "$url" ]; then echo "::error::The TEST_DATABASE_URL login was refused (see above)"; exit 1; fi
             # Supabase's transaction pooler: one login, schema set per transaction, few connections per service.
-            { echo "DATABASE_URL=$TEST_DATABASE_URL"; echo "DB_ROLE_PER_SERVICE=1"; echo "PG_POOL_MAX=3"; } >> "$GITHUB_ENV"
+            { echo "DATABASE_URL=$url"; echo "DB_ROLE_PER_SERVICE=1"; echo "PG_POOL_MAX=3"; } >> "$GITHUB_ENV"
             echo "Running against Supabase"
           else
             echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/textile_erp" >> "$GITHUB_ENV"
