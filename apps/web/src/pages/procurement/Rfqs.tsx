@@ -47,6 +47,27 @@ export function RfqsPage() {
   );
 }
 
+interface Rec { supplier_id: string; supplier_name: string; last_rate: number; avg_rate: number; orders: number; last_order: string; recommendation_score: number; why: string }
+/** Who we have bought these fabrics from before, at what rate, and how they performed: a starting point for invitations. */
+function PastSuppliers({ productIds, invite, onInvite }: { productIds: string[]; invite: string[]; onInvite: (id: string) => void }) {
+  const ids = [...new Set(productIds)];
+  const q = useQuery({ queryKey: ['supplier-recs', ids.join(',')], enabled: ids.length > 0, queryFn: async () => (await Promise.all(ids.map((id) => api.get<Rec[]>(`/procurement/suppliers/recommend?productId=${id}`)))).flat() });
+  if (!ids.length || !q.data?.length) return null;
+  const best = new Map<string, Rec>();
+  for (const r of q.data) if (!best.has(r.supplier_id) || best.get(r.supplier_id)!.recommendation_score < r.recommendation_score) best.set(r.supplier_id, r);
+  const rows = [...best.values()].sort((a, b) => b.recommendation_score - a.recommendation_score).slice(0, 6);
+  return (
+    <div>
+      <p className="label">Bought these fabrics before from</p>
+      <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 text-[13px]">{rows.map((r) => (
+        <li key={r.supplier_id} className="flex items-center justify-between gap-3 px-3 py-2">
+          <div className="min-w-0"><p className="font-medium">{r.supplier_name} <span className="font-normal text-slate-500">· last ₹{r.last_rate}/kg on {r.last_order?.slice(0, 10)}</span></p><p className="truncate text-[12px] text-slate-500">{r.why}</p></div>
+          <div className="flex shrink-0 items-center gap-2"><Badge tone={r.recommendation_score >= 75 ? 'success' : r.recommendation_score >= 50 ? 'neutral' : 'warning'}>Score {r.recommendation_score}</Badge>{invite.includes(r.supplier_id) ? <Badge tone="info">Invited</Badge> : <Button size="xs" onClick={() => onInvite(r.supplier_id)}>Invite</Button>}</div>
+        </li>))}</ul>
+    </div>
+  );
+}
+
 function RfqForm({ requisitionId, onClose, onCreated }: { requisitionId: string | null; onClose: () => void; onCreated: (id: string) => void }) {
   const qc = useQueryClient();
   const suppliers = useParties('supplier,manufacturer');
@@ -81,6 +102,7 @@ function RfqForm({ requisitionId, onClose, onCreated }: { requisitionId: string 
         </div>
         <DeliverTo type={dest.type} id={dest.id} onChange={(type, id) => setDest({ type, id })} />
         <LineEditor lines={lines} onChange={setLines} />
+        <PastSuppliers productIds={lines.map((l) => l.product_id).filter(Boolean)} invite={invite} onInvite={(id) => setInvite((x) => (x.includes(id) ? x : [...x, id]))} />
         <div>
           <p className="label">Invite suppliers</p>
           <div className="grid max-h-56 grid-cols-1 gap-1.5 overflow-y-auto rounded-lg border border-slate-200 p-3 sm:grid-cols-2">

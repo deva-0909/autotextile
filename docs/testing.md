@@ -23,10 +23,13 @@ To run the same suite against Supabase (Actions → Tests → Run workflow → d
 2. In the GitHub repository: Settings → Secrets and variables → Actions → New repository secret
    `TEST_DATABASE_URL` =
    `postgres://erp_test.<project-ref>:<password>@<pooler-host>:6543/postgres?sslmode=no-verify`
-   (the pooler host is shown under Connect → Transaction pooler in the Supabase dashboard).
+   (the pooler host is shown under Connect → Transaction pooler in the Supabase dashboard; for this project it is
+   `aws-0-ap-south-1.pooler.supabase.com`. If the other cluster is given, the workflow finds the right one itself).
 
 The tests use the transaction pooler like the hosted app (one login, the schema set per transaction, three connections
-per service), so they share the project's connection limit with whatever else runs there for a few minutes.
+per service), so they share the project's connection limit with whatever else runs there. Each test file builds its own database
+over the network, which takes several minutes from GitHub's runners to Mumbai, so a full run takes about an hour;
+three files run at a time.
 Afterwards the test databases are left for the next run to replace; drop them with `DROP DATABASE` if you like, and
 `DROP ROLE erp_test` once you no longer need it.
 

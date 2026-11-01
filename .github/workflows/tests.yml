@@ -25,7 +25,8 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Against Supabase each test file sets up its own database over the network (several minutes each), so allow longer.
+    timeout-minutes: ${{ inputs.database == 'supabase' && 180 || 40 }}
     services:
       postgres:
         image: postgres:17
@@ -78,4 +79,6 @@ jobs:
             echo "Running against the throwaway Postgres in this run"
           fi
       - name: Unit and integration tests
-        run: npm test
+        # Against Supabase, three test files run at a time (each on its own database) to keep the run within limits.
+        run: |
+          if [ "$USE_SUPABASE" = "true" ]; then node --test --test-concurrency=3 "tests/**/*.test.ts"; else npm test; fi

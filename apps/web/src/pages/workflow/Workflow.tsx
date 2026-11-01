@@ -8,7 +8,7 @@ import { api, invalidatePrefix, type Page } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtDate, fmtDateTime, fmtINR, fmtRelative, humanize } from '../../lib/format';
 import { SimpleTable } from '../../components/DataTable';
-import { Drawer, Modal, useToast } from '../../components/overlay';
+import { ConfirmDialog, Drawer, Modal, useToast } from '../../components/overlay';
 import { useParties } from '../../components/business';
 import { Badge, Button, Card, Checkbox, EmptyState, ErrorState, Input, KeyValue, Notice, PageHeader, Segmented, Select, Skeleton, Stat, StatusBadge, Tabs, Textarea } from '../../components/ui';
 
@@ -478,6 +478,8 @@ export function ContractDetailPage() {
   const q = useQuery({ queryKey: ['wf-contract', id], queryFn: () => api.get<Omit<KDetail, 'notes'> & { notes: { id: string; kind: string; body: string; by_name: string; at: string }[]; documents: { id: string; title: string }[] }>(`/workflow/contracts/${id}`) });
   const [edit, setEdit] = useState(false);
   const [renew, setRenew] = useState(false);
+  const [terminate, setTerminate] = useState(false);
+  const toast = useToast();
   const [note, setNote] = useState({ kind: 'note', body: '' });
   const [rv, setRv] = useState({ start_date: '', end_date: '' });
   const k = q.data;
@@ -486,7 +488,7 @@ export function ContractDetailPage() {
   return (
     <>
       <PageHeader title={k.title} meta={<StatusBadge status={k.status} />} description={`${k.number} · ${humanize(k.kind)} · ${k.party_name}`} breadcrumbs={[{ label: 'Workflow' }, { label: 'Contracts', to: '/contracts' }, { label: k.number }]}
-        actions={can('workflow.contract.manage') && ['active', 'expired'].includes(k.status) && <div className="flex gap-2"><Button onClick={() => setEdit(true)}>Amend</Button><Button variant="primary" onClick={() => { const d = new Date(`${k.end_date}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); const e = new Date(d); e.setUTCFullYear(e.getUTCFullYear() + 1); e.setUTCDate(e.getUTCDate() - 1); setRv({ start_date: d.toISOString().slice(0, 10), end_date: e.toISOString().slice(0, 10) }); setRenew(true); }}>Renew</Button></div>} />
+        actions={can('workflow.contract.manage') && ['active', 'expired'].includes(k.status) && <div className="flex gap-2"><Button variant="danger" onClick={() => setTerminate(true)}>Terminate</Button><Button onClick={() => setEdit(true)}>Amend</Button><Button variant="primary" onClick={() => { const d = new Date(`${k.end_date}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); const e = new Date(d); e.setUTCFullYear(e.getUTCFullYear() + 1); e.setUTCDate(e.getUTCDate() - 1); setRv({ start_date: d.toISOString().slice(0, 10), end_date: e.toISOString().slice(0, 10) }); setRenew(true); }}>Renew</Button></div>} />
       {k.status === 'active' && k.days_left <= 30 && <div className="mb-4"><Notice tone={k.days_left <= 7 ? 'danger' : 'warning'} title={`Expires in ${k.days_left} days`}>Renew it, renegotiate, or let it lapse deliberately.</Notice></div>}
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
@@ -504,6 +506,8 @@ export function ContractDetailPage() {
         </Card>
       </div>
       {edit && <ContractModal init={k as unknown as KDetail} onClose={() => setEdit(false)} onDone={() => invalidatePrefix(qc, 'wf-')} />}
+      <ConfirmDialog open={terminate} onClose={() => setTerminate(false)} title={`Terminate ${k.number}?`} description="The contract ends now and its rates stop applying. The reason is kept in its notes; renewal reminders stop." requireReason tone="danger" confirmLabel="Terminate"
+        onConfirm={async (reason) => { try { await api.post(`/workflow/contracts/${k.id}/terminate`, { reason }); setTerminate(false); invalidatePrefix(qc, 'wf-'); toast({ tone: 'success', title: 'Contract terminated' }); } catch (e) { toast({ tone: 'error', title: 'Not terminated', body: (e as Error).message }); } }} />
       <Modal open={renew} onClose={() => setRenew(false)} title={`Renew ${k.number}`} description="A new contract with the same terms and rates is created for the next period; amend it afterwards if rates change." footer={<><Button onClick={() => setRenew(false)}>Cancel</Button><Button variant="primary" onClick={async () => { const n = await api.post<{ id: string }>(`/workflow/contracts/${k.id}/renew`, rv); setRenew(false); invalidatePrefix(qc, 'wf-'); nav(`/contracts/${n.id}`); }}>Renew</Button></>}>
         <div className="grid grid-cols-2 gap-3"><Input label="From" type="date" value={rv.start_date} onChange={(e) => setRv({ ...rv, start_date: e.target.value })} /><Input label="To" type="date" value={rv.end_date} onChange={(e) => setRv({ ...rv, end_date: e.target.value })} /></div>
       </Modal>

@@ -91,7 +91,8 @@ export function BankPage() {
                         <p className="text-slate-500">{sg.bills.length ? sg.bills.map((x) => `${x.doc_no}${x.apply < x.outstanding ? ` (part ${fmtAmt(x.apply)})` : ''}`).join(', ') : 'No open invoice'}{sg.on_account > 0 ? ` · ${fmtAmt(sg.on_account)} on account` : ''}</p>
                         {can('finance.bank.reconcile') && <Button size="sm" className="mt-1" onClick={() => void recordReceipt(l)}>Record receipt</Button>}
                       </div>); })()}</div>) },
-                { key: 'a', header: '', render: (l) => status === 'unmatched' && can('finance.bank.reconcile') ? <div className="flex gap-1"><Button size="sm" onClick={() => setCreate(l)}>Create entry</Button><Button size="sm" variant="ghost" onClick={() => setIgnore(l)}>Set aside</Button></div> : null },
+                { key: 'a', header: '', render: (l) => status === 'unmatched' && can('finance.bank.reconcile') ? <div className="flex gap-1"><Button size="sm" onClick={() => setCreate(l)}>Create entry</Button><Button size="sm" variant="ghost" onClick={() => setIgnore(l)}>Set aside</Button></div>
+                  : status === 'matched' && can('finance.bank.reconcile') ? <Button size="sm" variant="ghost" onClick={async () => { try { await api.post(`/finance/bank-lines/${l.id}/unmatch`); refresh(); toast({ tone: 'success', title: 'Unmatched', body: 'The line is back in To reconcile.' }); } catch (e) { toast({ tone: 'error', title: 'Not unmatched', body: errMsg(e) }); } }}>Unmatch</Button> : null },
               ]} />
             )}
           </Card>
@@ -201,7 +202,7 @@ export function GstPage() {
   const { can } = useAuth();
   const [book, setBook] = useState('');
   const [month, setMonth] = useState(thisMonth());
-  const [tab, setTab] = useState<'3b' | 'gstr1' | '2b' | 'einv' | 'inward'>('3b');
+  const [tab, setTab] = useState<'3b' | 'gstr1' | '2b' | 'einv' | 'inward' | 'register'>('3b');
   const bookId = book || books.data?.find((b) => b.is_primary)?.id || '';
   const q = useQuery({ queryKey: ['fin-gst', bookId, month], queryFn: () => api.get<GstRet>(`/finance/gst/returns?book=${bookId}&month=${month}`), enabled: !!bookId });
   const g = q.data;
@@ -209,8 +210,8 @@ export function GstPage() {
     <>
       <PageHeader title="GST compliance" description="Returns are prepared from the GST register that every posted invoice, credit note and inter-GSTIN transfer writes. Filing is done on the GST portal or through a GSP with the exported files." breadcrumbs={[{ label: 'Finance', to: '/finance' }, { label: 'GST' }]}
         actions={<div className="flex gap-2"><BookPicker value={bookId} onChange={setBook} allowAll={false} /><Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></div>} />
-      <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ value: '3b', label: 'GSTR-3B' }, { value: 'gstr1', label: 'GSTR-1', count: g ? g.gstr1.b2b.length + g.gstr1.cdnr.length : undefined }, { value: 'inward', label: 'Purchases (ITC)', count: g?.inward.length }, { value: '2b', label: 'GSTR-2B match' }, { value: 'einv', label: 'E-invoice' }]} />
-      {!g ? <Skeleton className="h-80" /> : tab === '3b' ? (
+      <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ value: '3b', label: 'GSTR-3B' }, { value: 'gstr1', label: 'GSTR-1', count: g ? g.gstr1.b2b.length + g.gstr1.cdnr.length : undefined }, { value: 'inward', label: 'Purchases (ITC)', count: g?.inward.length }, { value: '2b', label: 'GSTR-2B match' }, { value: 'einv', label: 'E-invoice' }, { value: 'register', label: 'Sales & purchase register' }]} />
+      {tab === 'register' ? <RegisterTab month={month} /> : !g ? <Skeleton className="h-80" /> : tab === '3b' ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <Card title="3.1 Outward supplies and reverse charge">
             <TaxGrid rows={[['(a) Outward taxable supplies (net of credit notes)', g.gstr3b.outward_3_1_a], ['(d) Inward supplies liable to reverse charge', g.gstr3b.reverse_charge_3_1_d]]} />
@@ -499,6 +500,47 @@ function EInvoicePanel({ bookId, month }: { bookId: string; month: string }) {
 // ---------------------------------------------------------------- TDS
 interface TdsSec { code: string; description: string; rate_company: number; rate_individual: number; rate_no_pan: number; threshold_single: number; threshold_annual: number; on_excess: boolean; effective_from: string }
 interface TdsReg { fy: string; entries: { id: string; party_name: string; pan: string | null; section: string; base_amount: number; rate: number; tds_amount: number; deducted_on: string; voucher_no: string; challan_no: string | null }[]; challans: { id: string; section: string; month: string; amount: number; bsr_code: string; challan_no: string; paid_on: string }[]; summary: { month: string; section: string; deducted: number; deposited: number; pending: number; due_date: string; overdue: boolean; entries: number }[]; quarters: { quarter: string; form: string; deductees: number; entries: number; tds: number; deposited: number }[] }
+interface RegLine { doc_type: string; doc_no: string; doc_date: string; party_name: string; party_gstin: string | null; place_of_supply: string | null; hsn: string | null; sku: string | null; kg: number | null; gst_rate: number; taxable: number; tax: number; book: string; gstin: string }
+/** Sales and purchase registers line by line, as the GST returns read them: for the month, or the financial year to date. */
+function RegisterTab({ month }: { month: string }) {
+  const [dir, setDir] = useState<'sales' | 'purchases'>('sales');
+  const [span, setSpan] = useState<'month' | 'fy'>('month');
+  const y = Number(month.slice(0, 4)), m = Number(month.slice(5, 7));
+  const fyStart = `${m >= 4 ? y : y - 1}-04-01`;
+  const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  const from = span === 'fy' ? fyStart : `${month}-01`;
+  const q = useQuery({ queryKey: ['fin-register', dir, from, end], queryFn: () => api.get<RegLine[]>(`/finance/registers/${dir}?from=${from}&to=${end}`) });
+  const rows = q.data ?? [];
+  const docs = new Set(rows.map((r) => `${r.book}|${r.doc_no}`)).size;
+  const sum = (k: 'taxable' | 'tax') => rows.reduce((t, r) => t + r[k], 0);
+  return (
+    <>
+      <div className="mb-4 flex flex-wrap gap-3">
+        <Segmented value={dir} onChange={(v) => setDir(v as 'sales')} options={[{ value: 'sales', label: 'Sales register' }, { value: 'purchases', label: 'Purchase register' }]} />
+        <Segmented value={span} onChange={(v) => setSpan(v as 'month')} options={[{ value: 'month', label: 'This month' }, { value: 'fy', label: 'Financial year to date' }]} />
+      </div>
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat label="Documents" value={docs} sub={`${fmtDate(from)} – ${fmtDate(end)}`} />
+        <Stat label="Taxable value" value={fmtINR(sum('taxable'))} sub="credit notes deducted" />
+        <Stat label="GST" value={fmtINR(sum('tax'))} />
+        <Stat label="Invoice value" value={fmtINR(sum('taxable') + sum('tax'))} />
+      </div>
+      <Card padded={false} description="Every GSTIN together; filter by GSTIN in the downloaded file. Each line is one HSN and rate on a document.">
+        {!q.data ? <Skeleton className="m-5 h-40" /> : <SimpleTable rows={rows} rowKey={(r) => `${r.book}${r.doc_no}${r.hsn}${r.sku}${r.gst_rate}${r.taxable}`} pageSize={50} csvName={`${dir}-register-${from}-to-${end}`} empty={<EmptyState title="Nothing posted in this period" />} columns={[
+          { key: 'd', header: 'Date', render: (r) => fmtDate(r.doc_date) },
+          { key: 'n', header: 'Document', render: (r) => <div><p className="font-mono text-[12.5px]">{r.doc_no}</p><p className="text-[11.5px] text-slate-500">{humanize(r.doc_type)} · {r.book}</p></div> },
+          { key: 'p', header: dir === 'sales' ? 'Customer' : 'Supplier', render: (r) => <div><p>{r.party_name}</p><p className="font-mono text-[11.5px] text-slate-500">{r.party_gstin ?? 'Unregistered'}</p></div> },
+          { key: 'h', header: 'HSN · fabric', render: (r) => <span className="text-[12.5px]">{r.hsn ?? '—'}{r.sku ? ` · ${r.sku}` : ''}</span> },
+          { key: 'k', header: 'KG', align: 'right', render: (r) => (r.kg ? fmtNum(r.kg) : '—') },
+          { key: 'r', header: 'Rate', align: 'right', render: (r) => `${r.gst_rate}%` },
+          { key: 't', header: 'Taxable', align: 'right', render: (r) => fmtAmt(r.taxable) },
+          { key: 'g', header: 'GST', align: 'right', render: (r) => fmtAmt(r.tax) },
+        ]} />}
+      </Card>
+    </>
+  );
+}
+
 export function TdsPage() {
   const { can } = useAuth();
   const qc = useQueryClient();
@@ -697,8 +739,12 @@ export function ClosePage() {
   const v = useQuery({ queryKey: ['fin-val'], queryFn: () => api.get<Val>('/finance/inventory-valuation') });
   const [lock, setLock] = useState<Period | null>(null);
   const [reopen, setReopen] = useState<Period | null>(null);
+  const [yearEnd, setYearEnd] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const cur = new Date().toISOString().slice(0, 7);
+  // Financial years (April to March) in the period list, with how many of their months are locked.
+  const fyOfMonth = (mm: string) => { const y = Number(mm.slice(0, 4)), n = Number(mm.slice(5, 7)), s0 = n >= 4 ? y : y - 1; return `${String(s0).slice(2)}${String(s0 + 1).slice(2)}`; };
+  const years = Object.entries((p.data ?? []).reduce<Record<string, { months: number; locked: number }>>((acc, m) => { const k = fyOfMonth(m.month); acc[k] ??= { months: 0, locked: 0 }; acc[k].months++; if (m.status === 'locked') acc[k].locked++; return acc; }, {})).sort(([a], [b]) => b.localeCompare(a));
   return (
     <>
       <PageHeader title="Period close" description="Lock each month once it is reviewed: nothing can be posted into a locked month, and automatic postings that arrive late move to the next open month. Locking the latest month also values closing stock and posts it." breadcrumbs={[{ label: 'Finance', to: '/finance' }, { label: 'Period close' }]} />
@@ -716,6 +762,9 @@ export function ClosePage() {
             </ul>
           )}
         </Card>
+        {years.length > 0 && <Card className="lg:col-span-5" title="Year-end close" description="Once all twelve months of a financial year are locked, close the year: each GSTIN's income and expenses move to retained earnings in a closing entry on 31 March.">
+          <ul className="flex flex-wrap gap-3">{years.map(([fy, y]) => <li key={fy} className="flex items-center gap-3 rounded-lg px-3 py-2 ring-1 ring-slate-200 text-[13px]"><span className="font-medium">FY 20{fy.slice(0, 2)}–{fy.slice(2)}</span><span className="text-slate-500">{y.locked} of 12 months locked</span>{can('finance.period.manage') && <Button size="sm" disabled={y.locked < 12} onClick={() => setYearEnd(fy)}>Close year</Button>}</li>)}</ul>
+        </Card>}
         <Card className="lg:col-span-3" title="Inventory valuation" description={v.data ? `${humanize(v.data.method)} at landed lot cost (purchase, processing and freight as captured on each lot). Includes stock at mills and in transit, which the company still owns.` : undefined}>
           {!v.data ? <Skeleton className="h-60" /> : (
             <>
@@ -734,6 +783,8 @@ export function ClosePage() {
       </div>
       <ConfirmDialog open={!!lock} onClose={() => setLock(null)} title={`Lock ${lock?.month.slice(0, 7)}?`} description={lock && lock.month.slice(0, 7) >= new Date(Date.now() - 31 * 86_400_000).toISOString().slice(0, 7) ? 'Closing stock will be valued as it stands now and posted on the last day of the month.' : 'Earlier months are locked without a stock valuation (stock can only be valued as it stands today).'} confirmLabel="Lock month" loading={busy}
         onConfirm={async (note) => { setBusy(true); try { await api.post(`/finance/periods/${lock!.month}/lock`, { note: note || null }); setLock(null); invalidatePrefix(qc, 'fin-'); } catch (e) { toast({ tone: 'error', title: 'Could not lock', body: errMsg(e) }); } finally { setBusy(false); } }} />
+      <ConfirmDialog open={!!yearEnd} onClose={() => setYearEnd(null)} title={`Close FY 20${yearEnd?.slice(0, 2)}–${yearEnd?.slice(2)}?`} description="Posts the closing entry for each GSTIN: the year's profit or loss moves to retained earnings. Do this after the accounts are final." confirmLabel="Close the year" loading={busy}
+        onConfirm={async () => { setBusy(true); try { const out = await api.post<{ book: string; voucher: string; profit: number }[]>(`/finance/year-end/${yearEnd}`); toast({ tone: 'success', title: 'Year closed', body: out.map((x) => `${x.book}: ${fmtINR(x.profit)} to retained earnings (${x.voucher})`).join(' · ') || 'No income or expense balances to close.' }); setYearEnd(null); invalidatePrefix(qc, 'fin-'); } catch (e) { toast({ tone: 'error', title: 'Not closed', body: errMsg(e) }); } finally { setBusy(false); } }} />
       <ConfirmDialog open={!!reopen} onClose={() => setReopen(null)} title={`Reopen ${reopen?.month.slice(0, 7)}?`} description="A second person must approve. Reopening a month after returns are filed may need a revised return." requireReason tone="danger" confirmLabel="Request reopening" loading={busy}
         onConfirm={async (reason) => { setBusy(true); try { await api.post(`/finance/periods/${reopen!.month}/reopen`, { reason }); toast({ tone: 'success', title: 'Sent for approval' }); setReopen(null); } catch (e) { toast({ tone: 'error', title: 'Failed', body: errMsg(e) }); } finally { setBusy(false); } }} />
     </>

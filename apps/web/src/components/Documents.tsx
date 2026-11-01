@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import { api, type Page } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { fmtBytes, fmtDate, fmtDateTime, fmtRelative } from '../lib/format';
-import { Drawer, Modal, useToast } from './overlay';
+import { ConfirmDialog, Drawer, Modal, useToast } from './overlay';
 import { Badge, Button, EmptyState, Input, Notice, Select, Spinner } from './ui';
 
 export interface Doc { id: string; title: string; document_type: string; entity_type: string; entity_id: string; current_version: number; file_name: string; mime_type: string; size_bytes: number; uploaded_by_name: string; uploaded_at: string; expires_on: string | null; status: string }
@@ -106,11 +106,16 @@ export function UploadDialog({ entityType, entityId, onClose, docId }: { entityT
 export function VersionsDrawer({ docId, onClose }: { docId: string; onClose: () => void }) {
   const q = useQuery({ queryKey: ['document', docId], queryFn: () => api.get<Doc & { versions: Version[] }>(`/governance/documents/${docId}`) });
   const { can } = useAuth();
+  const qc = useQueryClient();
+  const toast = useToast();
   const [upload, setUpload] = useState(false);
+  const [archive, setArchive] = useState(false);
   const [preview, setPreview] = useState<Version | null>(null);
+  // Archiving needs the archive right; HR archives the personnel files it keeps.
+  const mayArchive = q.data?.status === 'active' && (can('governance.document.delete') || (q.data.entity_type === 'employee' && can('hrms.employee.manage')));
   return (
-    <Drawer open onClose={onClose} title={q.data?.title ?? 'Document'} description="Version history — every version is kept"
-      footer={can('governance.document.upload') && q.data?.status === 'active' && <Button variant="primary" icon={<Upload className="size-4" />} onClick={() => setUpload(true)}>Upload new version</Button>}>
+    <Drawer open onClose={onClose} title={q.data?.title ?? 'Document'} description={q.data?.status === 'archived' ? 'Archived — kept for the record, no longer listed as current' : 'Version history — every version is kept'}
+      footer={(mayArchive || (can('governance.document.upload') && q.data?.status === 'active')) && <div className="flex gap-2">{mayArchive && <Button variant="danger" onClick={() => setArchive(true)}>Archive</Button>}{can('governance.document.upload') && q.data?.status === 'active' && <Button variant="primary" icon={<Upload className="size-4" />} onClick={() => setUpload(true)}>Upload new version</Button>}</div>}>
       <ol className="space-y-3">
         {q.data?.versions.map((v) => (
           <li key={v.id} className="rounded-lg border border-slate-200 p-3.5">
@@ -129,6 +134,8 @@ export function VersionsDrawer({ docId, onClose }: { docId: string; onClose: () 
         ))}
       </ol>
       {upload && q.data && <UploadDialog entityType={q.data.entity_type} entityId={q.data.entity_id} docId={docId} onClose={() => setUpload(false)} />}
+      <ConfirmDialog open={archive} onClose={() => setArchive(false)} title={`Archive ${q.data?.title ?? 'this document'}?`} description="It leaves the current list but is kept with all its versions; find it under Archived on the Documents page." requireReason tone="danger" confirmLabel="Archive"
+        onConfirm={async (reason) => { try { await api.post(`/governance/documents/${docId}/archive`, { reason }); setArchive(false); void qc.invalidateQueries({ queryKey: ['documents'] }); void qc.invalidateQueries({ queryKey: ['document', docId] }); toast({ tone: 'success', title: 'Document archived' }); onClose(); } catch (e) { toast({ tone: 'error', title: 'Not archived', body: (e as Error).message }); } }} />
       {preview && q.data && <Preview doc={{ id: docId, title: `${q.data.title} · v${preview.version}`, mime_type: preview.mime_type }} version={preview.version} onClose={() => setPreview(null)} />}
     </Drawer>
   );

@@ -130,6 +130,7 @@ export function EmployeeDetailPage() {
   const [life, setLife] = useState<string | null>(null);
   const [lv, setLv] = useState({ effective_date: new Date().toISOString().slice(0, 10), last_working_day: '', location: '', designation: '', reason: '' });
   const [sal, setSal] = useState(false);
+  const [cancelLeave, setCancelLeave] = useState<string | null>(null);
   const e = q.data;
   const refresh = () => invalidatePrefix(qc, 'hr-');
   if (q.isError) return <ErrorState error={q.error} />;
@@ -159,7 +160,7 @@ export function EmployeeDetailPage() {
         </div>
       ) : tab === 'attendance' ? <AttendanceGrid rows={e.attendance} /> : tab === 'leave' ? (
         <Card padded={false}>
-          <SimpleTable rows={e.leaves} rowKey={(l) => l.id} empty={<EmptyState title="No leave yet" />} columns={[{ key: 'n', header: 'Request', render: (l) => <span className="font-mono text-[12.5px]">{l.number}</span> }, { key: 't', header: 'Type', render: (l) => l.leave_type }, { key: 'd', header: 'Dates', render: (l) => `${fmtDate(l.from_date)} – ${fmtDate(l.to_date)}` }, { key: 'x', header: 'Days', align: 'right', render: (l) => l.days }, { key: 'r', header: 'Reason', render: (l) => l.reason }, { key: 's', header: 'Status', render: (l) => <StatusBadge status={l.status} /> }]} />
+          <SimpleTable rows={e.leaves} rowKey={(l) => l.id} empty={<EmptyState title="No leave yet" />} columns={[{ key: 'n', header: 'Request', render: (l) => <span className="font-mono text-[12.5px]">{l.number}</span> }, { key: 't', header: 'Type', render: (l) => l.leave_type }, { key: 'd', header: 'Dates', render: (l) => `${fmtDate(l.from_date)} – ${fmtDate(l.to_date)}` }, { key: 'x', header: 'Days', align: 'right', render: (l) => l.days }, { key: 'r', header: 'Reason', render: (l) => l.reason }, { key: 's', header: 'Status', render: (l) => <StatusBadge status={l.status} /> }, { key: 'c', header: '', render: (l) => can('hrms.attendance.manage') && cancellable(l) && <Button size="xs" variant="ghost" onClick={() => setCancelLeave(l.id)}>Cancel</Button> }]} />
         </Card>
       ) : tab === 'salary' ? (
         <Card padded={false} actions={<Button size="sm" icon={<IndianRupee className="size-3.5" />} onClick={() => setSal(true)}>Revise salary</Button>} title="Salary structure (monthly)">
@@ -188,6 +189,7 @@ export function EmployeeDetailPage() {
         </div>
       </Modal>
       {sal && <SalaryModal employeeId={e.id} onClose={() => setSal(false)} onDone={refresh} />}
+      <CancelLeaveDialog id={cancelLeave} onClose={() => setCancelLeave(null)} />
     </>
   );
 }
@@ -415,6 +417,15 @@ export function PayslipPage() {
   );
 }
 
+/** Waiting leave can always be withdrawn; approved leave only before it starts (after that, attendance is corrected instead). */
+const cancellable = (l: { status: string; from_date: string }) => l.status === 'pending' || (l.status === 'approved' && l.from_date > new Date().toISOString().slice(0, 10));
+function CancelLeaveDialog({ id, onClose }: { id: string | null; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return <ConfirmDialog open={!!id} onClose={onClose} title="Cancel this leave?" description="Approved days are released back to the balance (or comp-off) and the attendance marks are removed." requireReason confirmLabel="Cancel leave" tone="danger"
+    onConfirm={async (reason) => { try { await api.post(`/hrms/leave/${id}/cancel`, { reason }); onClose(); invalidatePrefix(qc, 'hr-'); toast({ tone: 'success', title: 'Leave cancelled' }); } catch (e) { toast({ tone: 'error', title: 'Not cancelled', body: errMsg(e) }); } }} />;
+}
+
 // ---------------------------------------------------------------- self-service
 interface Me { employee: { id: string; name: string; code: string; designation: string; department: string; location: string; pt_state: string } | null; attendance: { day: string; status: string; in_time: string | null; out_time: string | null; late_minutes: number; overtime_minutes: number }[]; balances: { leave_type: string; name: string; entitled: number; used: number }[]; leaves: { id: string; number: string; leave_type: string; from_date: string; to_date: string; days: number; status: string; reason: string }[]; payslips: { id: string; month: string; gross: number; net: number }[]; comp_off: { available: number }; leave_types: { code: string; name: string }[] }
 export function MyHrPage() {
@@ -424,6 +435,7 @@ export function MyHrPage() {
   const year = new Date().getFullYear();
   const hols = useQuery({ queryKey: ['hr-holidays-me', year], queryFn: async () => [...(await api.get<HolidayYear>(`/hrms/holidays?year=${year}`)).holidays, ...(await api.get<HolidayYear>(`/hrms/holidays?year=${year + 1}`)).holidays] });
   const [apply, setApply] = useState(false);
+  const [cancelLeave, setCancelLeave] = useState<string | null>(null);
   const [lv, setLv] = useState({ leave_type: 'CL', from_date: '', to_date: '', half_day: false, reason: '' });
   const [err, setErr] = useState<string | null>(null);
   const d = q.data;
@@ -445,11 +457,12 @@ export function MyHrPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2"><AttendanceGrid rows={d.attendance} /></div>
         <div className="space-y-4">
-          <Card title="My leave" padded={false}>{d.leaves.length ? <ul className="divide-y divide-slate-100 text-[13px]">{d.leaves.map((l) => <li key={l.id} className="flex items-center justify-between px-4 py-2.5"><div><p>{l.leave_type} · {fmtDate(l.from_date)}{l.to_date !== l.from_date ? ` – ${fmtDate(l.to_date)}` : ''}</p><p className="text-[12px] text-slate-500">{l.days} day(s) · {l.reason}</p></div><StatusBadge status={l.status} /></li>)}</ul> : <p className="p-4 text-[13px] text-slate-500">None yet.</p>}</Card>
+          <Card title="My leave" padded={false}>{d.leaves.length ? <ul className="divide-y divide-slate-100 text-[13px]">{d.leaves.map((l) => <li key={l.id} className="flex items-center justify-between gap-2 px-4 py-2.5"><div><p>{l.leave_type} · {fmtDate(l.from_date)}{l.to_date !== l.from_date ? ` – ${fmtDate(l.to_date)}` : ''}</p><p className="text-[12px] text-slate-500">{l.days} day(s) · {l.reason}</p></div><div className="flex items-center gap-2"><StatusBadge status={l.status} />{cancellable(l) && <Button size="xs" variant="ghost" onClick={() => setCancelLeave(l.id)}>Cancel</Button>}</div></li>)}</ul> : <p className="p-4 text-[13px] text-slate-500">None yet.</p>}</Card>
           <Card title={`Holidays at ${d.employee.location}`} padded={false}>{(() => { const up = (hols.data ?? []).filter((h) => h.day >= new Date().toISOString().slice(0, 10) && (!h.state_code || h.state_code === d.employee!.pt_state)).slice(0, 6); return up.length ? <ul className="divide-y divide-slate-100 text-[13px]">{up.map((h) => <li key={h.day + h.name} className="flex justify-between px-4 py-2.5"><span>{h.name}</span><span className="text-slate-500">{fmtDate(h.day)} · {new Date(`${h.day}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short' })}</span></li>)}</ul> : <p className="p-4 text-[13px] text-slate-500">No more holidays listed this year.</p>; })()}</Card>
           <Card title="Payslips" padded={false}>{d.payslips.length ? <ul className="divide-y divide-slate-100 text-[13px]">{d.payslips.map((p) => <li key={p.id} className="flex justify-between px-4 py-2.5"><Link className="link" to={`/hr/payslips/${p.id}`}>{new Date(`${p.month}T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</Link><span className="tabular">{money(p.net)}</span></li>)}</ul> : <p className="p-4 text-[13px] text-slate-500">No payslips yet.</p>}</Card>
         </div>
       </div>
+      <CancelLeaveDialog id={cancelLeave} onClose={() => setCancelLeave(null)} />
       <Modal open={apply} onClose={() => setApply(false)} title="Apply for leave" description="Weekly offs and holidays inside the dates are not counted." footer={<><Button onClick={() => setApply(false)}>Cancel</Button><Button variant="primary" onClick={async () => { setErr(null); try { await api.post('/hrms/leave', lv); setApply(false); invalidatePrefix(qc, 'hr-'); toast({ tone: 'success', title: 'Sent for approval' }); } catch (e) { setErr(errMsg(e)); } }}>Apply</Button></>}>
         <div className="grid grid-cols-2 gap-3">
           {err && <div className="col-span-2"><Notice tone="danger">{err}</Notice></div>}
