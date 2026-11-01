@@ -90,4 +90,4 @@ jobs:
           # The demo's books should read like a trading business: sales in every month from April to last month.
           gaps=$(psql "$DATABASE_URL" -tAc "SELECT string_agg(to_char(m, 'YYYY-MM'), ', ') FROM generate_series(date '2026-04-01', date_trunc('month', current_date) - interval '1 month', interval '1 month') m WHERE NOT EXISTS (SELECT 1 FROM finance.tax_lines t WHERE t.direction = 'outward' AND date_trunc('month', t.doc_date) = m)")
           if [ -n "$gaps" ]; then echo "::error::Demo months with no sales: $gaps"; exit 1; fi
-          psql "$DATABASE_URL" -tAc "SELECT to_char(date_trunc('month', doc_date), 'YYYY-MM') || ' sales ' || round(sum(taxable)) FROM finance.tax_lines WHERE direction = 'outward' GROUP BY 1 ORDER BY 1"
+          psql "$DATABASE_URL" -tAc "SELECT to_char(m, 'YYYY-MM') || ' sales ' || round(t) FROM (SELECT date_trunc('month', doc_date) AS m, sum(taxable) AS t FROM finance.tax_lines WHERE direction = 'outward' GROUP BY 1) x ORDER BY m"
