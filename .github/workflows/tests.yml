@@ -82,6 +82,11 @@ jobs:
         # One file at a time everywhere: on Supabase each test database gets its own pooler pool (about 15 server
         # connections), and several at once would take the connections the live demo needs.
         run: npm test
+      - name: Integration tests again through the database web API (no transaction held open; DB_TRANSPORT=rpc)
+        if: env.USE_SUPABASE != 'true'
+        env:
+          DB_TRANSPORT: rpc
+        run: npm test
       - name: Demo data loads cleanly (the same setup the live demo runs on a reload)
         if: env.USE_SUPABASE != 'true'
         run: |

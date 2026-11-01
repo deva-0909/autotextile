@@ -1,4 +1,5 @@
-import type { Client, Pool } from './db.ts';
+import { type Client, type Pool, tx } from './db.ts';
+import { transportMode } from './transport.ts';
 
 /**
  * Event bus backed by PostgreSQL (transactional outbox + consumer offsets).
@@ -73,54 +74,65 @@ export function subscribe(pool: Pool, consumer: string, handlers: Record<string,
   let running: Promise<void> | null = null;
   let listener: Client | null = null;
 
+  /**
+   * Handles what is pending, one event per transaction: the handler's changes and the consumer's new offset commit
+   * together. The offset moves only from the value read, so two copies of the app never handle the same event
+   * twice (the second one's guarded update finds the offset already moved, and its transaction is undone).
+   * A failing event is parked in bus.dead_letters and the consumer moves on.
+   */
   async function batch(): Promise<number> {
-    const c = await pool.connect();
-    try {
-      await c.query('BEGIN');
-      await c.query('INSERT INTO bus.offsets (consumer) VALUES ($1) ON CONFLICT DO NOTHING', [consumer]);
-      const { rows: [off] } = await c.query('SELECT last_id FROM bus.offsets WHERE consumer = $1 FOR UPDATE', [consumer]);
-      const { rows } = await c.query(
-        `SELECT id, type, source, payload, occurred_at FROM bus.events WHERE id > $1 ORDER BY id LIMIT 200`,
-        [off.last_id],
-      );
-      for (const ev of rows as BusEvent[]) {
-        if (types.includes(ev.type)) {
-          await c.query('SAVEPOINT ev');
-          try {
-            await handlers[ev.type](ev, c);
-            await c.query('RELEASE SAVEPOINT ev');
-          } catch (err) {
-            // Park the event so one bad message cannot block the consumer; it can be replayed from bus.dead_letters.
-            await c.query('ROLLBACK TO SAVEPOINT ev');
-            await c.query('INSERT INTO bus.dead_letters (consumer, event_id, error) VALUES ($1, $2, $3)', [consumer, ev.id, (err as Error).message]);
-            console.error(`[bus:${consumer}] event ${ev.id} (${ev.type}) failed: ${(err as Error).message}`);
-          }
-        }
-      }
-      if (rows.length) await c.query('UPDATE bus.offsets SET last_id = $2 WHERE consumer = $1', [consumer, rows[rows.length - 1].id]);
-      // Parked events an operator asked to replay (after fixing the cause) run once more for this consumer only.
-      const { rows: replays } = await c.query(
-        `SELECT d.id AS dl_id, e.id, e.type, e.source, e.payload, e.occurred_at FROM bus.dead_letters d JOIN bus.events e ON e.id = d.event_id
-         WHERE d.consumer = $1 AND d.replay_requested_at IS NOT NULL AND d.replayed_at IS NULL ORDER BY d.id LIMIT 50`, [consumer]);
-      for (const r of replays as (BusEvent & { dl_id: number })[]) {
-        await c.query('SAVEPOINT rp');
+    await pool.query('INSERT INTO bus.offsets (consumer) VALUES ($1) ON CONFLICT DO NOTHING', [consumer]);
+    const { rows: [off] } = await pool.query('SELECT last_id FROM bus.offsets WHERE consumer = $1', [consumer]);
+    let last = Number(off.last_id);
+    const { rows } = await pool.query(
+      `SELECT id, type, source, payload, occurred_at FROM bus.events WHERE id > $1 ORDER BY id LIMIT 200`,
+      [last],
+    );
+    const advance = async (c: Client, to: number) => {
+      const r = await c.query('UPDATE bus.offsets SET last_id = $3 WHERE consumer = $1 AND last_id = $2', [consumer, last, to]);
+      if (!r.rowCount) throw Object.assign(new Error('another instance handled this event'), { taken: true });
+    };
+    let skipTo = 0;
+    for (const ev of rows as BusEvent[]) {
+      const id = Number(ev.id);
+      if (!types.includes(ev.type)) { skipTo = id; continue; }
+      try {
+        await tx(pool, async (c) => {
+          await advance(c, id);
+          await handlers[ev.type](ev, c);
+        });
+        last = id; skipTo = 0;
+      } catch (err) {
+        if ((err as { taken?: boolean }).taken) return 0; // someone else is working through these
+        // Park the event so one bad message cannot block the consumer; it can be replayed from bus.dead_letters.
+        console.error(`[bus:${consumer}] event ${ev.id} (${ev.type}) failed: ${(err as Error).message}`);
         try {
-          if (types.includes(r.type)) await handlers[r.type](r, c);
-          await c.query('RELEASE SAVEPOINT rp');
-          await c.query('UPDATE bus.dead_letters SET replayed_at = now(), replay_error = NULL WHERE id = $1', [r.dl_id]);
-        } catch (err) {
-          await c.query('ROLLBACK TO SAVEPOINT rp');
-          await c.query('UPDATE bus.dead_letters SET replay_requested_at = NULL, replay_error = $2 WHERE id = $1', [r.dl_id, (err as Error).message]);
-        }
+          await tx(pool, async (c) => {
+            await advance(c, id);
+            await c.query('INSERT INTO bus.dead_letters (consumer, event_id, error) VALUES ($1, $2, $3)', [consumer, ev.id, (err as Error).message]);
+          });
+          last = id; skipTo = 0;
+        } catch { return 0; }
       }
-      await c.query('COMMIT');
-      return rows.length;
-    } catch (err) {
-      await c.query('ROLLBACK').catch(() => {});
-      throw err;
-    } finally {
-      c.release();
     }
+    // Events this consumer does not handle: just move past them.
+    if (skipTo) await tx(pool, async (c) => { await advance(c, skipTo); }).then(() => { last = skipTo; }, () => undefined);
+    // Parked events an operator asked to replay (after fixing the cause) run once more for this consumer only.
+    const { rows: replays } = await pool.query(
+      `SELECT d.id AS dl_id, e.id, e.type, e.source, e.payload, e.occurred_at FROM bus.dead_letters d JOIN bus.events e ON e.id = d.event_id
+       WHERE d.consumer = $1 AND d.replay_requested_at IS NOT NULL AND d.replayed_at IS NULL ORDER BY d.id LIMIT 50`, [consumer]);
+    for (const r of replays as (BusEvent & { dl_id: number })[]) {
+      try {
+        await tx(pool, async (c) => {
+          const claim = await c.query('UPDATE bus.dead_letters SET replayed_at = now(), replay_error = NULL WHERE id = $1 AND replayed_at IS NULL', [r.dl_id]);
+          if (!claim.rowCount) return;
+          if (types.includes(r.type)) await handlers[r.type](r, c);
+        });
+      } catch (err) {
+        await pool.query('UPDATE bus.dead_letters SET replay_requested_at = NULL, replay_error = $2 WHERE id = $1', [r.dl_id, (err as Error).message]);
+      }
+    }
+    return rows.length;
   }
 
   async function drain() {
@@ -146,7 +158,7 @@ export function subscribe(pool: Pool, consumer: string, handlers: Record<string,
 
   const timer = opts.manual ? null : setInterval(() => void drain(), opts.pollMs ?? 2000);
   timer?.unref();
-  if (!opts.manual) void (async () => {
+  if (!opts.manual && transportMode() === 'pg') void (async () => {
     try {
       listener = await pool.connect();
       listener.on('notification', () => void drain());

@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { config } from './config.ts';
+import { RpcPool, httpRunner, installApi, localRunner, rpcTx, transportMode, type RunFn } from './transport.ts';
 
 export type Client = pg.PoolClient;
 export type Pool = pg.Pool;
@@ -19,7 +20,33 @@ pg.types.setTypeParser(pg.types.builtins.DATE, (v) => v);
  * erp_owner) and its search_path is set with SET LOCAL inside each transaction; a statement outside a transaction is
  * wrapped in one of its own. The user in DATABASE_URL is `erp_owner[.project-ref]` or `erp_identity[.project-ref]`.
  */
+// One runner per database for the web-API transports (all services share it; nothing is held open).
+const runners = new Map<string, { run: RunFn; ready: Promise<unknown> }>();
+function runnerFor(databaseUrl: string) {
+  const mode = transportMode();
+  const key = mode === 'http' ? 'http' : databaseUrl;
+  let r = runners.get(key);
+  if (!r) {
+    if (mode === 'http') {
+      const url = process.env.SUPABASE_URL, k = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!url || !k) throw new Error('DB_TRANSPORT=http needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY');
+      r = { run: httpRunner(url, k), ready: Promise.resolve() };
+    } else {
+      const l = localRunner(databaseUrl);
+      r = { run: l.run, ready: installApi(l.raw) };
+    }
+    runners.set(key, r);
+  }
+  return r;
+}
+/** Ready when the database API functions are installed (local and test databases install them on first use). */
+export const apiReady = (databaseUrl = config.databaseUrl()) => (transportMode() === 'pg' ? Promise.resolve() : runnerFor(databaseUrl).ready);
+
 export function createPool(schema: string, databaseUrl = config.databaseUrl()): Pool {
+  if (transportMode() !== 'pg') {
+    const r = runnerFor(databaseUrl);
+    return new RpcPool(schema, async (p) => { await r.ready; return r.run(p); }, transportMode() === 'rpc' ? databaseUrl : undefined) as unknown as Pool;
+  }
   const max = Number(process.env.PG_POOL_MAX ?? 10);
   if (process.env.DB_ROLE_PER_SERVICE === '1') {
     const u = new URL(databaseUrl);
@@ -79,6 +106,7 @@ function sslFor(u: URL) {
 }
 
 export async function tx<T>(pool: Pool, fn: (c: Client) => Promise<T>): Promise<T> {
+  if (pool instanceof RpcPool) return rpcTx(pool, fn as never);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

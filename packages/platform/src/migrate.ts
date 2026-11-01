@@ -28,6 +28,9 @@ export async function migrate(pool: Pool, schema: string, dir: string) {
         throw new Error(`Migration ${schema}/${file} failed: ${(err as Error).message}`);
       }
     }
+    // Generated keys through the replay-safe generators (see sql/erp_api.sql); a no-op once done.
+    if (await client.query(`SELECT to_regprocedure('public.erp_normalize_defaults(text)') IS NOT NULL AS ok`).then((r) => r.rows[0]?.ok, () => false))
+      await client.query('SELECT public.erp_normalize_defaults($1)', [schema]);
   } finally {
     client.release();
   }

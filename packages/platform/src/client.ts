@@ -1,3 +1,4 @@
+import { markExternalCall } from './transport.ts';
 import { config, type ServiceName } from './config.ts';
 import { serviceUser, signAccessToken } from './auth.ts';
 import { AppError } from './errors.ts';
@@ -33,6 +34,8 @@ export async function callAsUser<T>(authorization: string, target: ServiceName, 
 }
 
 async function send<T>(authorization: string, target: ServiceName, method: string, path: string, body: unknown, headers: Record<string, string>): Promise<T> {
+  // A transaction that calls another service must not be retried automatically (the call may have changed data).
+  if (method !== 'GET') markExternalCall();
   const port = portOverrides[target] ?? config.port(target);
   const raw = body instanceof Buffer || body instanceof Uint8Array;
   const res = await fetch(`http://127.0.0.1:${port}${path}`, {

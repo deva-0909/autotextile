@@ -1,6 +1,6 @@
 import type { Router } from 'express';
 import { z } from 'zod';
-import { type ServiceContext, audit, badRequest, conflict, contextOf, forbidden, hasPermission, many, notFound, one, optText, parse, reqText, requirePermission, tx } from '@erp/platform';
+import { AppError, type ServiceContext, audit, badRequest, conflict, contextOf, forbidden, hasPermission, many, notFound, one, optText, parse, reqText, requirePermission, transportMode, tx } from '@erp/platform';
 import { DATASETS, type Definition, fetchDataset, inferFields, runReport, toCsv, today } from './data.ts';
 import { commercialIntel, controlTower, customerIntel, exceptions, financialIntel, simulate, stockIntel, substitutes, supplierIntel } from './intelligence.ts';
 import { MODEL, aiEnabled, ask, brief } from './copilot.ts';
@@ -139,12 +139,15 @@ export function insightRoutes(r: Router, { pool }: ServiceContext) {
     res.json({ ...(await systemHealth(pool)), backups, backup_dir: backupDir(), rpo_hours: Number(process.env.RPO_HOURS ?? 24), rto_hours: Number(process.env.RTO_HOURS ?? 4), hours_since_backup: last ? Math.round((Date.now() - new Date(last.finished_at).getTime()) / 360_000) / 10 : null });
   });
   r.post('/system/backups', requirePermission('system.backup.manage'), async (req, res) => {
+    // pg_dump needs a direct database connection; on the hosted web API, Supabase's own daily backups apply.
+    if (transportMode() === 'http') throw new AppError(501, 'not_available', 'Backups here are taken by Supabase (daily, kept 7 days on the free plan). Manual backups need a direct database connection (on-premise installs).');
     if (await one(pool, `SELECT 1 FROM backups WHERE status = 'running' AND started_at > now() - interval '1 hour'`)) throw conflict('A backup is already running');
     const out = await runBackup(pool, req.user!.name);
     await tx(pool, (c) => audit(c, 'insights', contextOf(req), { entity: 'backup', entityId: String((out as { id: string }).id), action: 'created', after: { status: (out as { status: string }).status } }));
     res.status(201).json(out);
   });
   r.post('/system/backups/:id/restore-test', requirePermission('system.backup.manage'), async (req, res) => {
+    if (transportMode() === 'http') throw new AppError(501, 'not_available', 'Restore tests need a direct database connection (on-premise installs).');
     const out = await restoreTest(pool, String(req.params.id)).catch((e) => { throw badRequest((e as Error).message); });
     res.json(out);
   });
