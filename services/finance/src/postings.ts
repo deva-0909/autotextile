@@ -263,3 +263,32 @@ export function payrollPaidConsumer() {
   };
 }
 const monthEndOf = (m: string) => { const d = new Date(`${m.slice(0, 7)}-01T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() + 1); d.setUTCDate(0); return d.toISOString().slice(0, 10); };
+
+/** Approved agent commission payout from CRM → commission expense, payable to the agent (TDS 194H), payable in a payment run. */
+export function commissionApprovedConsumer() {
+  return async (ev: BusEvent, c: Client) => {
+    const p = ev.payload as { payout_id: string; number: string; party_id: string; agent_name: string; date: string; amount: number; pan: string | null; invoices: number };
+    const party = await getParty(p.party_id);
+    const book = await primaryBook(c);
+    const date = String(p.date).slice(0, 10);
+    // Commission agents are taxed under 194H unless Accounts has already set a section for this party.
+    if (!(await one(c, 'SELECT 1 FROM party_tax WHERE party_id = $1', [party.id])))
+      await c.query(`INSERT INTO party_tax (party_id, party_name, pan, tds_section, updated_by_name) VALUES ($1, $2, $3, '194H', 'CRM agent payout')`, [party.id, party.legal_name, p.pan ?? party.pan ?? null]);
+    const amount = round2(Number(p.amount));
+    const tds = await tdsFor(c, party.id, p.pan ?? party.pan ?? null, amount, date);
+    const payable = round2(amount - (tds?.amount ?? 0));
+    const v = await post(c, {
+      type: 'journal', book_id: book.id, date, auto: true, by: SYSTEM, approved_by: 'CRM commission approval',
+      narration: `Agent commission — ${p.agent_name}, payout ${p.number} (${p.invoices} invoices)`, party_id: party.id, party_name: party.legal_name,
+      source: { service: 'crm', type: 'agent_payout', id: p.payout_id, ref: p.number },
+      lines: [
+        { account: 'commission', debit: amount },
+        { account: 'payables', credit: payable, party_id: party.id, party_name: party.legal_name, bill_ref: p.number },
+        ...(tds ? [{ account: 'tds_payable', credit: tds.amount, narration: `TDS ${tds.section} @ ${tds.rate}% on ₹${tds.base}` }] : []),
+      ],
+      bill: { kind: 'payable', party_id: party.id, party_name: party.legal_name, doc_no: p.number, doc_date: date, due_date: addDays(date, 7), amount: payable },
+    });
+    if (v.existing) return;
+    if (tds) await recordTds(c, v.id, book.id, party.id, party.legal_name, tds, date);
+  };
+}

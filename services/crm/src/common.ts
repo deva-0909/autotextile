@@ -98,6 +98,7 @@ export interface Lead {
   city: string | null; state_code: string | null; language: string | null; category: string | null; product_id: string | null; product_label: string | null; requirement_kg: number | null; est_value: number | null;
   message: string | null; stage: string; status: string; owner_id: string | null; owner_name: string | null; assigned_at: string | null; first_response_at: string | null; next_action_at: string | null; next_action: string | null;
   lost_reason: string | null; customer_id: string | null; customer_name: string | null; merged_into: string | null; duplicate_flag: boolean; created_at: string; version: number;
+  agent_id?: string | null; agent_name?: string | null; score?: number | null; previous_lead_id?: string | null; call_attempts?: number; no_progress?: boolean;
 }
 
 export { forbidden };

@@ -302,26 +302,33 @@ describe('P5 CRM', () => {
     assert.match(d.allocation_trace.candidates[0].reason, /lead cap \(1\/1\)/);
   });
 
-  test('webhook capture maps fields, is idempotent and flags duplicates without merging them', async () => {
+  test('webhook capture maps fields and is idempotent; a repeat enquiry marks the open lead; duplicates are flagged, not merged silently', async () => {
     const src = (await h.ok(t.mgr!, 'GET', '/crm/sources')).find((s: { code: string }) => s.code === 'INDIAMART');
     const body = { UNIQUE_QUERY_ID: 'IM-778', SENDER_NAME: 'Murali Krishnan', SENDER_MOBILE: '+91-9843011111', SENDER_COMPANY: 'Kovai Knits', SENDER_CITY: 'Coimbatore', QUERY_MESSAGE: 'Need 500 kg navy SJ' };
     const r1 = await h.call(null, 'POST', `/crm/public/leads/${src.webhook_key}`, body);
     assert.equal(r1.status, 201);
-    const r2 = await h.call(null, 'POST', `/crm/public/leads/${src.webhook_key}`, body);
-    assert.equal(r2.body.results[0].created, false, 'same query id ignored');
+    assert.equal(r1.body.results[0].created, false, 'no new lead for a contact with an open lead');
+    let target = await h.ok(t.mgr!, 'GET', `/crm/leads/${ids.lead}`);
+    assert.equal(target.reenquiry_count, 1);
+    assert.equal(target.last_reenquiry_source, 'INDIAMART');
+    assert.ok(target.activities.some((a: { kind: string }) => a.kind === 'reenquiry'));
+    assert.match(target.message, /Need 500 kg navy SJ/);
+    await h.call(null, 'POST', `/crm/public/leads/${src.webhook_key}`, body);
+    assert.equal((await h.ok(t.mgr!, 'GET', `/crm/leads/${ids.lead}`)).reenquiry_count, 1, 'same query id counted once');
     assert.equal((await h.call(null, 'POST', '/crm/public/leads/not-a-key', body)).status, 404);
-    const lead = (await h.ok(t.mgr!, 'GET', `/crm/leads?q=${encodeURIComponent('Murali Krishnan')}`)).items[0];
+    // Same GSTIN, different phone: flagged for review; merge keeps the newer lead readable.
+    const a = await h.ok(t.mgr!, 'POST', '/crm/leads', { source_code: 'PHONE', name: 'Ravi Agarwal', company: 'Agarwal Hosiery', mobile: '9811100001', gstin: '07AABCA1234B1Z5', state_code: '07' });
+    const b = await h.ok(t.mgr!, 'POST', '/crm/leads', { source_code: 'WEBSITE', name: 'Accounts Desk', company: 'Agarwal Hosiery', mobile: '9811100002', gstin: '07AABCA1234B1Z5', state_code: '07' });
+    const lead = await h.ok(t.mgr!, 'GET', `/crm/leads/${b.id}`);
     assert.equal(lead.duplicate_flag, true);
-    assert.equal(lead.owner_name, 'Selvi Raman', 'sticky: same contact goes to the same salesperson');
-    const dups = await h.ok(t.mgr!, 'GET', '/crm/duplicates');
-    const dup = dups.find((x: { lead_id: string }) => x.lead_id === lead.id);
-    assert.deepEqual(dup.match_on, ['mobile']);
+    assert.equal(lead.owner_name, (await h.ok(t.mgr!, 'GET', `/crm/leads/${a.id}`)).owner_name, 'sticky: same buyer goes to the same salesperson');
+    const dup = (await h.ok(t.mgr!, 'GET', '/crm/duplicates')).find((x: { lead_id: string }) => x.lead_id === b.id);
+    assert.deepEqual(dup.match_on, ['gstin']);
     await h.ok(t.mgr!, 'POST', `/crm/duplicates/${dup.id}/resolve`, { action: 'merge', note: 'Same buyer' });
-    const merged = await h.ok(t.mgr!, 'GET', `/crm/leads/${lead.id}`);
-    assert.equal(merged.status, 'merged', 'kept, not deleted');
-    const target = await h.ok(t.mgr!, 'GET', `/crm/leads/${ids.lead}`);
-    assert.ok(target.merged_leads.some((m: { id: string }) => m.id === lead.id));
-    assert.ok(target.activities.some((a: { kind: string }) => a.kind === 'merge'));
+    assert.equal((await h.ok(t.mgr!, 'GET', `/crm/leads/${b.id}`)).status, 'merged', 'kept, not deleted');
+    target = await h.ok(t.mgr!, 'GET', `/crm/leads/${a.id}`);
+    assert.ok(target.merged_leads.some((m: { id: string }) => m.id === b.id));
+    assert.ok(target.activities.some((x: { kind: string }) => x.kind === 'merge'));
     assert.deepEqual(parseCsv('name,phone\n"Shah, Ravi",98200 00001\n'), [['name', 'phone'], ['Shah, Ravi', '98200 00001']]);
     assert.deepEqual(mapFields({ profile: { name: 'A' }, from: '91999' }, { name: 'profile.name', mobile: 'from' }), { name: 'A', mobile: '91999' });
   });

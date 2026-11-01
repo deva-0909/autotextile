@@ -77,7 +77,7 @@ export async function setupDatabase({ reset = false, log = console.log }: { rese
     });
     await governance.consumer?.drain();
     await masters.consumer?.drain();
-    log(`  ✓ 1 legal entity, 3 GST registrations, 5 warehouses with locations, 15 parties, 8 fabric SKUs, ${DEMO_USERS.length} users`);
+    log(`  ✓ 1 legal entity, 3 GST registrations, 5 warehouses with locations, 16 parties, 8 fabric SKUs, ${DEMO_USERS.length} users`);
     await seedOperations(services);
     log('  ✓ procurement and job-work examples (requisition, RFQ, POs, receipts, invoices, job-work orders)');
     log('  ✓ inventory and sales examples (lots and rolls, transfers, a stock count, leads, quotations, credit)');

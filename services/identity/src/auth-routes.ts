@@ -103,7 +103,7 @@ export function authRoutes(r: Router, ctx: ServiceContext) {
         SELECT u.email, u.name, u.designation, u.party_id IS NOT NULL AS portal, string_agg(DISTINCT ro.name, ', ') AS roles, min(ro.code) AS role_code
         FROM users u LEFT JOIN user_roles ur ON ur.user_id = u.id LEFT JOIN roles ro ON ro.id = ur.role_id
         WHERE u.status = 'active' GROUP BY u.id
-        ORDER BY (u.party_id IS NOT NULL), coalesce(array_position(ARRAY['owner','super_admin','management_approver','purchase_manager','purchase_executive','warehouse_manager','mill_ops_manager','sales_manager','sales_executive','dispatch_manager','customer_care','accounts_manager','accounts_executive','hr_manager','auditor','customer_company_admin','customer_buyer','supplier_portal','mill_user'], min(ro.code)), 99), u.name`));
+        ORDER BY (u.party_id IS NOT NULL), coalesce(array_position(ARRAY['owner','super_admin','management_approver','purchase_manager','purchase_executive','warehouse_manager','mill_ops_manager','sales_manager','sales_executive','dispatch_manager','customer_care','accounts_manager','accounts_executive','hr_manager','auditor','customer_company_admin','customer_buyer','supplier_portal','mill_user','commission_agent'], min(ro.code)), 99), u.name`));
     });
     r.post('/auth/demo-login', async (req, res) => {
       const { email } = parse(z.object({ email: z.string().trim().min(1) }), req.body);

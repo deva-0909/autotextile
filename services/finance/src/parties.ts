@@ -20,6 +20,31 @@ export function partyRoutes(r: Router, { pool }: ServiceContext) {
     res.json({ as_of: asOf, kind, rows, totals });
   });
 
+  /** Sales invoices by customer with what is still unpaid (for agent commission and lead-source revenue). */
+  r.get('/sales-invoices', requirePermission('finance.read'), async (req, res) => {
+    const ids = String(req.query.party_ids ?? '').split(',').filter((x) => /^[0-9a-f-]{36}$/.test(x));
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from)) ? String(req.query.from) : '1900-01-01';
+    if (!ids.length) { res.json([]); return; }
+    const rows = await many<{ party_id: string; doc_no: string; doc_date: string; taxable: number; kg: number | null; total: number }>(pool, `
+      SELECT t.party_id, t.doc_no, min(t.doc_date)::text AS doc_date, round(sum(t.taxable), 2)::float AS taxable, sum(t.qty_kg)::float AS kg, round(sum(t.taxable + t.cgst + t.sgst + t.igst), 2)::float AS total
+      FROM tax_lines t JOIN vouchers v ON v.id = t.voucher_id
+      WHERE t.direction = 'outward' AND t.doc_type = 'invoice' AND v.status = 'posted' AND t.party_id = ANY($1) AND t.doc_date >= $2
+      GROUP BY t.party_id, t.doc_no ORDER BY 3`, [ids, from]);
+    const open = new Map<string, number>();
+    for (const id of ids) for (const b of (await openBills(pool, 'receivable', id)).bills) open.set(`${id}|${b.doc_no}`, b.outstanding);
+    res.json(rows.map((r1) => ({ ...r1, outstanding: open.get(`${r1.party_id}|${r1.doc_no}`) ?? 0 })));
+  });
+
+  /** Taxable sales per customer in a period (lead-source return). */
+  r.get('/sales-by-party', requirePermission('finance.read'), async (req, res) => {
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from)) ? String(req.query.from) : '1900-01-01';
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to)) ? String(req.query.to) : '9999-12-31';
+    res.json(await many(pool, `
+      SELECT t.party_id, round(sum(t.taxable), 2)::float AS taxable, count(DISTINCT t.doc_no)::int AS invoices, min(t.doc_date)::text AS first_invoice
+      FROM tax_lines t JOIN vouchers v ON v.id = t.voucher_id
+      WHERE t.direction = 'outward' AND t.doc_type = 'invoice' AND v.status = 'posted' AND t.doc_date BETWEEN $1 AND $2 GROUP BY t.party_id`, [from, to]));
+  });
+
   r.get('/parties/:kind/:partyId', requirePermission('finance.read'), async (req, res) => {
     const kind = req.params.kind === 'payables' ? 'payable' : 'receivable';
     const ctl = kind === 'receivable' ? 'receivables' : 'payables';

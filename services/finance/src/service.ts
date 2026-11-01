@@ -2,7 +2,7 @@ import { legacyRoutes } from './legacy.ts';
 import { paymentRunRoutes } from './payrun.ts';
 import { type ServiceDefinition, migrationsOf } from '@erp/platform';
 import { applyFinanceDecision, voucherRoutes } from './vouchers.ts';
-import { approvalDecidedConsumer, creditNoteConsumer, orderCancelledConsumer, payrollApprovedConsumer, payrollPaidConsumer, paymentReceivedConsumer, paymentRefundedConsumer, salesInvoiceConsumer, supplierInvoiceConsumer, transferConsumer } from './postings.ts';
+import { approvalDecidedConsumer, commissionApprovedConsumer, creditNoteConsumer, orderCancelledConsumer, payrollApprovedConsumer, payrollPaidConsumer, paymentReceivedConsumer, paymentRefundedConsumer, salesInvoiceConsumer, supplierInvoiceConsumer, transferConsumer } from './postings.ts';
 import { partyRoutes } from './parties.ts';
 import { gstRoutes } from './gst.ts';
 import { tdsRoutes } from './tds.ts';
@@ -33,5 +33,6 @@ export const financeService: ServiceDefinition = {
     'inventory.transfer.dispatched': transferConsumer(),
     'hrms.payroll.approved': payrollApprovedConsumer(),
     'hrms.payroll.paid': payrollPaidConsumer(),
+    'crm.commission.approved': commissionApprovedConsumer(),
   }),
 };

@@ -6,7 +6,11 @@ import {
 import {
   S, type Lead, assertOwnerOrAll, auditReq, getParty, leadOrThrow, nextNumber, normEmail, normGstin, normMobile, raiseException, resolveException, seesAll, stateOfCity, userId,
 } from './common.ts';
-import { assignLead, autoAssign } from './allocation.ts';
+import { assignLead, autoAssign, decide } from './allocation.ts';
+import { rescore } from './score.ts';
+import { closeLost, countAttempt, isForward, markProgress } from './work.ts';
+import { crmSettings } from './settings.ts';
+import { linkAgentCustomer } from './agents.ts';
 
 export const OPEN_STAGES = ['new', 'assigned', 'contact_pending', 'contacted', 'qualified', 'quotation', 'negotiation', 'order_confirmed', 'nurture'];
 const STAGES = [...OPEN_STAGES, 'won', 'lost'] as const;
@@ -39,7 +43,7 @@ type LeadInput = z.infer<typeof leadInput>;
  * matches an open lead or a customer is flagged for review (never merged silently) and goes to the
  * salesperson already handling it.
  */
-export async function captureLead(c: Client, input: LeadInput, by: { id: string | null; name: string; canAssign: boolean; selfAssign: boolean }) {
+export async function captureLead(c: Client, input: LeadInput, by: { id: string | null; name: string; canAssign: boolean; selfAssign: boolean; agent?: { id: string; name: string; protectDays: number } }) {
   const src = await one<{ id: string; code: string; name: string; status: string }>(c, `SELECT * FROM lead_sources WHERE ${input.source_id ? 'id = $1' : 'code = upper($1)'}`, [input.source_id ?? input.source_code ?? 'MANUAL']);
   if (!src) throw badRequest('Unknown lead source', { fields: { source_id: 'Choose a source' } });
   if (src.status !== 'active') throw badRequest(`${src.name} is switched off`);
@@ -49,6 +53,29 @@ export async function captureLead(c: Client, input: LeadInput, by: { id: string 
     const existing = await one<{ id: string; number: string }>(c, 'SELECT id, number FROM leads WHERE source_id = $1 AND source_ref = $2', [src.id, input.source_ref]);
     if (existing) return { ...existing, duplicate_of_source: true, created: false };
   }
+  if (input.source_ref) {
+    const seen = await one<{ id: string; number: string }>(c, `SELECT l.id, l.number FROM lead_activities a JOIN leads l ON l.id = a.lead_id WHERE a.source_id = $1 AND a.source_ref = $2`, [src.id, input.source_ref]);
+    if (seen) return { ...seen, duplicate_of_source: true, created: false, reenquiry: true, duplicates: [] };
+  }
+  // The same contact enquiring again while a lead is open: no new lead; the open one is marked and its owner told.
+  const open = await one<Lead & { agent_id: string | null; agent_name: string | null }>(c, `SELECT * FROM leads WHERE status = 'open' AND ((mobile IS NOT NULL AND mobile = $1) OR (email IS NOT NULL AND email = $2)) ORDER BY created_at LIMIT 1 FOR UPDATE`, [mobile, email]);
+  if (open) {
+    if (by.agent) throw conflict(open.agent_id && open.agent_id !== by.agent.id ? 'This buyer is already registered by another agent' : open.agent_id === by.agent.id ? `You registered this buyer already (${open.number})` : 'This buyer is already in touch with our sales team');
+    await c.query(`UPDATE leads SET reenquiry_count = reenquiry_count + 1, last_reenquiry_at = now(), last_reenquiry_source = $2,
+        message = CASE WHEN $3::text IS NULL THEN message ELSE concat_ws(E'\n---\n', message, $3::text) END,
+        requirement_kg = coalesce(requirement_kg, $4), est_value = greatest(est_value, $5), updated_at = now(), version = version + 1 WHERE id = $1`,
+      [open.id, src.code, input.message ? `${src.name}, ${new Date().toISOString().slice(0, 10)}: ${input.message}` : null, input.requirement_kg ?? null, input.est_value ?? null]);
+    await c.query(`INSERT INTO lead_activities (lead_id, kind, summary, outcome, by_name, source_id, source_ref) VALUES ($1, 'reenquiry', $2, $3, $4, $5, $6)`, [open.id, `Enquired again via ${src.name}`, input.message ?? null, by.name, src.id, input.source_ref ?? null]);
+    if (input.source_ref) await c.query('UPDATE lead_sources SET leads_received = leads_received + 1, last_received_at = now() WHERE id = $1', [src.id]);
+    else await c.query('UPDATE lead_sources SET last_received_at = now() WHERE id = $1', [src.id]);
+    if (open.owner_id) await notify(c, S, { user_id: open.owner_id, kind: 'action', title: `${open.company ?? open.name} enquired again via ${src.name}`, body: input.message?.slice(0, 160) ?? null, link: `/crm/leads/${open.id}` });
+    await rescore(c, [open.id]);
+    return { id: open.id, number: open.number, created: false, reenquiry: true, duplicates: [] };
+  }
+  const previous = await one<{ id: string; number: string; agent_id: string | null; agent_name: string | null; agent_protected_until: string | null }>(c, `SELECT id, number, agent_id, agent_name, agent_protected_until::text FROM leads WHERE status <> 'merged' AND ((mobile IS NOT NULL AND mobile = $1) OR (email IS NOT NULL AND email = $2)) ORDER BY created_at DESC LIMIT 1`, [mobile, email]);
+  if (by.agent && previous?.agent_id && previous.agent_id !== by.agent.id && previous.agent_protected_until && previous.agent_protected_until >= new Date().toISOString().slice(0, 10)) throw conflict('This buyer is registered by another agent');
+  // An agent's protected buyer coming in from any other source stays the agent's.
+  const agent = by.agent ?? (previous?.agent_id && previous.agent_protected_until && previous.agent_protected_until >= new Date().toISOString().slice(0, 10) ? { id: previous.agent_id, name: previous.agent_name ?? '', protectDays: 0 } : null);
   const number = await nextNumber(c, 'lead', 'LD-');
   const lead = await one<Lead>(c, `
     INSERT INTO leads (number, source_id, source_code, source_ref, name, company, mobile, email, gstin, city, state_code, language, category, product_id, product_label, requirement_kg, est_value, message, created_by_name)
@@ -57,6 +84,14 @@ export async function captureLead(c: Client, input: LeadInput, by: { id: string 
       input.category ?? null, input.product_id ?? null, input.product_label ?? null, input.requirement_kg ?? null, input.est_value ?? null, input.message ?? null, by.name]);
   await c.query('UPDATE lead_sources SET leads_received = leads_received + 1, last_received_at = now() WHERE id = $1', [src.id]);
   await c.query(`INSERT INTO lead_activities (lead_id, kind, summary, by_name) VALUES ($1, 'system', $2, $3)`, [lead!.id, `Enquiry received via ${src.name}`, by.name]);
+  if (previous) {
+    await c.query('UPDATE leads SET previous_lead_id = $2 WHERE id = $1', [lead!.id, previous.id]);
+    await c.query(`INSERT INTO lead_activities (lead_id, kind, summary, by_name) VALUES ($1, 'system', $2, 'system')`, [lead!.id, `Same contact as earlier lead ${previous.number}`]);
+  }
+  if (agent) {
+    await c.query(`UPDATE leads SET agent_id = $2, agent_name = $3, agent_protected_until = CASE WHEN $4 > 0 THEN current_date + $4::int ELSE (SELECT agent_protected_until FROM leads WHERE id = $5) END WHERE id = $1`, [lead!.id, agent.id, agent.name, agent.protectDays, previous?.id ?? null]);
+    lead!.agent_id = agent.id;
+  }
   const dups = await findDuplicates(c, lead!);
   // Assignment: explicit owner (managers), the creator themselves (salesperson entering their own lead), else the engine.
   if (input.owner_id && by.canAssign) {
@@ -67,13 +102,14 @@ export async function captureLead(c: Client, input: LeadInput, by: { id: string 
     await assignLead(c, lead!, { user_id: by.id, name: by.name }, 'manual', { reason: 'Entered by the salesperson', by: by.name });
   } else await autoAssign(c, lead!, by.name);
   await publish(c, S, 'crm.lead.created', { lead_id: lead!.id, number, source: src.code });
-  return { id: lead!.id, number, created: true, duplicates: dups };
+  await rescore(c, [lead!.id]);
+  return { id: lead!.id, number, created: true, reenquiry: false, duplicates: dups };
 }
 
 async function findDuplicates(c: Client, lead: Lead) {
   const found: { type: 'lead' | 'customer'; id: string; label: string; on: string[] }[] = [];
   const others = await many<{ id: string; number: string; name: string; company: string | null; mobile: string | null; email: string | null; gstin: string | null }>(c, `
-    SELECT id, number, name, company, mobile, email, gstin FROM leads WHERE id <> $1 AND status <> 'merged'
+    SELECT id, number, name, company, mobile, email, gstin FROM leads WHERE id <> $1 AND status = 'open' AND id IS DISTINCT FROM (SELECT previous_lead_id FROM leads WHERE id = $1)
       AND ((mobile IS NOT NULL AND mobile = $2) OR (email IS NOT NULL AND email = $3) OR (gstin IS NOT NULL AND gstin = $4)) ORDER BY created_at DESC LIMIT 10`,
     [lead.id, lead.mobile, lead.email, lead.gstin]);
   for (const o of others)
@@ -139,7 +175,11 @@ export async function leadDetail(c: Client | import('@erp/platform').Pool, req: 
     many(c, `SELECT id, number, version, status, total, kg, margin_pct, valid_until, created_at FROM quotations WHERE lead_id = ANY($1) AND status <> 'superseded' ORDER BY created_at DESC`, [ids]),
     one(c, 'SELECT code, name, kind FROM lead_sources WHERE id = $1', [lead.source_id]),
   ]);
-  return { ...lead, source, merged_leads: merged, activities, assignments, duplicates, quotations };
+  const engagements = await many(c, 'SELECT * FROM lead_engagements WHERE lead_id = ANY($1) ORDER BY created_at DESC', [ids]);
+  const previous = (lead as Lead & { previous_lead_id: string | null }).previous_lead_id ? await one(c, 'SELECT id, number, stage, lost_reason, closed_at FROM leads WHERE id = $1', [(lead as Lead & { previous_lead_id: string }).previous_lead_id]) : null;
+  const settings = await crmSettings(c);
+  return { ...lead, source, merged_leads: merged, activities, assignments, duplicates, quotations, engagements, previous_lead: previous, first_response_minutes: settings.first_response_minutes, no_progress_attempts: settings.no_progress_attempts,
+    sla_due_at: lead.status === 'open' && !lead.first_response_at && lead.owner_id ? new Date(new Date(lead.assigned_at ?? lead.created_at).getTime() + Number(settings.first_response_minutes) * 60_000).toISOString() : null };
 }
 
 const stageBody = z.object({
@@ -147,6 +187,7 @@ const stageBody = z.object({
   next_action_at: z.iso.datetime({ offset: true }).nullable().optional(),
   next_action: optText(200),
   lost_reason: optText(300),
+  objection: optText(60),
   competitor: optText(120),
   nurture_reason: optText(300),
   note: optText(1000),
@@ -155,7 +196,7 @@ const stageBody = z.object({
 export function leadRoutes(r: Router, { pool }: ServiceContext) {
   /** Webhook for lead sources (IndiaMART, Meta, website…). The key in the URL identifies and authorises the source. */
   r.get('/leads', requirePermission('crm.read'), async (req, res) => {
-    const lq = listQuery(req, ['number', 'created_at', 'name', 'stage', 'next_action_at', 'est_value', 'owner_name'], 'created_at');
+    const lq = listQuery(req, ['number', 'created_at', 'name', 'stage', 'next_action_at', 'est_value', 'owner_name', 'score', 'call_attempts', 'closed_at'], 'created_at');
     const params: unknown[] = [];
     const where: string[] = [`l.status <> 'merged'`];
     if (!seesAll(req)) { params.push(req.user!.id); where.push(`l.owner_id = $${params.length}`); }
@@ -165,14 +206,23 @@ export function leadRoutes(r: Router, { pool }: ServiceContext) {
     if (lq.filters.view === 'overdue') where.push(`l.status = 'open' AND l.stage <> 'nurture' AND (l.next_action_at IS NULL OR l.next_action_at < now())`);
     if (lq.filters.view === 'duplicates') where.push(`EXISTS (SELECT 1 FROM duplicate_candidates d WHERE d.lead_id = l.id AND d.status = 'open')`);
     if (lq.filters.view === 'open') where.push(`l.status = 'open'`);
+    if (lq.filters.view === 'lost') where.push(`l.stage = 'lost'`);
+    if (lq.filters.view === 'no_progress') where.push(`l.status = 'open' AND l.no_progress`);
+    if (lq.filters.view === 'reenquiry') where.push(`l.status = 'open' AND l.reenquiry_count > 0`);
+    if (lq.filters.view === 'not_contacted') where.push(`l.status = 'open' AND l.first_response_at IS NULL`);
+    if (lq.filters.band) { params.push(lq.filters.band.split(',')); where.push(`l.score_band = ANY($${params.length})`); }
+    if (lq.filters.objection) { params.push(lq.filters.objection); where.push(`l.objection = $${params.length}`); }
+    if (lq.filters.agent) { params.push(lq.filters.agent); where.push(`l.agent_id = $${params.length}`); }
     if (lq.filters.customer) { params.push(lq.filters.customer); where.push(`l.customer_id = $${params.length}`); }
     if (lq.q) { params.push(`%${lq.q}%`); where.push(`(l.number ILIKE $${params.length} OR l.name ILIKE $${params.length} OR l.company ILIKE $${params.length} OR l.mobile ILIKE $${params.length} OR l.email ILIKE $${params.length} OR l.city ILIKE $${params.length})`); }
     const rows = await many<{ total_count: number }>(pool, `
       SELECT l.*, s.name AS source_name,
         (SELECT count(*)::int FROM duplicate_candidates d WHERE d.lead_id = l.id AND d.status = 'open') AS open_duplicates,
         (l.status = 'open' AND l.stage <> 'nurture' AND (l.next_action_at IS NULL OR l.next_action_at < now())) AS follow_up_due,
+        CASE WHEN l.status = 'open' AND l.first_response_at IS NULL AND l.owner_id IS NOT NULL THEN coalesce(l.assigned_at, l.created_at) + make_interval(mins => ${Number((await crmSettings(pool)).first_response_minutes)}) END AS sla_due_at,
+        (l.owner_id IS NOT NULL AND coalesce(m.active, false) = false) AS owner_inactive,
         count(*) OVER ()::int AS total_count
-      FROM leads l JOIN lead_sources s ON s.id = l.source_id WHERE ${where.join(' AND ')} ${orderLimit({ ...lq, dir: req.query.dir ? lq.dir : 'desc' }, params)}`, params);
+      FROM leads l JOIN lead_sources s ON s.id = l.source_id LEFT JOIN sales_team m ON m.user_id = l.owner_id WHERE ${where.join(' AND ')} ${orderLimit({ ...lq, dir: req.query.dir ? lq.dir : 'desc' }, params)}`, params);
     res.json(page(rows, lq));
   });
 
@@ -229,6 +279,8 @@ export function leadRoutes(r: Router, { pool }: ServiceContext) {
       if (lead.status !== 'open') throw conflict(`This lead is ${lead.status}`);
       await c.query(`INSERT INTO lead_activities (lead_id, kind, summary, outcome, by_user, by_name) VALUES ($1,$2,$3,$4,$5,$6)`, [lead.id, b.kind, b.summary, b.outcome ?? null, userId(req), req.user!.name]);
       const contact = CONTACT_KINDS.includes(b.kind);
+      if (b.kind === 'call') await countAttempt(c, lead, true);
+      else if (contact) await c.query('UPDATE leads SET last_contact_at = now() WHERE id = $1', [lead.id]);
       await c.query(`UPDATE leads SET
           first_response_at = CASE WHEN $2 AND first_response_at IS NULL THEN now() ELSE first_response_at END,
           stage = CASE WHEN $2 AND stage IN ('new','assigned','contact_pending') THEN 'contacted' ELSE stage END,
@@ -236,6 +288,7 @@ export function leadRoutes(r: Router, { pool }: ServiceContext) {
         [lead.id, contact, b.next_action_at ?? null, b.next_action ?? null]);
       if (contact) await resolveException(c, 'first_response_breach', lead.id, 'Contacted');
       if (b.next_action_at) await resolveException(c, 'followup_overdue', lead.id, 'Follow-up scheduled');
+      await rescore(c, [lead.id]);
     });
     res.status(201).json({ ok: true });
   });
@@ -248,7 +301,14 @@ export function leadRoutes(r: Router, { pool }: ServiceContext) {
       assertOwnerOrAll(req, lead.owner_id);
       if (lead.status === 'merged') throw conflict('This lead was merged into another');
       if (!lead.owner_id && !['lost'].includes(b.stage)) throw conflict('Assign the lead before working it');
-      if (b.stage === 'lost' && !b.lost_reason) throw badRequest('Give the reason the lead was lost', { fields: { lost_reason: 'Required' } });
+      if (b.stage === 'lost' && !b.lost_reason && !b.objection) throw badRequest('Give the reason the lead was lost', { fields: { objection: 'Choose the main objection', lost_reason: 'Required' } });
+      if (b.stage === 'lost') {
+        await closeLost(c, req, lead, b.objection ?? 'Other', b.lost_reason ?? null);
+        if (b.competitor) await c.query('UPDATE leads SET competitor = $2 WHERE id = $1', [lead.id, b.competitor]);
+        await rescore(c, [lead.id]);
+        await auditReq(c, req, 'lead', lead.id, 'stage_changed', { before: { stage: lead.stage }, after: { stage: 'lost', objection: b.objection ?? 'Other' }, reason: b.lost_reason ?? b.objection });
+        return { stage: 'lost', status: 'closed' };
+      }
       if (b.stage === 'nurture' && !b.nurture_reason) throw badRequest('Say why the lead is parked for nurturing', { fields: { nurture_reason: 'Required' } });
       const open = OPEN_STAGES.includes(b.stage);
       const next = b.next_action_at ?? (open && lead.next_action_at && new Date(lead.next_action_at) > new Date() ? lead.next_action_at : null);
@@ -263,6 +323,8 @@ export function leadRoutes(r: Router, { pool }: ServiceContext) {
         [lead.id, `${lead.stage.replace(/_/g, ' ')} → ${b.stage.replace(/_/g, ' ')}`, b.lost_reason ?? b.nurture_reason ?? b.note ?? null, userId(req), req.user!.name]);
       if (!open) for (const k of ['followup_overdue', 'first_response_breach']) await resolveException(c, k, lead.id, `Lead ${b.stage}`);
       if (next) await resolveException(c, 'followup_overdue', lead.id, 'Follow-up scheduled');
+      if (isForward(lead.stage, b.stage)) await markProgress(c, lead.id, `Moved to ${b.stage.replace(/_/g, ' ')}`);
+      await rescore(c, [lead.id]);
       await auditReq(c, req, 'lead', lead.id, 'stage_changed', { before: { stage: lead.stage }, after: { stage: b.stage, next_action_at: next }, reason: b.lost_reason ?? b.nurture_reason ?? b.note });
       return { stage: b.stage, status };
     });
@@ -280,11 +342,15 @@ export function leadRoutes(r: Router, { pool }: ServiceContext) {
         return { owner: d.owner?.name ?? null, note: d.note };
       }
       if (!b.user_id) throw badRequest('Choose a salesperson');
-      if (lead.owner_id && !b.reason) throw badRequest('Give a reason for reassigning', { fields: { reason: 'Required' } });
       const m = await one<{ user_id: string; name: string; active: boolean }>(c, 'SELECT user_id, name, active FROM sales_team WHERE user_id = $1', [b.user_id]);
       if (!m?.active) throw badRequest('That person is not an active member of the sales team');
       if (m.user_id === lead.owner_id) throw badRequest(`${m.name} already owns this lead`);
-      await assignLead(c, lead, m, lead.owner_id ? 'reassign' : 'manual', { reason: b.reason, by: req.user!.name });
+      // A manager may always choose someone other than the engine's pick: that is recorded as an override with a reason.
+      const d = await decide(c, { ...lead, exclude_lead_id: lead.id, exclude_user_id: lead.owner_id });
+      const override = !!d.owner && d.owner.user_id !== m.user_id;
+      if ((lead.owner_id || override) && !b.reason) throw badRequest(override ? `The engine suggests ${d.owner!.name}; give a reason for choosing ${m.name}` : 'Give a reason for reassigning', { fields: { reason: 'Required' } });
+      await assignLead(c, lead, m, override ? 'override' : lead.owner_id ? 'reassign' : 'manual', { reason: b.reason, by: req.user!.name, suggested: d.owner?.name ?? null });
+      await rescore(c, [lead.id]);
       await auditReq(c, req, 'lead', lead.id, lead.owner_id ? 'reassigned' : 'assigned', { before: { owner: lead.owner_name }, after: { owner: m.name }, reason: b.reason });
       return { owner: m.name };
     });
@@ -315,6 +381,8 @@ export function leadRoutes(r: Router, { pool }: ServiceContext) {
       await c.query('UPDATE leads SET customer_id = $2, customer_name = $3, updated_at = now() WHERE id = $1', [lead.id, customer.id, customer.legal_name]);
       await c.query(`UPDATE duplicate_candidates SET status = 'linked', decided_by_name = $3, decided_at = now() WHERE lead_id = $1 AND match_type = 'customer' AND match_id = $2 AND status = 'open'`, [lead.id, customer.id, req.user!.name]);
       await c.query(`INSERT INTO lead_activities (lead_id, kind, summary, by_user, by_name) VALUES ($1, 'system', $2, $3, $4)`, [lead.id, `${b.customer_id ? 'Linked to' : 'Converted to customer'} ${customer.legal_name}`, userId(req), req.user!.name]);
+      await linkAgentCustomer(c, lead.id, customer);
+      await rescore(c, [lead.id]);
       await auditReq(c, req, 'lead', lead.id, 'converted', { after: { customer_id: customer.id, customer: customer.legal_name } });
     });
     res.json({ customer_id: customer.id, customer_name: customer.legal_name });

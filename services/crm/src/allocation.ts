@@ -1,13 +1,14 @@
 import type { Request, Router } from 'express';
 import { z } from 'zod';
 import { type Client, type Pool, type ServiceContext, badRequest, many, notFound, notify, one, optText, parse, requirePermission, tx } from '@erp/platform';
+import { crmSettings } from './settings.ts';
 import { S, auditReq, getDirectory, getParty, normEmail, normGstin, normMobile, raiseException, resolveException, setting, today, type Lead } from './common.ts';
 
-export interface Member { user_id: string; name: string; cities: string[]; states: string[]; categories: string[]; sources: string[]; languages: string[]; min_value: number | null; max_value: number | null; max_active_leads: number | null; weekly_off: number[]; active: boolean; last_assigned_at: string | null }
-interface Rule { id: string; name: string; priority: number; conditions: Conditions; strategy: 'round_robin' | 'least_loaded'; member_ids: string[] }
+export interface Member { user_id: string; name: string; cities: string[]; states: string[]; categories: string[]; sources: string[]; languages: string[]; min_value: number | null; max_value: number | null; max_active_leads: number | null; weekly_off: number[]; active: boolean; last_assigned_at: string | null; shift_start: string | null; shift_end: string | null; shift_name: string | null }
+interface Rule { id: string; name: string; priority: number; conditions: Conditions; strategy: 'round_robin' | 'least_loaded' | 'best_performer'; member_ids: string[] }
 interface Conditions { cities?: string[]; states?: string[]; sources?: string[]; categories?: string[]; languages?: string[]; min_value?: number | null; max_value?: number | null }
-export interface LeadFacts { city: string | null; state_code: string | null; source_code: string; category: string | null; language: string | null; est_value: number | null; mobile?: string | null; email?: string | null; gstin?: string | null; customer_id?: string | null; exclude_lead_id?: string | null }
-export interface TraceEntry { user_id: string; name: string; eligible: boolean; reason: string; active_leads: number }
+export interface LeadFacts { city: string | null; state_code: string | null; source_code: string; category: string | null; language: string | null; est_value: number | null; mobile?: string | null; email?: string | null; gstin?: string | null; customer_id?: string | null; exclude_lead_id?: string | null; exclude_user_id?: string | null }
+export interface TraceEntry { user_id: string; name: string; eligible: boolean; reason: string; active_leads: number; performance?: number | null }
 export interface Decision { owner: Member | null; method: 'auto' | 'sticky' | 'unassigned'; rule: string | null; trace: TraceEntry[]; note: string }
 
 const lc = (a: string[] | undefined) => (a ?? []).map((x) => x.trim().toLowerCase()).filter(Boolean);
@@ -22,6 +23,30 @@ const fits = (list: string[] | undefined, v: string | null) => !v || inList(list
 const memberMatches = (m: Member, f: LeadFacts) =>
   fits(m.cities, f.city) && fits(m.states, f.state_code) && fits(m.sources, f.source_code) && fits(m.categories, f.category) && fits(m.languages, f.language) && valueOk(m.min_value, m.max_value, f.est_value);
 
+/** Minutes since midnight in India (shift hours are set in IST). */
+export const istMinutes = (d = new Date()) => { const t = new Date(d.getTime() + 330 * 60_000); return t.getUTCHours() * 60 + t.getUTCMinutes(); };
+const hm = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+/** "Outside shift (09:30–18:30)" when the person's working hours (from HR) do not cover now; null otherwise. */
+export function outsideShift(m: Pick<Member, 'shift_start' | 'shift_end'>, at = new Date()) {
+  if (!m.shift_start || !m.shift_end) return null;
+  const now = istMinutes(at), a = hm(m.shift_start), b = hm(m.shift_end);
+  const inside = a <= b ? now >= a && now < b : now >= a || now < b;
+  return inside ? null : `Outside shift (${m.shift_start.slice(0, 5)}–${m.shift_end.slice(0, 5)})`;
+}
+
+/** Contact and conversion rates over the window: 60% weight on reaching leads, 40% on winning them. */
+export async function performanceOf(c: Pool | Client, ids: string[], windowDays: number) {
+  const rows = await many<{ user_id: string; assigned: number; contacted: number; won: number }>(c, `
+    WITH a AS (SELECT DISTINCT ON (x.lead_id, x.to_user) x.lead_id, x.to_user FROM lead_assignments x WHERE x.to_user = ANY($1) AND x.at > now() - make_interval(days => $2))
+    SELECT a.to_user AS user_id, count(*)::int AS assigned, count(*) FILTER (WHERE l.first_response_at IS NOT NULL)::int AS contacted, count(*) FILTER (WHERE l.stage = 'won')::int AS won
+    FROM a JOIN leads l ON l.id = a.lead_id GROUP BY a.to_user`, [ids, windowDays]);
+  return new Map(ids.map((id) => {
+    const r = rows.find((x) => x.user_id === id);
+    const contact = r && r.assigned ? r.contacted / r.assigned : 0, conv = r && r.assigned ? r.won / r.assigned : 0;
+    return [id, { assigned: r?.assigned ?? 0, contact_rate: Math.round(contact * 1000) / 10, conversion_rate: Math.round(conv * 1000) / 10, score: Math.round((contact * 0.6 + conv * 0.4) * 1000) / 10 }];
+  }));
+}
+
 /** Who can take a lead right now: active, present, not on a break or weekly off, and under their lead cap. */
 async function availability(c: Pool | Client, members: Member[]) {
   const defaultCap = Number(await setting('crm.max_active_leads_default', 40));
@@ -34,7 +59,8 @@ async function availability(c: Pool | Client, members: Member[]) {
     const n = load.find((x) => x.owner_id === m.user_id)?.n ?? 0;
     const cap = m.max_active_leads ?? defaultCap;
     const status = a?.status ?? (m.weekly_off.includes(dow) ? 'weekly_off' : 'present');
-    const reason = !m.active ? 'Inactive' : status === 'absent' ? 'Absent today' : status === 'leave' ? 'On leave' : status === 'weekly_off' ? 'Weekly off' : a?.on_break ? 'On a break' : n >= cap ? `At lead cap (${n}/${cap})` : 'Available';
+    const off = outsideShift(m);
+    const reason = !m.active ? 'Inactive' : status === 'absent' ? 'Absent today' : status === 'leave' ? 'On leave' : status === 'weekly_off' ? 'Weekly off' : a?.on_break ? 'On a break' : off ? off : n >= cap ? `At lead cap (${n}/${cap})` : 'Available';
     return { member: m, eligible: reason === 'Available', reason, active_leads: n };
   });
 }
@@ -65,31 +91,34 @@ export async function decide(c: Pool | Client, f: LeadFacts): Promise<Decision> 
   }
   if (stickyId) {
     const a = avail.find((x) => x.member.user_id === stickyId);
-    if (a?.eligible) return { owner: a.member, method: 'sticky', rule: null, trace: trace([a]), note: stickyWhy };
+    if (a?.eligible && a.member.user_id !== f.exclude_user_id) return { owner: a.member, method: 'sticky', rule: null, trace: trace([a]), note: stickyWhy };
   }
   const rules = await many<Rule>(c, `SELECT * FROM allocation_rules WHERE status = 'active' ORDER BY priority, created_at`);
   const rule = rules.find((r) => ruleMatches(r.conditions, f) && r.member_ids.length);
   const pool = rule ? avail.filter((a) => rule.member_ids.includes(a.member.user_id)) : avail.filter((a) => memberMatches(a.member, f));
-  const eligible = pool.filter((a) => a.eligible);
-  const t = trace(pool);
+  const eligible = pool.filter((a) => a.eligible && a.member.user_id !== f.exclude_user_id);
+  const strategy = rule?.strategy ?? 'round_robin';
+  const perf = strategy === 'best_performer' ? await performanceOf(c, pool.map((a) => a.member.user_id), Number((await crmSettings(c)).performance_window_days)) : null;
+  const t = trace(pool).map((x) => ({ ...x, performance: perf?.get(x.user_id)?.score ?? null }));
   const stickyNote = stickyId ? `${stickyWhy}, but ${avail.find((x) => x.member.user_id === stickyId)?.reason.toLowerCase() ?? 'not in the sales team'}. ` : '';
   if (!eligible.length) return { owner: null, method: 'unassigned', rule: rule?.name ?? null, trace: t, note: `${stickyNote}Nobody in ${rule ? `“${rule.name}”` : 'the matching team'} is available` };
-  const strategy = rule?.strategy ?? 'round_robin';
   const pick = eligible.sort((a, b) =>
-    strategy === 'least_loaded' && a.active_leads !== b.active_leads ? a.active_leads - b.active_leads
+    strategy === 'best_performer' && perf!.get(a.member.user_id)!.score !== perf!.get(b.member.user_id)!.score ? perf!.get(b.member.user_id)!.score - perf!.get(a.member.user_id)!.score
+      : strategy === 'least_loaded' && a.active_leads !== b.active_leads ? a.active_leads - b.active_leads
       : (a.member.last_assigned_at ? new Date(a.member.last_assigned_at).getTime() : 0) - (b.member.last_assigned_at ? new Date(b.member.last_assigned_at).getTime() : 0) || a.member.name.localeCompare(b.member.name))[0];
-  return { owner: pick.member, method: 'auto', rule: rule?.name ?? null, trace: t, note: `${stickyNote}${rule ? `Rule “${rule.name}”` : 'Profile match'}, ${strategy.replace('_', ' ')}` };
+  const pf = perf?.get(pick.member.user_id);
+  return { owner: pick.member, method: 'auto', rule: rule?.name ?? null, trace: t, note: `${stickyNote}${rule ? `Rule “${rule.name}”` : 'Profile match'}, ${strategy.replace(/_/g, ' ')}${pf ? ` (${pf.contact_rate}% contact, ${pf.conversion_rate}% conversion)` : ''}` };
 }
 
 /** Gives a lead to someone, keeps the reassignment history and tells the new owner. */
-export async function assignLead(c: Client, lead: Lead, to: { user_id: string; name: string } | null, method: 'auto' | 'sticky' | 'manual' | 'reassign' | 'unassigned', p: { rule?: string | null; reason?: string | null; by: string; trace?: unknown }) {
+export async function assignLead(c: Client, lead: Lead, to: { user_id: string; name: string } | null, method: 'auto' | 'sticky' | 'manual' | 'reassign' | 'unassigned' | 'override' | 'bulk' | 'rebalance' | 'sla' | 'revive' | 'agent', p: { rule?: string | null; reason?: string | null; by: string; trace?: unknown; suggested?: string | null }) {
   await c.query(`
     UPDATE leads SET owner_id = $2, owner_name = $3, assigned_at = CASE WHEN $2::uuid IS NULL THEN assigned_at ELSE now() END,
       stage = CASE WHEN stage = 'new' AND $2::uuid IS NOT NULL THEN 'assigned' ELSE stage END,
       allocation_trace = coalesce($4, allocation_trace), updated_at = now(), version = version + 1 WHERE id = $1`,
     [lead.id, to?.user_id ?? null, to?.name ?? null, p.trace ? JSON.stringify(p.trace) : null]);
-  await c.query(`INSERT INTO lead_assignments (lead_id, from_user, from_name, to_user, to_name, method, rule_name, reason, by_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [lead.id, lead.owner_id, lead.owner_name, to?.user_id ?? null, to?.name ?? null, method, p.rule ?? null, p.reason ?? null, p.by]);
+  await c.query(`INSERT INTO lead_assignments (lead_id, from_user, from_name, to_user, to_name, method, rule_name, reason, by_name, suggested_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [lead.id, lead.owner_id, lead.owner_name, to?.user_id ?? null, to?.name ?? null, method, p.rule ?? null, p.reason ?? null, p.by, p.suggested ?? null]);
   if (to) {
     await c.query('UPDATE sales_team SET last_assigned_at = now() WHERE user_id = $1', [to.user_id]);
     await c.query(`INSERT INTO lead_activities (lead_id, kind, summary, by_name) VALUES ($1, 'assignment', $2, $3)`, [lead.id, `Assigned to ${to.name} (${method}${p.rule ? `, ${p.rule}` : ''})${p.reason ? `: ${p.reason}` : ''}`, p.by]);
@@ -98,10 +127,10 @@ export async function assignLead(c: Client, lead: Lead, to: { user_id: string; n
   }
 }
 
-export async function autoAssign(c: Client, lead: Lead, by: string) {
-  const d = await decide(c, { ...lead, exclude_lead_id: lead.id });
+export async function autoAssign(c: Client, lead: Lead, by: string, o: { method?: 'auto' | 'bulk' | 'rebalance' | 'sla' | 'revive'; exclude_user_id?: string | null; reason?: string } = {}) {
+  const d = await decide(c, { ...lead, exclude_lead_id: lead.id, exclude_user_id: o.exclude_user_id ?? null });
   const trace = { at: new Date().toISOString(), method: d.method, rule: d.rule, note: d.note, candidates: d.trace, chosen: d.owner?.name ?? null };
-  if (d.owner) await assignLead(c, lead, { user_id: d.owner.user_id, name: d.owner.name }, d.method, { rule: d.rule, reason: d.note, by, trace });
+  if (d.owner) await assignLead(c, lead, { user_id: d.owner.user_id, name: d.owner.name }, d.method === 'auto' && o.method ? o.method : d.method, { rule: d.rule, reason: o.reason ? `${o.reason}. ${d.note}` : d.note, by, trace });
   else {
     await c.query('UPDATE leads SET allocation_trace = $2 WHERE id = $1', [lead.id, JSON.stringify(trace)]);
     await c.query(`INSERT INTO lead_assignments (lead_id, method, rule_name, reason, by_name) VALUES ($1, 'unassigned', $2, $3, $4)`, [lead.id, d.rule, d.note, by]);
@@ -132,7 +161,7 @@ const conditionsBody = z.object({
 });
 const ruleBody = z.object({
   name: z.string().trim().min(2).max(120), priority: z.number().int().min(1).max(10000).default(100), conditions: conditionsBody.default({}),
-  strategy: z.enum(['round_robin', 'least_loaded']).default('round_robin'), member_ids: z.array(z.uuid()).min(1, 'Choose at least one salesperson').max(50),
+  strategy: z.enum(['round_robin', 'least_loaded', 'best_performer']).default('round_robin'), member_ids: z.array(z.uuid()).min(1, 'Choose at least one salesperson').max(50),
   status: z.enum(['active', 'inactive']).default('active'),
 });
 const sourceBody = z.object({
@@ -148,7 +177,8 @@ export function allocationRoutes(r: Router, { pool }: ServiceContext) {
     const members = await many<Member & Record<string, unknown>>(pool, 'SELECT * FROM sales_team ORDER BY active DESC, name');
     const avail = await availability(pool, members);
     const att = await many<{ user_id: string; status: string; on_break: boolean; note: string | null }>(pool, 'SELECT * FROM attendance WHERE day = current_date');
-    res.json(avail.map((a) => ({ ...a.member, available: a.eligible, availability: a.reason, active_leads: a.active_leads, attendance: att.find((x) => x.user_id === a.member.user_id) ?? null })));
+    const perf = await performanceOf(pool, members.map((m) => m.user_id), Number((await crmSettings(pool)).performance_window_days));
+    res.json(avail.map((a) => ({ ...a.member, available: a.eligible, availability: a.reason, active_leads: a.active_leads, attendance: att.find((x) => x.user_id === a.member.user_id) ?? null, performance: perf.get(a.member.user_id) })));
   });
 
   /** People who could join the sales team (internal users not yet in it). */

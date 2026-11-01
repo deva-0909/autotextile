@@ -1,6 +1,6 @@
 import type { Router } from 'express';
 import { z } from 'zod';
-import { type ServiceContext, badRequest, callService, conflict, hasPermission, many, notFound, one, optText, parse, publish, reqText, requirePermission, tx } from '@erp/platform';
+import { type Client, type ServiceContext, badRequest, callService, conflict, hasPermission, many, notFound, one, optText, parse, publish, reqText, requirePermission, tx } from '@erp/platform';
 import { OFFICE_STATE, S, assertSelfOr, auditReq, daysIn, fyOf, localNumber, selfEmployee, today } from './common.ts';
 import { type PtSlab, computePayslip } from './statutory.ts';
 
@@ -23,6 +23,15 @@ export async function grantLeave(c: Parameters<typeof one>[0], employeeId: strin
   const start = new Date(`20${fy.slice(0, 2)}-04-01T00:00:00Z`), j = new Date(`${doj}T00:00:00Z`);
   const months = j > start ? 12 - ((j.getUTCFullYear() - start.getUTCFullYear()) * 12 + j.getUTCMonth() - start.getUTCMonth()) : 12;
   for (const t of types) await c.query(`INSERT INTO leave_balances (employee_id, leave_type, fy, entitled) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [employeeId, t.code, fy, Math.round((t.annual_quota * Math.max(0, months)) / 12 * 2) / 2]);
+}
+
+/** Tells CRM (lead allocation) the hours an employee works: their own hours if HR set them, else their shift's. */
+export async function publishShift(c: Client, employeeId: string) {
+  const e = await one<{ user_id: string | null; start_time: string | null; end_time: string | null; shift_name: string | null }>(c, `
+    SELECT e.user_id, coalesce(e.work_start, s.start_time)::text AS start_time, coalesce(e.work_end, s.end_time)::text AS end_time,
+      CASE WHEN e.work_start IS NOT NULL THEN 'Own hours' ELSE s.name END AS shift_name
+    FROM employees e LEFT JOIN shifts s ON s.id = e.shift_id WHERE e.id = $1`, [employeeId]);
+  if (e?.user_id) await publish(c, S, 'hrms.shift.changed', { user_id: e.user_id, employee_id: employeeId, start_time: e.start_time?.slice(0, 5) ?? null, end_time: e.end_time?.slice(0, 5) ?? null, shift_name: e.shift_name });
 }
 
 export function peopleRoutes(r: Router, { pool }: ServiceContext) {
@@ -49,7 +58,7 @@ export function peopleRoutes(r: Router, { pool }: ServiceContext) {
   });
 
   r.get('/employees/:id', async (req, res) => {
-    const e = await one<{ id: string }>(pool, `SELECT e.*, e.date_of_joining::text, e.confirmed_on::text, e.last_working_day::text, m.name AS manager_name, s.code AS shift_code, s.name AS shift_name FROM employees e LEFT JOIN employees m ON m.id = e.manager_id LEFT JOIN shifts s ON s.id = e.shift_id WHERE e.id::text = $1 OR e.code = $1`, [req.params.id]);
+    const e = await one<{ id: string }>(pool, `SELECT e.*, e.date_of_joining::text, e.confirmed_on::text, e.last_working_day::text, m.name AS manager_name, s.code AS shift_code, s.name AS shift_name, s.start_time::text AS shift_start, s.end_time::text AS shift_end, e.work_start::text, e.work_end::text FROM employees e LEFT JOIN employees m ON m.id = e.manager_id LEFT JOIN shifts s ON s.id = e.shift_id WHERE e.id::text = $1 OR e.code = $1`, [req.params.id]);
     if (!e) throw notFound('Employee');
     await assertSelfOr(pool, req, e.id, 'hrms.read');
     const canPay = hasPermission(req.user, 'hrms.payroll.manage');
@@ -107,10 +116,29 @@ export function peopleRoutes(r: Router, { pool }: ServiceContext) {
       for (const item of ONBOARDING) await c.query(`INSERT INTO checklist (employee_id, stage, item) VALUES ($1, 'onboarding', $2)`, [e!.id, item]);
       await grantLeave(c, e!.id, b.date_of_joining);
       await c.query(`INSERT INTO employee_events (employee_id, kind, detail, effective_date, by_name) VALUES ($1, 'hired', $2, $3, $4)`, [e!.id, `${b.designation}, ${b.department} at ${b.location}`, b.date_of_joining, req.user!.name]);
+      await publishShift(c, e!.id);
       await auditReq(c, req, 'employee', e!.id, 'hired', { after: { ...b, bank_account: b.bank_account ? `••••${b.bank_account.slice(-4)}` : null } });
       return { id: e!.id, code };
     });
     res.status(201).json(out);
+  });
+
+  /** HR sets the shift and, where needed, an employee's own working hours (they decide when leads reach a salesperson). */
+  r.put('/employees/:id/hours', requirePermission('hrms.attendance.manage'), async (req, res) => {
+    const t = z.preprocess((v) => (v === '' ? null : v), z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM').nullable().optional());
+    const b = parse(z.object({ shift_code: z.string().optional(), work_start: t, work_end: t }), req.body);
+    if (!!b.work_start !== !!b.work_end) throw badRequest('Give both the start and the end time, or neither', { fields: { work_end: 'Required with a start time' } });
+    await tx(pool, async (c) => {
+      const before = await one<{ shift_id: string | null; work_start: string | null; work_end: string | null }>(c, 'SELECT shift_id, work_start::text, work_end::text FROM employees WHERE id = $1 FOR UPDATE', [req.params.id]);
+      if (!before) throw notFound('Employee');
+      const shift = b.shift_code ? await one<{ id: string }>(c, 'SELECT id FROM shifts WHERE code = $1', [b.shift_code]) : null;
+      if (b.shift_code && !shift) throw badRequest('Unknown shift', { fields: { shift_code: 'Choose a shift' } });
+      await c.query('UPDATE employees SET shift_id = coalesce($2, shift_id), work_start = $3, work_end = $4, updated_at = now() WHERE id = $1', [req.params.id, shift?.id ?? null, b.work_start ?? null, b.work_end ?? null]);
+      await c.query(`INSERT INTO employee_events (employee_id, kind, detail, by_name) VALUES ($1, 'hours_changed', $2, $3)`, [req.params.id, b.work_start ? `Working hours ${b.work_start}–${b.work_end}` : `Shift ${b.shift_code ?? 'unchanged'}, own hours cleared`, req.user!.name]);
+      await publishShift(c, String(req.params.id));
+      await auditReq(c, req, 'employee', String(req.params.id), 'hours_changed', { before, after: b });
+    });
+    res.json({ ok: true });
   });
 
   r.put('/employees/:id', requirePermission('hrms.employee.manage'), async (req, res) => {
@@ -123,6 +151,7 @@ export function peopleRoutes(r: Router, { pool }: ServiceContext) {
         pan = coalesce($8, pan), uan = coalesce($9, uan), esic_no = coalesce($10, esic_no), bank_account = coalesce($11, bank_account), ifsc = coalesce($12, ifsc), shift_id = coalesce($13, shift_id), weekly_off = coalesce($14, weekly_off), overtime_eligible = coalesce($15, overtime_eligible), user_id = coalesce($16, user_id), updated_at = now() WHERE id = $1`,
       [req.params.id, b.name, b.email ?? null, b.phone ?? null, b.designation ?? null, b.department ?? null, b.manager_id ?? null, b.pan ?? null, b.uan ?? null, b.esic_no ?? null, b.bank_account ?? null, b.ifsc ?? null, shift?.id ?? null, b.weekly_off ?? null, b.overtime_eligible ?? null, b.user_id ?? null]);
       if (b.bank_account && b.bank_account !== before.bank_account) await c.query(`INSERT INTO employee_events (employee_id, kind, detail, by_name) VALUES ($1, 'bank_changed', 'Salary bank account changed', $2)`, [req.params.id, req.user!.name]);
+      await publishShift(c, String(req.params.id));
       await auditReq(c, req, 'employee', String(req.params.id), 'updated', { before: { ...before, bank_account: before.bank_account ? '••••' : null }, after: { ...b, bank_account: b.bank_account ? '••••' : undefined } });
     });
     res.json({ ok: true });

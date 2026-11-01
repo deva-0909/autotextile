@@ -90,6 +90,7 @@ const PARTIES: [string, string, string, string, string, string, Record<string, u
   ['supplier', 'Shree Ambica Knitters', '24', 'AAPFS6612G', 'Surat', 'Grey fabric', { fabric_categories: ['Single Jersey', 'Rib'] }],
   ['supplier', 'Velavan Knit Fab', '33', 'AAFFV2290D', 'Tiruppur', 'Grey fabric', { fabric_categories: ['Interlock', 'Fleece'] }],
   ['supplier', 'Ganesh Yarn & Fabrics', '24', 'AAGPG4471C', 'Surat', 'Grey fabric', { fabric_categories: ['Single Jersey Lycra'] }],
+  ['supplier', 'Agarwal Trade Links', '24', 'ABJPA4321K', 'Surat', 'Commission agent', {}],
   ['manufacturer', 'Arvind Knit Mills', '24', 'AABCA1000B', 'Ahmedabad', 'Knitting', {}],
   ['manufacturer', 'KPR Knitting Unit', '33', 'AABCK2000C', 'Tiruppur', 'Knitting', {}],
   ['mill', 'Surat Process House', '24', 'AAFCS3131E', 'Surat', 'Dyeing', { processes: ['Pretreatment', 'Dyeing', 'Washing', 'Compacting'], capacity_kg_per_day: 12000, tat_days: 7 }],
@@ -166,6 +167,7 @@ export const DEMO_USERS: { email: string; name: string; designation: string; rol
   { email: 'purchase@kolkatahosiery.example', name: 'Debashis Roy', designation: 'Customer portal: buyer', role: 'customer_buyer', scope: 'none', party: 'Kolkata Hosiery Works' },
   { email: 'supplier@ambica.example', name: 'Ambica Dispatch Desk', designation: 'Supplier portal user', role: 'supplier_portal', scope: 'none', party: 'Shree Ambica Knitters' },
   { email: 'mill@suratprocess.example', name: 'Surat Process House Desk', designation: 'Mill portal user', role: 'mill_user', scope: 'none', party: 'Surat Process House' },
+  { email: 'agent@agarwaltrade.example', name: 'Ramesh Agarwal', designation: 'Commission agent (portal)', role: 'commission_agent', scope: 'none', party: 'Agarwal Trade Links' },
 ];
 
 /** Creates demo users with roles and data scope. Portal users are linked to their partner after masters exist. */
