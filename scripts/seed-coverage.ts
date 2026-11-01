@@ -9,7 +9,8 @@
  */
 type Call = <T = any>(svc: string, token: string | null, method: string, path: string, body?: unknown, headers?: Record<string, string>) => Promise<T>;
 
-export async function seedCoverage(o: { call: Call; login: (email: string) => Promise<string>; party: (name: string) => string; drain: () => Promise<unknown> }) {
+type Q = { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }> };
+export async function seedCoverage(o: { call: Call; login: (email: string) => Promise<string>; party: (name: string) => string; drain: () => Promise<unknown>; finance?: Q }) {
   const { call } = o;
   const tok: Record<string, string> = {};
   const as = async (email: string) => (tok[email] ??= await o.login(email));
@@ -36,8 +37,12 @@ export async function seedCoverage(o: { call: Call; login: (email: string) => Pr
   const ourGstin = books.find((b) => b.is_primary)!.gstin;
 
   await step('sales return', async () => {
-    const fs = list(await call<{ id: string; status: string }[]>('fulfilment', await as('dispatch@textile.local'), 'GET', '/fulfilments?pageSize=200'));
-    for (const f of fs.filter((x) => ['dispatched', 'delivered'].includes(x.status)).slice(0, 6)) {
+    const fs = list(await call<{ id: string; status: string; customer_id: string }[]>('fulfilment', await as('dispatch@textile.local'), 'GET', '/fulfilments?pageSize=200'));
+    // A customer who paid online first: the credit note leaves them money that can then be refunded to the card or UPI.
+    const online = new Set(list(await call<{ customer_id: string; gateway: string; status: string }[]>('commerce', await as('accounts@textile.local'), 'GET', '/payments?pageSize=300'))
+      .filter((x) => x.gateway !== 'offline' && x.status === 'success').map((x) => x.customer_id));
+    const ready = fs.filter((x) => ['dispatched', 'delivered'].includes(x.status)).sort((a, b) => Number(online.has(b.customer_id)) - Number(online.has(a.customer_id)));
+    for (const f of ready.slice(0, 6)) {
       const d = await call<{ pick_list?: { barcode: string }[] }>('fulfilment', await as('dispatch@textile.local'), 'GET', `/fulfilments/${f.id}`);
       const roll = d.pick_list?.[0]?.barcode;
       if (!roll) continue;
@@ -187,5 +192,117 @@ export async function seedCoverage(o: { call: Call; login: (email: string) => Pr
   await step('go-live incident and decision', async () => {
     await call('golive', await as('sales@textile.local'), 'POST', '/incidents', { title: 'Invoice print shows the old address', description: 'Print preview on the dispatch PC still shows the Udhna address', severity: 'P3', module: 'Fulfilment' });
     await call('golive', await as('owner@textile.local'), 'POST', '/go-decision', { decision: 'no_go', rollback_plan: 'Not applicable', notes: 'Finish UAT on accounts and the payroll dry run first' });
+  });
+
+  await step('price list from invoiced rates', async () => {
+    if (!o.finance) throw new Error('finance pool not given');
+    // Rates actually charged this year: list price at the top of the range, volume tiers at the average and the lowest.
+    const { rows } = await o.finance.query(`SELECT sku, round(max(taxable / qty_kg)) AS top, round(sum(taxable) / sum(qty_kg)) AS avg, round(min(taxable / qty_kg)) AS low
+      FROM tax_lines WHERE direction = 'outward' AND doc_type = 'invoice' AND qty_kg > 0 AND sku IS NOT NULL GROUP BY sku`);
+    const admin = await as('admin@textile.local');
+    const products = list(await call<{ id: string; sku: string }[]>('masters', admin, 'GET', '/products?pageSize=50'));
+    const fyFrom = `${new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1}-04-01`;
+    const pl = await call<{ id: string }>('masters', admin, 'POST', '/price-lists', { code: 'STD-2627', name: 'Standard dealer price list 2026-27', valid_from: fyFrom, valid_to: null, status: 'active' });
+    const items = rows.flatMap((r: { sku: string; top: string; avg: string; low: string }) => {
+      const p = products.find((x) => x.sku === r.sku);
+      return p ? [{ product_id: p.id, rate_per_uom: Number(r.top), min_qty: 0 }, { product_id: p.id, rate_per_uom: Number(r.avg), min_qty: 500 }, { product_id: p.id, rate_per_uom: Number(r.low), min_qty: 2000 }] : [];
+    });
+    if (!items.length) throw new Error('no invoiced rates to build the price list from');
+    await call('masters', admin, 'PUT', `/price-lists/${pl.id}/items`, { items });
+  });
+
+  await step('customer portal cart and company settings', async () => {
+    const buyer = await as('buyer@srimurugan.example');
+    const cat = list(await call<{ id: string }[]>('commerce', buyer, 'GET', '/catalogue'));
+    const lines: { product_id: string; lot_id: string; kg: number }[] = [];
+    for (const p of cat.slice(0, 4)) {
+      const d = await call<{ id: string; moq_kg: number; lots: { id: string; available_kg: number }[] }>('commerce', buyer, 'GET', `/catalogue/${p.id}`);
+      const lot = d.lots.find((l) => l.available_kg >= Math.max(100, d.moq_kg));
+      if (lot && lines.length < 2) lines.push({ product_id: d.id, lot_id: lot.id, kg: Math.max(100, d.moq_kg) });
+    }
+    if (!lines.length) throw new Error('no lot with enough stock for a cart');
+    await call('commerce', buyer, 'PUT', '/portal/cart', { lines });
+    await call('commerce', buyer, 'PUT', '/portal/company/settings', { order_approval_limit: 250000, default_ship_to: 'Sri Murugan Garments, 14 Kumaran Road, Tiruppur 641601' });
+  });
+
+  await step('enquiry from an existing customer', async () => {
+    const mgr = await as('salesmgr@textile.local');
+    const parties = list(await call<{ id: string; party_type: string; phone: string | null; legal_name: string }[]>('masters', await as('admin@textile.local'), 'GET', '/parties?pageSize=200'));
+    const leads = list(await call<{ mobile: string | null }[]>('crm', mgr, 'GET', '/leads?pageSize=200'));
+    const known = new Set(leads.map((l) => l.mobile));
+    const c = parties.find((p) => p.party_type === 'customer' && p.phone && !known.has(p.phone.replace(/\D/g, '').slice(-10)));
+    if (!c) throw new Error('no customer phone free for an enquiry');
+    // Someone at an existing customer calls in as if new: the lead is flagged as a possible duplicate of the customer.
+    await call('crm', mgr, 'POST', '/leads', { source_code: 'PHONE', name: 'Purchase desk', company: c.legal_name, mobile: c.phone!.replace(/\D/g, '').slice(-10), state_code: '33' });
+  });
+
+  await step('supplier bank change approved', async () => {
+    const owner = await as('owner@textile.local');
+    const pend = list(await call<{ id: string; approval_type: string; ref_id: string }[]>('governance', owner, 'GET', '/approvals?f_status=pending&pageSize=200')).filter((x) => x.approval_type === 'party_bank_account');
+    if (!pend.length) throw new Error('no bank change waiting');
+    // The first is approved after a call-back to the supplier; payments to it are then watched for 30 days.
+    await call('governance', owner, 'POST', `/approvals/${pend[0]!.id}/decide`, { decision: 'approved', comment: 'Confirmed on a call-back to the supplier’s accounts head on the number in our records' });
+  });
+
+  await step('customer credit limit change for approval', async () => {
+    const mgr = await as('salesmgr@textile.local');
+    const id = o.party('Rupa Apparel House');
+    const p = await call<Record<string, unknown> & { credit_limit: number | null; version: number }>('masters', mgr, 'GET', `/parties/${id}`);
+    const limit = Math.round((Number(p.credit_limit ?? 500000) * 1.5) / 50000) * 50000;
+    await call('masters', mgr, 'PATCH', `/parties/${id}`, { ...p, credit_limit: limit, reason: 'Buyer has paid within terms for six months and asked for a higher limit for the winter range' });
+  });
+
+  await step('blind count of one rack', async () => {
+    const op = await as('stores.operator@textile.local');
+    const st = await call<{ id: string }>('inventory', op, 'POST', '/stocktakes', { warehouse_id: SRT, location_prefix: 'A-01-R1', blind: true });
+    const view = await call<{ variance: { missing: { barcode: string; expected_kg?: number; weight_kg?: number }[] } }>('inventory', await as('owner@textile.local'), 'GET', `/stocktakes/${st.id}`);
+    const rolls = view.variance?.missing ?? [];
+    if (rolls.length < 3) throw new Error(`rack A-01-R1 has only ${rolls.length} rolls`);
+    const [notFound, light, ...rest] = rolls;
+    const kg = (r: { expected_kg?: number; weight_kg?: number }) => Number(r.expected_kg ?? r.weight_kg);
+    await call('inventory', op, 'POST', `/stocktakes/${st.id}/count`, { barcode: light!.barcode, weight_kg: Math.round((kg(light!) - 1.8) * 100) / 100 });
+    for (const r of rest) await call('inventory', op, 'POST', `/stocktakes/${st.id}/count`, { barcode: r.barcode, weight_kg: kg(r) });
+    await call('inventory', op, 'PUT', `/stocktakes/${st.id}/reasons`, { reasons: [
+      { barcode: notFound!.barcode, reason_code: 'not_found', note: 'Searched rack A-01 and the dispatch bay; not found' },
+      { barcode: light!.barcode, reason_code: 'weight_moisture', note: 'Roll dried out near the window; 1.8 kg lighter' },
+    ] });
+    await call('inventory', op, 'POST', `/stocktakes/${st.id}/submit`, { reason: 'Monthly cycle count of rack A-01-R1' });
+    await o.drain();
+    for (const who of ['accounts@textile.local', 'owner@textile.local']) {
+      const t = await as(who);
+      const a = list(await call<{ id: string; ref_id: string }[]>('governance', t, 'GET', '/approvals?f_status=pending&pageSize=200')).find((x) => x.ref_id === st.id);
+      if (a) { await call('governance', t, 'POST', `/approvals/${a.id}/decide`, { decision: 'approved', comment: 'Checked the count sheet with the stores manager' }); await o.drain(); }
+    }
+  });
+
+  await step('notifications read', async () => {
+    for (const who of ['owner@textile.local', 'accounts@textile.local', 'salesmgr@textile.local']) {
+      const t = await as(who);
+      const ns = list(await call<{ id: string }[]>('governance', t, 'GET', '/notifications'));
+      for (const n of ns.slice(Math.ceil(ns.length / 2))) await call('governance', t, 'POST', `/notifications/${n.id}/read`, {});
+    }
+  });
+
+  await step('password reset request', async () => {
+    await call('identity', null, 'POST', '/auth/password-reset/request', { email: 'purchase.exec@textile.local' });
+  });
+
+  await step('daily brief and assistant question', async () => {
+    const owner = await as('owner@textile.local');
+    await call('insights', owner, 'GET', '/brief');
+    // The assistant answers from the data (or says why it cannot, when no AI key is set); either way the question is logged.
+    await call('insights', owner, 'POST', '/assistant/ask', { question: 'Which customers are overdue by more than 30 days, and by how much?' }).catch(() => undefined);
+  });
+
+  await step('UAT sign-off', async () => {
+    await call('golive', await as('owner@textile.local'), 'POST', '/uat/signoff', { scope: 'P2', decision: 'approved', conditions: 'Approved for purchasing; invoice capture to be re-tested with October bills', role: 'Owner' });
+  });
+
+  // Last: close the three months before this one as a normal month-end close. Last month's closing stock is valued and posted, so the
+  // books carry the stock actually on hand. Later demo entries are dated in November.
+  await step('month-end close of the last three months', async () => {
+    const acc = await as('accounts@textile.local');
+    // The three months before this one, oldest first; earlier months of the year are already closed.
+    for (const m of [month(3), month(2), month(1)]) await call('finance', acc, 'POST', `/periods/${m}/lock`, { note: 'Month-end close: bank reconciled, GST and TDS returns reviewed', value_stock: true });
   });
 }

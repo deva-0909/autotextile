@@ -773,7 +773,7 @@ export async function seedOperations(services: RunningService[]) {
     await drain();
     try { await seedOpsExtras({ call: call as never, login, party, drain }); } catch (e) { console.error(`[seed] operations demo skipped: ${(e as Error).message}`); }
     try { await seedLeadDesk({ call: call as never, login, crm: services.find((s) => s.ctx.name === 'crm')!.ctx.pool, party, drain }); } catch (e) { console.error(`[seed] lead management demo skipped: ${(e as Error).message}`); }
-    try { await seedCoverage({ call: call as never, login, party, drain }); } catch (e) { console.error(`[seed] coverage demo skipped: ${(e as Error).message}`); }
+    try { await seedCoverage({ call: call as never, login, party, drain, finance: services.find((s) => s.ctx.name === 'finance')!.ctx.pool as never }); } catch (e) { console.error(`[seed] coverage demo skipped: ${(e as Error).message}`); }
     await drain();
     await runProcurementChecks(services.find((s) => s.ctx.name === 'procurement')!.ctx.pool);
     await runJobworkChecks(services.find((s) => s.ctx.name === 'jobwork')!.ctx.pool);
