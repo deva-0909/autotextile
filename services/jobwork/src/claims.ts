@@ -30,7 +30,7 @@ export function claimRoutes(r: Router, { pool }: ServiceContext) {
   r.post('/claims', requirePermission('jobwork.claim.manage'), async (req, res) => {
     const b = parse(z.object({
       job_order_id: z.uuid(), defect_types: z.array(z.string()).min(1, 'Choose at least one defect'), description: reqText(2000),
-      kg_affected: z.number().positive(), samples: optText(500), claim_type: z.enum(['debit_note', 'rework', 'replacement', 'none']).default('debit_note'),
+      kg_affected: z.number().positive(), samples: optText(500), claim_type: z.enum(['debit_note', 'rework', 'replacement', 'none', 'shortage']).default('debit_note'),
       amount: z.number().min(0).default(0),
     }), req.body);
     const out = await tx(pool, async (c) => {
@@ -54,7 +54,7 @@ export function claimRoutes(r: Router, { pool }: ServiceContext) {
     const b = parse(z.object({
       status: z.enum(['open', 'under_review', 'accepted', 'rejected', 'closed']),
       root_cause: optText(1000), responsibility: z.enum(['mill', 'supplier', 'internal', 'undetermined']),
-      claim_type: z.enum(['debit_note', 'rework', 'replacement', 'none']), amount: z.number().min(0), resolution: optText(1000),
+      claim_type: z.enum(['debit_note', 'rework', 'replacement', 'none', 'shortage']), amount: z.number().min(0), resolution: optText(1000),
     }), req.body);
     if (['accepted', 'rejected', 'closed'].includes(b.status) && !b.resolution) throw badRequest('Record the resolution', { fields: { resolution: 'Required' } });
     res.json(await tx(pool, async (c) => {
@@ -65,8 +65,8 @@ export function claimRoutes(r: Router, { pool }: ServiceContext) {
         closed_at = CASE WHEN $2 = 'closed' THEN now() END WHERE id = $1 RETURNING *`,
         [req.params.id, b.status, b.root_cause ?? null, b.responsibility, b.claim_type, b.amount, b.resolution ?? null]);
       // Accounting (P8) raises the debit note from this event.
-      if (b.status === 'accepted' && b.claim_type === 'debit_note' && b.amount > 0)
-        await publish(c, S, 'jobwork.claim.accepted', { claim_id: req.params.id, number: before.number, mill_id: before.mill_id, amount: b.amount });
+      if (b.status === 'accepted' && ['debit_note', 'shortage'].includes(b.claim_type) && b.amount > 0 && before.status !== 'accepted')
+        await publish(c, S, 'jobwork.claim.accepted', { claim_id: req.params.id, number: before.number, mill_id: before.mill_id, mill_name: before.mill_name, amount: b.amount, claim_type: b.claim_type, reason: b.resolution ?? null, date: new Date().toISOString().slice(0, 10) });
       await auditReq(c, req, 'quality_claim', String(req.params.id), 'updated', { before, after, reason: b.resolution });
       return after;
     }));

@@ -28,6 +28,8 @@ import { JobworkCockpit } from './pages/jobwork/Cockpit';
 import { JobOrderDetailPage, JobOrdersPage } from './pages/jobwork/Orders';
 import { MillDetailPage, MillsPage } from './pages/jobwork/Mills';
 import { ClaimsPage } from './pages/jobwork/Claims';
+import { MillLossPage } from './pages/jobwork/MillLoss';
+import { CashBookPage, CounterSalePage, CounterSalesListPage, ManualInvoiceDetailPage, ManualInvoiceEditPage, ManualInvoicesPage } from './pages/finance/Invoices';
 import { InventoryOverview } from './pages/inventory/Overview';
 import { InwardDetailPage, InwardsPage } from './pages/inventory/Inward';
 import { QcPage, ScanStationPage } from './pages/inventory/Qc';
@@ -185,6 +187,7 @@ export default function App() {
         <Route path="/jobwork/mills" element={<Guard perms={['jobwork.read']}><MillsPage /></Guard>} />
         <Route path="/jobwork/mills/:id" element={<Guard perms={['jobwork.read']}><MillDetailPage /></Guard>} />
         <Route path="/jobwork/claims" element={<Guard perms={['jobwork.read']}><ClaimsPage /></Guard>} />
+        <Route path="/jobwork/losses" element={<Guard perms={['jobwork.read']}><MillLossPage /></Guard>} />
         <Route path="/jobwork/claims/:id" element={<Navigate to="/jobwork/claims" replace />} />
         <Route path="/inventory" element={<Guard perms={['inventory.read']}><InventoryOverview /></Guard>} />
         <Route path="/inventory/scan" element={<Guard perms={['inventory.read']}><ScanStationPage /></Guard>} />
@@ -238,6 +241,13 @@ export default function App() {
         <Route path="/fulfilment/returns" element={<Guard perms={['fulfilment.read']}><ReturnsPage /></Guard>} />
         <Route path="/fulfilment/returns/:id" element={<Guard perms={['fulfilment.read']}><ReturnDetailPage /></Guard>} />
         <Route path="/fulfilment/:id" element={<Guard perms={['fulfilment.read']}><FulfilmentDetailPage /></Guard>} />
+        <Route path="/finance/invoices" element={<Guard perms={['finance.read']}><ManualInvoicesPage /></Guard>} />
+        <Route path="/finance/invoices/new" element={<Guard perms={['finance.voucher.post']}><ManualInvoiceEditPage /></Guard>} />
+        <Route path="/finance/invoices/:id" element={<Guard perms={['finance.read', 'fulfilment.read']}><ManualInvoiceDetailPage /></Guard>} />
+        <Route path="/finance/invoices/:id/edit" element={<Guard perms={['finance.voucher.post']}><ManualInvoiceEditPage /></Guard>} />
+        <Route path="/finance/counter" element={<Guard perms={['finance.read']}><CounterSalesListPage /></Guard>} />
+        <Route path="/finance/counter/new" element={<Guard perms={['finance.voucher.post', 'fulfilment.invoice']}><CounterSalePage /></Guard>} />
+        <Route path="/finance/cash-book" element={<Guard perms={['finance.read']}><CashBookPage /></Guard>} />
         <Route path="/finance" element={<Guard perms={['finance.read']}><FinanceOverview /></Guard>} />
         <Route path="/finance/accounts" element={<Guard perms={['finance.read']}><ChartOfAccountsPage /></Guard>} />
         <Route path="/finance/ledger/:id" element={<Guard perms={['finance.read']}><LedgerPage /></Guard>} />

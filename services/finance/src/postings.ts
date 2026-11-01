@@ -292,3 +292,43 @@ export function commissionApprovedConsumer() {
     if (tds) await recordTds(c, v.id, book.id, party.id, party.legal_name, tds, date);
   };
 }
+
+/** Accepted claim on a mill (quality debit note or shortage) → debit note: reduces what we owe the mill, so it comes off its next bill. */
+export function millClaimConsumer() {
+  return async (ev: BusEvent, c: Client) => {
+    const p = ev.payload as { claim_id: string; number: string; mill_id: string; mill_name?: string; amount: number; claim_type: string; reason: string | null; date?: string };
+    const party = await getParty(p.mill_id);
+    const book = await primaryBook(c);
+    const date = (p.date ?? new Date().toISOString()).slice(0, 10);
+    const amount = round2(Number(p.amount));
+    if (amount <= 0) return;
+    await post(c, {
+      type: 'debit_note', book_id: book.id, date, auto: true, by: SYSTEM, approved_by: 'job-work claim accepted',
+      narration: `${p.claim_type === 'shortage' ? 'Shortage' : 'Quality'} claim ${p.number} on ${party.legal_name}${p.reason ? ` — ${p.reason}` : ''}`, party_id: party.id, party_name: party.legal_name,
+      source: { service: 'jobwork', type: 'mill_claim', id: p.claim_id, ref: p.number },
+      lines: [
+        { account: 'payables', debit: amount, party_id: party.id, party_name: party.legal_name, bill_ref: p.number },
+        { account: p.claim_type === 'shortage' ? 'purchases' : 'jobwork', credit: amount },
+      ],
+    });
+  };
+}
+
+/**
+ * Approved stock-count difference → reclassified from the change in inventory to its own expense line. Stock is valued
+ * periodically, so the closing stock already reflects the count; this only makes the loss (or gain) visible.
+ */
+export function stockCountConsumer() {
+  return async (ev: BusEvent, c: Client) => {
+    const p = ev.payload as { stocktake_id: string; number: string; value_diff: number; date: string; approved_by: string };
+    const v = round2(Number(p.value_diff));
+    if (!v) return;
+    const book = await primaryBook(c);
+    await post(c, {
+      type: 'journal', book_id: book.id, date: p.date, auto: true, by: SYSTEM, approved_by: p.approved_by,
+      narration: `Stock count ${p.number}: ${v < 0 ? 'shortage' : 'excess'} of ₹${Math.abs(v).toLocaleString('en-IN')} at cost`,
+      source: { service: 'inventory', type: 'stocktake', id: p.stocktake_id, ref: p.number },
+      lines: v < 0 ? [{ account: 'stock_loss', debit: -v }, { account: 'inventory_change', credit: -v }] : [{ account: 'inventory_change', debit: v }, { account: 'stock_loss', credit: v }],
+    });
+  };
+}

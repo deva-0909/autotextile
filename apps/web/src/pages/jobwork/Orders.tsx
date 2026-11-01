@@ -4,6 +4,7 @@ import { CheckCircle2, Circle, CircleDot, Lock, PackageCheck, Plus, Send, Shield
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Link } from '../../components/AppLink';
+import { DocumentPreviewButton } from '../../components/DocumentPreview';
 import { api, invalidatePrefix } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtDate, fmtDateTime, fmtINR, fmtNum } from '../../lib/format';
@@ -26,8 +27,12 @@ export interface JobDetail extends OrderRow {
   returns: { id: string; return_date: string; warehouse_name: string; mill_challan_no: string | null; kg_good: number; kg_rejected: number; kg_damaged: number; kg_process_loss: number; rolls: number | null; lot_ref: string | null; loss_reason: string | null; charge: number; created_by_name: string }[];
   claims: { id: string; number: string; status: string; kg_affected: number; amount: number; claim_type: string }[];
   exceptions: { id: string; kind: string; severity: string; message: string }[];
-  reconciliation: { kg_sent: number; kg_good: number; kg_rejected: number; kg_damaged: number; kg_process_loss: number; kg_balance_at_mill: number; yield_pct: number | null; loss_pct: number | null };
+  quarantine: Hold[];
+  reconciliation: { kg_sent: number; kg_good: number; kg_rejected: number; kg_damaged: number; kg_process_loss: number; kg_quarantine: number; kg_balance_at_mill: number; yield_pct: number | null; loss_pct: number | null };
 }
+
+interface Hold { id: string; number: string; kg: number; rolls: number | null; reason_type: string; description: string; status: string; resolution: string | null; challan_no: string | null; resolved_by_name: string | null; created_at: string; warehouse_name: string | null }
+const HOLD_REASON: Record<string, string> = { other_party: 'Another party’s fabric', wrong_shade: 'Wrong shade', wrong_gsm: 'Wrong GSM', wrong_quality: 'Wrong quality', other: 'Other' };
 
 export function JobOrdersPage() {
   const { can } = useAuth();
@@ -158,10 +163,10 @@ export function StageTrack({ stages, updates, current }: { stages: Stage[]; upda
 }
 
 export function Reconciliation({ r }: { r: JobDetail['reconciliation'] }) {
-  const cells = [['Sent', r.kg_sent, ''], ['Good', r.kg_good, 'text-emerald-700'], ['Rejected', r.kg_rejected, 'text-rose-600'], ['Damaged', r.kg_damaged, 'text-rose-600'], ['Process loss', r.kg_process_loss, 'text-amber-700'], ['Balance at mill', r.kg_balance_at_mill, 'font-semibold']] as const;
+  const cells = [['Sent', r.kg_sent, ''], ['Good', r.kg_good, 'text-emerald-700'], ['Rejected', r.kg_rejected, 'text-rose-600'], ['Damaged', r.kg_damaged, 'text-rose-600'], ['Process loss', r.kg_process_loss, 'text-amber-700'], ['In quarantine', r.kg_quarantine ?? 0, 'text-violet-700'], ['Balance at mill', r.kg_balance_at_mill, 'font-semibold']] as const;
   return (
     <div>
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">{cells.map(([l, v, c]) => <div key={l} className="rounded-lg border border-slate-200 px-3 py-2"><p className="text-[11px] text-slate-500">{l}</p><p className={clsx('text-[15px] tabular', c)}>{fmtNum(v)} kg</p></div>)}</div>
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-7">{cells.map(([l, v, c]) => <div key={l} className="rounded-lg border border-slate-200 px-3 py-2"><p className="text-[11px] text-slate-500">{l}</p><p className={clsx('text-[15px] tabular', c)}>{fmtNum(v)} kg</p></div>)}</div>
       <p className="mt-2 text-[12.5px] text-slate-600">Yield {r.yield_pct != null ? <span className="font-semibold">{r.yield_pct}%</span> : '—'} of returned quantity · loss {r.loss_pct != null ? `${r.loss_pct}%` : '—'}</p>
     </div>
   );
@@ -177,7 +182,12 @@ export function JobOrderDetailPage() {
   const [modal, setModal] = useState<'ack' | 'stage' | 'return' | 'claim' | 'close' | 'cancel' | null>(null);
   const refresh = () => { q.refetch(); invalidatePrefix(qc, '/jobwork'); qc.invalidateQueries({ queryKey: ['jw-deadlines'] }); };
   const act = async (path: string, body: object = {}, msg = 'Saved') => {
-    try { await api.post(`/jobwork/orders/${id}/${path}`, body); refresh(); setModal(null); toast({ tone: 'success', title: msg }); } catch (e) { toast({ tone: 'error', title: (e as Error).message }); }
+    try {
+      const r = await api.post<{ closed?: boolean; shortage_claim?: { number: string } }>(`/jobwork/orders/${id}/${path}`, body);
+      refresh(); setModal(null);
+      if (r && r.closed === false && r.shortage_claim) toast({ tone: 'warning', title: `Shortage claim ${r.shortage_claim.number} raised on the mill`, body: 'Settle the claim, then close the order.' });
+      else toast({ tone: 'success', title: msg });
+    } catch (e) { toast({ tone: 'error', title: (e as Error).message }); }
   };
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   if (!q.data) return <Skeleton className="h-96" />;
@@ -190,6 +200,11 @@ export function JobOrderDetailPage() {
         title={<>{o.number} <StatusBadge status={o.status} /></>}
         meta={<><span>{o.mill_name} <span className="font-mono text-slate-400">{o.mill_gstin}</span></span><span>{o.process_name}</span>{o.rate_summary && <span>Rate {o.rate_summary}</span>}</>}
         actions={<>
+          <DocumentPreviewButton label={o.status === 'draft' ? 'Preview challan' : 'Print challan'} draft={o.status === 'draft'} d={{ title: 'Job-work delivery challan', number: o.number, date: (o as { issue_date?: string }).issue_date ?? new Date().toISOString().slice(0, 10), status: o.status,
+            seller: { name: 'Demo Textile Trading Pvt Ltd', lines: ['Goods sent for job work (not a sale); to be returned within the statutory period'] }, party: { label: 'Mill', name: o.mill_name, gstin: o.mill_gstin },
+            meta: [{ label: 'Process', value: o.process_name }, { label: 'Return by', value: fmtDate(o.expected_return_date) }, { label: 'Transport', value: [o.transporter_name, o.lr_number && `LR ${o.lr_number}`, o.eway_bill_no && `e-way ${o.eway_bill_no}`].filter(Boolean).join(' · ') || '—' }],
+            lines: o.lines.map((l) => ({ description: `${l.sku} — ${l.product_name}${l.lot_ref ? ` (lot ${l.lot_ref})` : ''}`, qty: Number(l.kg_sent), uom: 'kg', note: l.rolls ? `${l.rolls} rolls` : null, amount: Number(l.estimated_charge) })),
+            totals: [{ label: 'Estimated processing charge', value: Number(o.estimated_charge), strong: true }], notes: o.instructions }} />
           {o.status === 'draft' && manage && <Button variant="primary" icon={<Send className="size-4" />} onClick={() => act('issue', {}, 'Challan issued — clocks started')}>Issue challan</Button>}
           {o.status === 'issued' && manage && <Button onClick={() => setModal('ack')}>Record mill receipt</Button>}
           {atMill && manage && <><Button onClick={() => setModal('stage')}>Update stage</Button><Button onClick={() => act('ready', {}, 'Marked ready for collection')}>Mark ready</Button></>}
@@ -262,6 +277,8 @@ export function JobOrderDetailPage() {
               ))}
             </ul>
           </Card>
+          {o.quarantine.length > 0 && <QuarantineCard holds={o.quarantine} onDone={refresh} />}
+          {['returned', 'partially_returned', 'in_process', 'ready'].includes(o.status) && <ShortageCard orderId={o.id} onDone={refresh} />}
           {o.claims.length > 0 && <Card title="Quality claims" padded={false}><ul className="divide-y divide-slate-100">{o.claims.map((c) => <li key={c.id}><Link to={`/jobwork/claims?open=${c.id}`} className="flex items-center gap-2 px-5 py-3 text-[13px] hover:bg-slate-50"><span className="flex-1 font-mono">{c.number}</span><StatusBadge status={c.status} /><span className="tabular">{fmtINR(c.amount)}</span></Link></li>)}</ul></Card>}
           <Card title="Details"><KeyValue columns={1} items={[{ label: 'Instructions', value: o.instructions }, { label: 'Transport', value: [o.transporter_name, o.lr_number && `LR ${o.lr_number}`, o.eway_bill_no && `e-way ${o.eway_bill_no}`].filter(Boolean).join(' · ') || null }, { label: 'Created by', value: o.created_by_name }, { label: 'Closed', value: o.close_reason }]} /></Card>
         </div>
@@ -308,14 +325,14 @@ export function StageModal({ stages, onClose, onSubmit }: { stages: Stage[]; onC
 function ReturnModal({ order, onClose, onSubmit }: { order: JobDetail; onClose: () => void; onSubmit: (b: object) => void }) {
   const wh = useWarehouses();
   const bal = order.reconciliation.kg_balance_at_mill;
-  const [v, setV] = useState({ return_date: new Date().toISOString().slice(0, 10), warehouse_id: '', mill_challan_no: '', lr_number: '', kg_good: '', kg_rejected: '', kg_damaged: '', kg_process_loss: '', rolls: '', lot_ref: '', loss_reason: '' });
-  const n = (k: 'kg_good' | 'kg_rejected' | 'kg_damaged' | 'kg_process_loss') => Number(v[k] || 0);
-  const total = n('kg_good') + n('kg_rejected') + n('kg_damaged') + n('kg_process_loss');
+  const [v, setV] = useState({ return_date: new Date().toISOString().slice(0, 10), warehouse_id: '', mill_challan_no: '', lr_number: '', kg_good: '', kg_rejected: '', kg_damaged: '', kg_process_loss: '', rolls: '', lot_ref: '', loss_reason: '', kg_quarantine: '', quarantine_reason: 'wrong_shade', quarantine_note: '', quarantine_rolls: '' });
+  const n = (k: 'kg_good' | 'kg_rejected' | 'kg_damaged' | 'kg_process_loss' | 'kg_quarantine') => Number(v[k] || 0);
+  const total = n('kg_good') + n('kg_rejected') + n('kg_damaged') + n('kg_process_loss') + n('kg_quarantine');
   const yieldPct = total ? (n('kg_good') / total) * 100 : null;
   const f = (k: keyof typeof v, label: string, type = 'number') => <Input label={label} type={type} value={v[k]} onChange={(e) => setV({ ...v, [k]: e.target.value })} />;
   return (
     <Modal open onClose={onClose} size="lg" title="Return inward & yield" description={`${fmtNum(bal)} kg still at the mill. Account for every kilogram: good, rejected, damaged or process loss.`}
-      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={() => onSubmit({ ...v, kg_good: n('kg_good'), kg_rejected: n('kg_rejected'), kg_damaged: n('kg_damaged'), kg_process_loss: n('kg_process_loss'), rolls: v.rolls ? Number(v.rolls) : null })}>Record return</Button></>}>
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={() => onSubmit({ ...v, kg_good: n('kg_good'), kg_rejected: n('kg_rejected'), kg_damaged: n('kg_damaged'), kg_process_loss: n('kg_process_loss'), kg_quarantine: n('kg_quarantine'), quarantine_rolls: v.quarantine_rolls ? Number(v.quarantine_rolls) : null, quarantine_note: v.quarantine_note || null, rolls: v.rolls ? Number(v.rolls) : null })}>Record return</Button></>}>
       <div className="space-y-4">
         <div className="grid grid-cols-3 gap-3">
           {f('return_date', 'Return date', 'date')}
@@ -325,6 +342,15 @@ function ReturnModal({ order, onClose, onSubmit }: { order: JobDetail; onClose: 
         </div>
         <div className={clsx('rounded-lg px-4 py-3 text-[13px]', total > bal + 0.001 ? 'bg-rose-50 text-rose-800' : 'bg-slate-50 text-slate-700')}>
           Accounting for {fmtNum(total)} of {fmtNum(bal)} kg{yieldPct != null && <> · yield <span className="font-semibold">{yieldPct.toFixed(1)}%</span></>}
+        </div>
+        <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-3">
+          <p className="mb-2 text-[13px] font-medium text-violet-900">Wrong goods sent back? Hold them in quarantine</p>
+          <p className="mb-2 text-[12px] text-violet-800">Another party’s fabric, wrong shade, GSM or quality: counted as received but kept out of sellable stock until you send it back, send it for rework, or accept it.</p>
+          <div className="grid grid-cols-3 gap-3">
+            {f('kg_quarantine', 'KG held')}{f('quarantine_rolls', 'Rolls held')}
+            <Select label="What is wrong" value={v.quarantine_reason} onChange={(e) => setV({ ...v, quarantine_reason: e.target.value })} options={Object.entries(HOLD_REASON).map(([value, label]) => ({ value, label }))} />
+          </div>
+          {n('kg_quarantine') > 0 && <Textarea className="mt-2" label="Describe it" required value={v.quarantine_note} onChange={(e) => setV({ ...v, quarantine_note: e.target.value })} placeholder="e.g. 4 rolls are maroon, ordered navy; tags show another party’s lot" />}
         </div>
         {n('kg_rejected') + n('kg_damaged') + n('kg_process_loss') > 0 && <Textarea label="Reason for rejection, damage or loss" required value={v.loss_reason} onChange={(e) => setV({ ...v, loss_reason: e.target.value })} />}
       </div>
@@ -354,5 +380,53 @@ export function ClaimModal({ orderId, onClose, onDone }: { orderId: string; onCl
         <Input label="Samples / evidence kept" value={v.samples} onChange={(e) => setV({ ...v, samples: e.target.value })} />
       </div>
     </Modal>
+  );
+}
+
+function QuarantineCard({ holds, onDone }: { holds: Hold[]; onDone: () => void }) {
+  const { can } = useAuth();
+  const toast = useToast();
+  const [act, setAct] = useState<{ id: string; action: string; note: string; challan_no: string } | null>(null);
+  return (
+    <Card title="Quarantine" description="Wrong goods sent back by the mill: not in sellable stock until resolved.">
+      <ul className="space-y-3">{holds.map((h) => (
+        <li key={h.id} className="rounded-lg border border-slate-200 p-3 text-[12.5px]">
+          <div className="flex items-center justify-between"><span className="font-medium">{h.number} · {fmtNum(h.kg)} kg{h.rolls ? `, ${h.rolls} rolls` : ''}</span><Badge tone={h.status === 'held' ? 'warning' : 'neutral'}>{h.status === 'held' ? 'Held' : h.status === 'accepted' ? 'Accepted' : h.status === 'rework' ? 'Sent for rework' : 'Sent back to mill'}</Badge></div>
+          <p className="text-slate-600">{HOLD_REASON[h.reason_type]}: {h.description}</p>
+          {h.resolution && <p className="text-slate-500">{h.challan_no ? `${h.challan_no} · ` : ''}{h.resolution} — {h.resolved_by_name}</p>}
+          {h.status === 'held' && can('jobwork.claim.manage') && (act?.id === h.id ? (
+            <div className="mt-2 space-y-2">
+              <Input placeholder="Note (required)" value={act.note} onChange={(e) => setAct({ ...act, note: e.target.value })} />
+              {act.action !== 'accept' && <Input placeholder="Return challan no. (blank = next number)" value={act.challan_no} onChange={(e) => setAct({ ...act, challan_no: e.target.value })} />}
+              <div className="flex gap-1.5"><Button size="sm" variant="primary" disabled={act.note.trim().length < 2} onClick={async () => {
+                try { await api.post(`/jobwork/quarantine/${h.id}/resolve`, { action: act.action, note: act.note, challan_no: act.challan_no || null }); setAct(null); onDone(); toast({ tone: 'success', title: 'Quarantine resolved' }); } catch (e) { toast({ tone: 'error', title: (e as Error).message }); }
+              }}>Confirm</Button><Button size="sm" variant="ghost" onClick={() => setAct(null)}>Cancel</Button></div>
+            </div>
+          ) : (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <Button size="sm" onClick={() => setAct({ id: h.id, action: 'return_to_mill', note: '', challan_no: '' })}>Send back to mill</Button>
+              <Button size="sm" onClick={() => setAct({ id: h.id, action: 'rework', note: '', challan_no: '' })}>Send for rework</Button>
+              <Button size="sm" variant="ghost" onClick={() => setAct({ id: h.id, action: 'accept', note: '', challan_no: '' })}>Accept into stock</Button>
+            </div>
+          ))}
+        </li>
+      ))}</ul>
+    </Card>
+  );
+}
+
+function ShortageCard({ orderId, onDone }: { orderId: string; onDone: () => void }) {
+  const { can } = useAuth();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ['jw-shortage', orderId], queryFn: () => api.get<{ kg: number; kg_not_returned: number; kg_excess_loss: number; allowed_loss_pct: number; rate_per_kg: number; amount: number }>(`/jobwork/orders/${orderId}/shortage`) });
+  const s = q.data;
+  if (!s || s.kg <= 0.001) return null;
+  return (
+    <Card title="Shortage at the mill" description={`Process loss allowed: ${s.allowed_loss_pct}% of what was sent`}>
+      <KeyValue columns={1} items={[{ label: 'Not returned', value: `${fmtNum(s.kg_not_returned)} kg` }, { label: 'Loss above the allowance', value: `${fmtNum(s.kg_excess_loss)} kg` }, { label: 'Claim', value: `${fmtNum(s.kg)} kg × ${fmtINR(s.rate_per_kg)} = ${fmtINR(s.amount)}` }]} />
+      {can('jobwork.claim.manage') && <Button className="mt-3" variant="primary" onClick={async () => {
+        try { const r = await api.post<{ number: string }>(`/jobwork/orders/${orderId}/shortage-claim`, {}); toast({ tone: 'success', title: `Shortage claim ${r.number} raised`, body: 'Once accepted it posts a debit note: the amount comes off the mill’s next bill.' }); q.refetch(); onDone(); } catch (e) { toast({ tone: 'error', title: (e as Error).message }); }
+      }}>Raise shortage claim</Button>}
+    </Card>
   );
 }

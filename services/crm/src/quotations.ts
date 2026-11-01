@@ -1,6 +1,6 @@
 import type { Request, Router } from 'express';
 import { z } from 'zod';
-import { type Client, type Pool, type ServiceContext, badRequest, callService, conflict, many, notFound, notify, one, optText, parse, publish, requirePermission, tx } from '@erp/platform';
+import { type Client, type Pool, type ServiceContext, badRequest, callService, conflict, many, notFound, notify, one, optText, parse, publish, recordVersion, requirePermission, tx } from '@erp/platform';
 import { S, addDays, assertOwnerOrAll, auditReq, getLot, getParty, getProduct, leadOrThrow, lotsOf, nextNumber, requestApproval, round2, round3, seesAll, setting, today, userId } from './common.ts';
 import { creditCheck, markOverrideUsed } from './credit.ts';
 
@@ -74,6 +74,15 @@ function totals(lines: { kg: number; taxable: number; gst_rate: number; cost_per
   return { kg: round3(lines.reduce((s, l) => s + l.kg, 0)), taxable, tax, total: round2(taxable + tax), margin_pct: margin };
 }
 
+/** Read-only copy of a quotation version for the history (governance keeps it). */
+export async function snapQuote(c: Client, id: string, note: string, by: string) {
+  const q = await one<Record<string, unknown> & { root_id: string; number: string; version: number; status: string }>(c, 'SELECT * FROM quotations WHERE id = $1', [id]);
+  if (!q) return;
+  const lines = await many(c, 'SELECT line_no, sku, product_name, lot_no, kg, requested_price, list_price, discount_pct, gst_rate, taxable FROM quotation_lines WHERE quotation_id = $1 ORDER BY line_no', [id]);
+  await recordVersion(c, S, { doc_type: 'quotation', doc_id: q.root_id, number: q.number, version: q.version, status: q.status, change_note: note, by_name: by,
+    data: { number: q.number, status: q.status, customer_name: q.customer_name ?? q.prospect_name, valid_until: q.valid_until, payment_terms: q.payment_terms, delivery_terms: q.delivery_terms, freight_amount: q.freight_amount, kg: q.kg, taxable: q.taxable, tax: q.tax, total: q.total, margin_pct: q.margin_pct, notes: q.notes, revision_reason: q.revision_reason, lines } });
+}
+
 async function writeQuote(c: Client, req: Request, b: QuoteInput, prior: { root_id: string; number: string; version: number } | null) {
   let lead = null;
   if (b.lead_id) { lead = await leadOrThrow(c, b.lead_id); assertOwnerOrAll(req, lead.owner_id); }
@@ -109,6 +118,7 @@ async function writeQuote(c: Client, req: Request, b: QuoteInput, prior: { root_
     await c.query(`INSERT INTO quotation_lines (quotation_id, line_no, product_id, sku, product_name, category, lot_id, lot_no, kg, list_price, requested_price, discount_pct, cost_per_kg, margin_pct, gst_rate, taxable, needs_approval, approval_reason)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
       [q!.id, l.line_no, l.product_id, l.sku, l.product_name, l.category, l.lot_id, l.lot_no, l.kg, l.list_price, l.requested_price, l.discount_pct, l.cost_per_kg, l.margin_pct, l.gst_rate, l.taxable, l.needs_approval, l.approval_reason]);
+  await snapQuote(c, q!.id, prior ? (b.revision_reason ? `Revised: ${b.revision_reason}` : 'Draft edited') : 'Created', req.user!.name);
   return { id: q!.id, number, version: (prior?.version ?? 0) + 1, ...t, needs_approval: priced.lines.some((l) => l.needs_approval), warnings: priced.warnings, lines: priced.lines };
 }
 
@@ -232,9 +242,11 @@ export function quotationRoutes(r: Router, { pool }: ServiceContext) {
           summary: lines.map((l) => `${l.sku} ${l.kg} kg at ₹${l.requested_price} (list ${l.list_price ?? '—'}, cost ${l.cost_per_kg ?? '—'}): ${l.approval_reason}`).join(' | '),
           payload: { number: q.number, version: q.version, total: Number(q.total), margin_pct: q.margin_pct, lines },
         });
+        await snapQuote(c, q.id, 'Sent for price approval', req.user!.name);
         return { status: 'pending_approval' };
       }
       await c.query(`UPDATE quotations SET status = 'approved', approved_by_name = 'within authority', approved_at = now(), updated_at = now() WHERE id = $1`, [q.id]);
+      await snapQuote(c, q.id, 'Approved (within authority)', req.user!.name);
       return { status: 'approved' };
     });
     res.json(out);
@@ -250,6 +262,7 @@ export function quotationRoutes(r: Router, { pool }: ServiceContext) {
       await c.query(`UPDATE quotations SET status = 'sent', sent_at = now(), updated_at = now() WHERE id = $1`, [q.id]);
       await advanceLead(c, q.lead_id, 'quotation', `${q.number} v${q.version} sent: ₹${Number(q.total).toLocaleString('en-IN')}`, req.user!.name);
       await auditReq(c, req, 'quotation', q.id, 'sent');
+      await snapQuote(c, q.id, 'Sent to the customer', req.user!.name);
       // Communications (P9) send the quotation to the customer from this event.
       await publish(c, S, 'crm.quotation.sent', { quotation_id: q.id, number: q.number, version: q.version, customer_id: q.customer_id, prospect_name: q.prospect_name, lead_id: q.lead_id, owner_id: q.owner_id, owner_name: q.owner_name, total: Number(q.total), valid_until: String(q.valid_until).slice(0, 10) });
       return { status: 'sent' };
@@ -274,6 +287,7 @@ export function quotationRoutes(r: Router, { pool }: ServiceContext) {
         await c.query(`UPDATE quotations SET status = $2, lost_reason = $3, competitor_name = coalesce($4, competitor_name), competitor_price = coalesce($5, competitor_price), decided_at = now(), updated_at = now() WHERE id = $1`,
           [q!.id, b.outcome, b.lost_reason, b.competitor_name ?? null, b.competitor_price ?? null]);
         if (q!.lead_id) await c.query(`INSERT INTO lead_activities (lead_id, kind, summary, outcome, by_name) VALUES ($1, 'quotation', $2, $3, $4)`, [q!.lead_id, `${q!.number} v${q!.version} ${b.outcome} by customer`, b.lost_reason, req.user!.name]);
+        await snapQuote(c, q!.id, `Customer: ${b.outcome}${b.lost_reason ? ` — ${b.lost_reason}` : ''}`, req.user!.name);
         await auditReq(c, req, 'quotation', q!.id, b.outcome, { reason: b.lost_reason, after: { competitor: b.competitor_name, competitor_price: b.competitor_price } });
         return { status: b.outcome };
       }
@@ -293,6 +307,7 @@ export function quotationRoutes(r: Router, { pool }: ServiceContext) {
       await advanceLead(c, q!.lead_id, 'order_confirmed', `${q!.number} v${q!.version} accepted${reservation ? `, stock reserved (${reservation.number})` : ''}`, req.user!.name);
       // Sales orders (P7) are created from this event.
       await publish(c, S, 'crm.quotation.accepted', { quotation_id: q!.id, number: q!.number, version: q!.version, customer_id: q!.customer_id, total: Number(q!.total), reservation_id: reservation?.id ?? null });
+      await snapQuote(c, q!.id, 'Accepted by the customer', req.user!.name);
       await auditReq(c, req, 'quotation', q!.id, 'accepted', { after: { total: q!.total, credit: credit.mode, reservation: reservation?.number } });
       return { status: 'accepted', credit, reservation, warnings };
     });

@@ -3,6 +3,7 @@ import { Ban, CheckCheck, Lock, PackageCheck, Pencil, Plus, RotateCcw, Send, Tru
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Link } from '../../components/AppLink';
+import { DocumentPreviewButton, VersionHistory, type DocData } from '../../components/DocumentPreview';
 import { api, invalidatePrefix } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtDate, fmtDateTime, fmtINR, fmtNum, humanize } from '../../lib/format';
@@ -110,6 +111,19 @@ function PoForm({ po, onClose, onSaved }: { po?: PoDetail; onClose: () => void; 
   );
 }
 
+/** The purchase order as a printable document. */
+function poDoc(po: PoDetail): DocData {
+  return {
+    title: 'Purchase order', number: po.revision > 0 ? `${po.number} R${po.revision}` : po.number, date: po.order_date, status: po.status,
+    seller: { name: 'Demo Textile Trading Pvt Ltd', gstin: po.bill_to_gstin, lines: ['Buyer'] },
+    party: { label: 'Supplier', name: po.supplier_name, gstin: po.supplier_gstin },
+    meta: [{ label: 'Deliver to', value: po.deliver_to_name }, { label: 'Expected by', value: po.expected_date }, { label: 'Payment', value: po.payment_term ?? '—' }, { label: 'Freight', value: po.freight_terms ?? '—' }],
+    lines: po.lines.map((l) => ({ description: `${l.sku} — ${l.product_name}`, hsn: l.hsn_code, qty: Number(l.qty_kg), uom: 'kg', rate: Number(l.rate_per_kg), gst_rate: Number(l.gst_rate), taxable: Number(l.taxable) })),
+    totals: [{ label: 'Taxable value', value: Number(po.taxable_value) }, { label: po.tax_type === 'intra' ? 'CGST + SGST' : 'IGST', value: Number(po.tax_value) }, { label: 'Total', value: Number(po.total_value), strong: true }],
+    notes: po.notes, terms: 'Goods are weighed and checked on receipt; invoices are paid against goods received.',
+  };
+}
+
 export function PurchaseOrderDetailPage() {
   const { id = '' } = useParams();
   const { can } = useAuth();
@@ -137,6 +151,7 @@ export function PurchaseOrderDetailPage() {
         title={<>{po.number}{po.revision > 0 && <Badge tone="warning">Revision {po.revision}</Badge>} <StatusBadge status={po.status} /></>}
         meta={<><span>{po.supplier_name} <span className="font-mono text-slate-400">{po.supplier_gstin}</span></span><span>Bill to <span className="font-mono">{po.bill_to_gstin}</span> · {po.tax_type === 'intra' ? 'CGST+SGST' : 'IGST'}</span>{po.rfq_id && <Link className="link" to={`/procurement/rfqs/${po.rfq_id}`}>From RFQ</Link>}</>}
         actions={<>
+          <DocumentPreviewButton draft={['draft', 'pending_approval'].includes(po.status)} d={poDoc(po)} />
           {po.status === 'draft' && manage && <><Button icon={<Pencil className="size-4" />} onClick={() => setModal('edit')}>Edit</Button><Button variant="primary" icon={<CheckCheck className="size-4" />} onClick={() => act('submit', {}, 'Sent for approval')}>Submit for approval</Button></>}
           {po.status === 'approved' && manage && <Button variant="primary" icon={<Send className="size-4" />} onClick={() => act('send', {}, 'Sent to supplier portal')}>Send to supplier</Button>}
           {receivable && can('procurement.receipt.record') && po.deliver_to_type === 'warehouse' && <Button variant="primary" icon={<PackageCheck className="size-4" />} onClick={() => setModal('receipt')}>Record receipt</Button>}
@@ -194,7 +209,7 @@ export function PurchaseOrderDetailPage() {
             </div>
           )}
           {tab === 'documents' && <Card><DocumentsPanel entityType="purchase_order" entityId={po.id} /></Card>}
-          {tab === 'history' && <Card><AuditTimeline entityId={po.id} /></Card>}
+          {tab === 'history' && <div className="space-y-6"><VersionHistory docType="purchase_order" docId={po.id} render={(v) => poDoc({ ...po, ...(v.data as object), lines: ((v.data as { lines?: PoLine[] }).lines ?? po.lines).map((l) => ({ ...l, sku: l.sku ?? '', product_name: l.product_name ?? '' })) } as PoDetail)} /><Card><AuditTimeline entityId={po.id} /></Card></div>}
         </div>
         <div className="space-y-6">
           <Card title="Timeline">

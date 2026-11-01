@@ -2,7 +2,7 @@ import type { Request, Router } from 'express';
 import { z } from 'zod';
 import {
   type BusEvent, type Client, type ServiceContext, badRequest, conflict, forbidden, listQuery, many, notFound, notify, one, optText, orderLimit,
-  page, parse, publish, reqText, requirePermission, tx,
+  page, parse, publish, recordVersion, reqText, requirePermission, tx,
 } from '@erp/platform';
 import {
   S, auditReq, getGstRegs, getParty, getPaymentTerms, getProduct, getWarehouses, nextNumber, poEvent, portalUsers, requestApproval, resolveDestination,
@@ -69,11 +69,21 @@ export async function createPurchaseOrder(c: Client, req: Request, input: PoInpu
       input.freight_terms ?? null, input.notes ?? null, b.intra ? 'intra' : 'inter', b.taxable, b.tax, b.total, req.user!.id, req.user!.name]);
   await writeLines(c, po!.id, b.lines);
   await poEvent(c, po!.id, 'created', `${b.lines.length} lines · ₹${b.total.toLocaleString('en-IN')}`, { name: req.user!.name });
+  await snapPO(c, po!.id, 'Created', req.user!.name);
   await auditReq(c, req, 'purchase_order', po!.id, 'created', { after: { number, supplier: b.supplier.code, total: b.total, deliver_to: b.dest.name } });
   return po!;
 }
 
 /** Applies a checker's decision on a PO approval request. */
+/** Read-only copy of a purchase order as it stands (each revision, approval and send), kept by governance. */
+export async function snapPO(c: Client, id: string, note: string, by: string) {
+  const po = await one<Record<string, unknown> & { id: string; number: string; revision: number; status: string }>(c, 'SELECT * FROM purchase_orders WHERE id = $1', [id]);
+  if (!po) return;
+  const lines = await many(c, 'SELECT * FROM po_lines WHERE po_id = $1 ORDER BY line_no', [id]).catch(() => []);
+  await recordVersion(c, S, { doc_type: 'purchase_order', doc_id: po.id, number: po.number, version: Number(po.revision ?? 0) + 1, status: po.status, change_note: note, by_name: by,
+    data: { number: po.number, status: po.status, revision: po.revision, supplier_id: po.supplier_id, order_date: po.order_date, expected_date: po.expected_date, payment_term: po.payment_term, freight_terms: po.freight_terms, taxable_value: po.taxable_value, lines } });
+}
+
 export async function applyPoDecision(c: Client, p: { ref_id: string; decision: string; decided_by: string; decided_by_name: string; comment: string | null }) {
   const po = await one<{ id: string; number: string; status: string; created_by: string }>(c, 'SELECT id, number, status, created_by FROM purchase_orders WHERE id = $1 FOR UPDATE', [p.ref_id]);
   if (!po || po.status !== 'pending_approval') return;
@@ -84,6 +94,7 @@ export async function applyPoDecision(c: Client, p: { ref_id: string; decision: 
     await c.query(`UPDATE purchase_orders SET status = 'draft', updated_at = now() WHERE id = $1`, [po.id]);
     await poEvent(c, po.id, 'approval_rejected', p.comment, { name: p.decided_by_name });
   }
+  await snapPO(c, p.ref_id, `${p.decision === 'approved' ? 'Approved' : 'Rejected'} by ${p.decided_by_name}${p.comment ? `: ${p.comment}` : ''}`, p.decided_by_name);
 }
 
 export function orderRoutes(r: Router, { pool }: ServiceContext) {
@@ -151,6 +162,7 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
           body.freight_terms ?? null, body.notes ?? null, b.intra ? 'intra' : 'inter', b.taxable, b.tax, b.total, req.user!.id]);
       await writeLines(c, String(req.params.id), b.lines);
       await poEvent(c, String(req.params.id), 'edited', null, { name: req.user!.name });
+      await snapPO(c, String(req.params.id), 'Draft edited', req.user!.name);
       await auditReq(c, req, 'purchase_order', String(req.params.id), 'updated', { after: { total: b.total, lines: b.lines.length } });
     });
     res.json({ ok: true });
@@ -177,6 +189,7 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
       });
       await poEvent(c, po.id, 'submitted', 'Sent for approval', { name: req.user!.name });
       await auditReq(c, req, 'purchase_order', po.id, 'submitted');
+      await snapPO(c, po.id, 'Sent for approval', req.user!.name);
       return { status: 'pending_approval' };
     });
     res.json(out);
@@ -192,6 +205,7 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
       for (const uid of await portalUsers(po.supplier_id))
         await notify(c, S, { user_id: uid, kind: 'action', title: `New purchase order ${po.number}`, body: 'Please accept or reject and confirm the delivery date.', link: `/portal/orders/${po.id}` });
       await auditReq(c, req, 'purchase_order', po.id, 'sent');
+      await snapPO(c, po.id, 'Sent to the supplier', req.user!.name);
     });
     res.json({ ok: true });
   });
@@ -209,6 +223,7 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
         supplier_response_at = NULL, supplier_promise_date = NULL, supplier_remarks = NULL, version = version + 1, updated_at = now() WHERE id = $1`, [po.id]);
       await poEvent(c, po.id, 'revised', `Revision ${po.revision + 1}: ${reason}`, { name: req.user!.name });
       await auditReq(c, req, 'purchase_order', po.id, 'revised', { reason });
+      await snapPO(c, po.id, `Revised: ${reason}`, req.user!.name);
     });
     res.json({ ok: true });
   });
@@ -224,6 +239,7 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
       await c.query(`UPDATE purchase_orders SET status = 'cancelled', updated_at = now() WHERE id = $1`, [po.id]);
       await poEvent(c, po.id, 'cancelled', reason, { name: req.user!.name });
       await auditReq(c, req, 'purchase_order', po.id, 'cancelled', { reason });
+      await snapPO(c, po.id, `Cancelled: ${reason}`, req.user!.name);
     });
     res.json({ ok: true });
   });

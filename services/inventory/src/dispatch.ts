@@ -92,6 +92,27 @@ export function dispatchRoutes(r: Router, { pool }: ServiceContext) {
     res.json(out);
   });
 
+  /** Rolls sold without an order (counter cash sale, manual sales invoice): scanned out of stock in one step. */
+  r.post('/issues/sale', requirePermission('inventory.move'), async (req, res) => {
+    const b = parse(z.object({ barcodes: z.array(z.string().trim().min(3)).min(1).max(200), ref_type: z.enum(['counter_sale', 'manual_invoice']), ref_id: z.uuid(), ref_no: reqText(60), holder: z.string().max(160).nullable().optional(), preview: z.boolean().default(false) }), req.body);
+    if (new Set(b.barcodes.map((x) => x.toUpperCase())).size !== b.barcodes.length) throw badRequest('The same roll is scanned twice');
+    const run = async (c: import('@erp/platform').Client) => {
+      const out = [];
+      for (const code of b.barcodes) {
+        const roll = await lockRoll(c, code);
+        if (roll.state !== 'available') throw conflict(`Roll ${roll.barcode} is ${roll.state.replace(/_/g, ' ')}, not available to sell`);
+        if (roll.warehouse_id) assertWarehouse(req, roll.warehouse_id);
+        const info = await one<{ lot_no: string; sku: string; product_name: string; price_per_kg: number | null; cost_per_kg: number | null; warehouse_id: string | null }>(c, 'SELECT l.lot_no, l.sku, l.product_name, l.price_per_kg::float, l.cost_per_kg::float, $2::uuid AS warehouse_id FROM lots l WHERE l.id = $1', [roll.lot_id, roll.warehouse_id]);
+        out.push({ roll_id: roll.id, barcode: roll.barcode, product_id: roll.product_id, lot_id: roll.lot_id, weight_kg: Number(roll.weight_kg), shade_code: roll.shade_code, dye_lot: roll.dye_lot, ...info });
+        if (!b.preview) await moveRoll(c, roll, 'pick', { state: 'dispatched', warehouse_id: null, location: null }, { ref: { type: b.ref_type, id: b.ref_id, no: b.ref_no }, reason: b.ref_type === 'counter_sale' ? 'Counter sale' : 'Manual sales invoice', actor: actorOf(req), set: { holder_ref: b.holder ?? b.ref_no } });
+      }
+      if (!b.preview) await auditReq(c, req, b.ref_type, b.ref_id, 'rolls_issued', { after: { ref_no: b.ref_no, rolls: out.length, kg: round3(out.reduce((s, x) => s + x.weight_kg, 0)) } });
+      return out;
+    };
+    const rolls = await tx(pool, run);
+    res.json({ rolls, kg: round3(rolls.reduce((s, x) => s + x.weight_kg, 0)) });
+  });
+
   /** Customer return: dispatched rolls come back into a warehouse on QC hold for disposition. */
   r.post('/returns/receive', requirePermission('inventory.inward.record'), async (req, res) => {
     const b = parse(z.object({ warehouse_id: z.uuid(), barcodes: z.array(z.string().min(3)).min(1).max(300), ref_no: reqText(60), reason: z.string().max(300).nullable().optional() }), req.body);

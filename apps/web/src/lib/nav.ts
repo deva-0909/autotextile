@@ -70,6 +70,7 @@ export const NAV: NavGroup[] = [
       { to: '/jobwork/orders', label: 'Job-work orders', icon: Factory, perms: ['jobwork.read'] },
       { to: '/jobwork/mills', label: 'Mills & rates', icon: Building2, perms: ['jobwork.read'] },
       { to: '/jobwork/claims', label: 'Quality claims', icon: ShieldAlert, perms: ['jobwork.read'] },
+      { to: '/jobwork/losses', label: 'Mill losses', icon: TriangleAlert, perms: ['jobwork.read'] },
     ],
   },
   {
@@ -137,6 +138,9 @@ export const NAV: NavGroup[] = [
     items: [
       { to: '/finance', label: 'Overview', icon: Gauge, perms: ['finance.read'] },
       { to: '/finance/vouchers', label: 'Vouchers', icon: ScrollText, perms: ['finance.read'] },
+      { to: '/finance/invoices', label: 'Manual invoices', icon: Receipt, perms: ['finance.read'] },
+      { to: '/finance/counter', label: 'Counter sales', icon: Store, perms: ['finance.read'] },
+      { to: '/finance/cash-book', label: 'Cash book', icon: Wallet, perms: ['finance.read'] },
       { to: '/finance/accounts', label: 'Chart of accounts', icon: BookOpen, perms: ['finance.read'] },
       { to: '/finance/receivables', label: 'Receivables', icon: ArrowDownToLine, perms: ['finance.read'] },
       { to: '/finance/payables', label: 'Payables', icon: HandCoins, perms: ['finance.read'] },

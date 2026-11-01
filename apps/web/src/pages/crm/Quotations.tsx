@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, FileText, Plus, Send, Trash2, XCircle } fr
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Link } from '../../components/AppLink';
+import { DocumentPreviewButton, VersionHistory, type DocData } from '../../components/DocumentPreview';
 import { api, invalidatePrefix, type Page } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtDate, fmtDateTime, fmtINR, fmtNum, humanize } from '../../lib/format';
@@ -188,6 +189,19 @@ export function QuotationBuilderPage() {
   );
 }
 
+/** The quotation as a printable document. */
+function quoteDoc(x: Quote): DocData {
+  return {
+    title: 'Quotation', number: `${x.number} v${x.version}`, date: x.created_at.slice(0, 10), status: x.status,
+    seller: { name: 'Demo Textile Trading Pvt Ltd', lines: [x.warehouse_name ? `Despatch from ${x.warehouse_name}` : null] },
+    party: { label: 'Quoted to', name: x.customer_name ?? x.prospect_name ?? '' },
+    meta: [{ label: 'Valid until', value: x.valid_until }, { label: 'Payment', value: x.payment_terms ?? '—' }, { label: 'Delivery', value: x.delivery_terms ?? '—' }, { label: 'Prepared by', value: x.owner_name ?? '' }],
+    lines: x.lines.map((l) => ({ description: `${l.sku} — ${l.product_name}${l.lot_no ? ` (lot ${l.lot_no})` : ''}`, qty: Number(l.kg), uom: 'kg', rate: Number(l.requested_price), gst_rate: Number(l.gst_rate), taxable: Number(l.taxable) })),
+    totals: [{ label: 'Taxable value', value: Number(x.taxable) }, ...(Number(x.freight_amount) ? [{ label: 'Freight', value: Number(x.freight_amount) }] : []), { label: 'GST', value: Number(x.tax) }, { label: 'Total', value: Number(x.total), strong: true }],
+    notes: x.notes, terms: 'Prices per kg, ex-warehouse unless stated. Shade and GSM within normal tolerance. Subject to stock at the time of order.',
+  };
+}
+
 export function QuotationDetailPage() {
   const { id = '' } = useParams();
   const nav = useNavigate();
@@ -206,12 +220,16 @@ export function QuotationDetailPage() {
     <>
       <PageHeader title={<span className="font-mono">{x.number} <span className="text-slate-400">v{x.version}</span></span>} description={`${x.customer_name ?? `${x.prospect_name} (prospect)`} · ${x.owner_name}`} meta={<StatusBadge status={x.status} />}
         breadcrumbs={[{ label: 'Sales & CRM', to: '/crm' }, { label: 'Quotations', to: '/crm/quotations' }, { label: `${x.number} v${x.version}` }]}
-        actions={manage && latest && <>
+        actions={<>
+          <DocumentPreviewButton draft={['draft', 'pending_approval', 'rejected_internal'].includes(x.status)} d={quoteDoc(x)} />
+          {manage && latest && <>
           {['draft', 'rejected_internal'].includes(x.status) && <><Button onClick={() => nav(`/crm/quotations/${x.id}/edit`)}>Edit</Button><Button variant="primary" onClick={() => void act('submit', 'Submitted')}>{x.needs_approval ? 'Submit for approval' : 'Approve'}</Button></>}
           {x.status === 'approved' && <Button variant="primary" icon={<Send className="size-4" />} onClick={() => void act('send', 'Marked as sent')}>Mark sent</Button>}
           {['pending_approval', 'approved', 'sent', 'rejected_internal', 'expired', 'rejected'].includes(x.status) && <Button onClick={() => nav(`/crm/quotations/${x.id}/edit?revise=1`)}>Revise</Button>}
           {x.status === 'sent' && <><Button variant="danger" icon={<XCircle className="size-4" />} onClick={() => setOutcome('lost')}>Lost</Button><Button variant="primary" icon={<CheckCircle2 className="size-4" />} onClick={() => setOutcome('accepted')}>Customer accepted</Button></>}
+        </>}
         </>} />
+      {!latest && <div className="mb-5"><Notice tone="info" title="An older version">Kept read-only for the negotiation history; only the latest version can be revised.</Notice></div>}
       {x.status === 'pending_approval' && <div className="mb-5"><Notice tone="warning">Waiting for price approval. Approvers see it under <Link className="link" to="/crm/price-approvals">Price approvals</Link>.</Notice></div>}
       {x.approval_note && x.status === 'rejected_internal' && <div className="mb-5"><Notice tone="danger" title={`Rejected by ${x.approved_by_name}`}>{x.approval_note}</Notice></div>}
       {x.status === 'accepted' && <div className="mb-5"><Notice tone="success" title="Order confirmed">{x.reservation_no ? <>Stock reserved on <Link className="link" to="/inventory/reservations">{x.reservation_no}</Link>. </> : null}Sales orders, invoicing and dispatch follow in P7.</Notice></div>}
@@ -245,6 +263,7 @@ export function QuotationDetailPage() {
           </Card>
         </div>
         <div className="space-y-6">
+          <VersionHistory docType="quotation" docId={x.root_id} render={(v) => quoteDoc({ ...x, ...(v.data as object), version: v.version, lines: ((v.data as { lines?: PricedLine[] }).lines ?? x.lines) } as Quote)} />
           <Card title="Details">
             <KeyValue columns={1} items={[
               { label: 'Lead', value: x.lead ? <Link className="link" to={`/crm/leads/${x.lead.id}`}>{x.lead.number} · {humanize(x.lead.stage)}</Link> : '—' },

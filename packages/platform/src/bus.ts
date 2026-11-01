@@ -210,3 +210,11 @@ export async function drainMany(pool: Pool, consumers: (Consumer | undefined)[],
     for (const c of behind) await c.drain();
   }
 }
+
+/**
+ * Keeps a read-only copy of a document version (governance stores it). Call when a document is created, each time
+ * its latest version is saved or revised, and when it is confirmed or cancelled.
+ */
+export async function recordVersion(c: Client, source: string, v: { doc_type: string; doc_id: string; number?: string | null; version: number; status?: string | null; data: unknown; change_note?: string | null; by_name?: string | null }) {
+  await publish(c, source, 'document.version.recorded', { service: source, ...v });
+}

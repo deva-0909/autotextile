@@ -1,9 +1,11 @@
+import { runCountSchedules } from './schedules.ts';
 import { type Pool, many, tx } from '@erp/platform';
 import { raiseException } from './common.ts';
 import { releaseReservation } from './reservations.ts';
 
 /** Expires lapsed reservations and flags transfers stuck in transit. Runs every 15 minutes. */
 export async function runInventoryChecks(pool: Pool) {
+  await runCountSchedules(pool).catch((e) => console.error('[inventory] count schedules', (e as Error).message));
   const actor = { id: null, name: 'system' };
   const lapsed = await many<{ id: string }>(pool, `SELECT id FROM reservations WHERE status = 'active' AND expires_at < now()`);
   for (const r of lapsed) await tx(pool, (c) => releaseReservation(c, r.id, 'expired', 'Reservation hold expired', actor));

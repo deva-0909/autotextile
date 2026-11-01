@@ -16,13 +16,13 @@ export function portalRoutes(r: Router, { pool }: ServiceContext) {
       (SELECT count(*)::int FROM job_orders WHERE mill_id = $1 AND status = 'issued') AS awaiting_ack,
       (SELECT count(*)::int FROM job_orders WHERE mill_id = $1 AND status IN ('acknowledged','in_process')) AS in_process,
       (SELECT count(*)::int FROM job_orders WHERE mill_id = $1 AND status = 'ready') AS ready,
-      (SELECT round(coalesce(sum(kg_sent - kg_good - kg_rejected - kg_damaged - kg_process_loss), 0), 1) FROM job_orders WHERE mill_id = $1 AND status IN ('issued','acknowledged','in_process','ready','partially_returned')) AS kg_with_you,
+      (SELECT round(coalesce(sum(kg_sent - kg_good - kg_rejected - kg_damaged - kg_process_loss - kg_quarantine), 0), 1) FROM job_orders WHERE mill_id = $1 AND status IN ('issued','acknowledged','in_process','ready','partially_returned')) AS kg_with_you,
       (SELECT count(*)::int FROM quality_claims WHERE mill_id = $1 AND status IN ('open','under_review')) AS open_claims`, [millOf(req)]));
   });
 
   r.get('/portal/mill/jobs', requirePermission('portal.mill.access'), async (req, res) => {
     res.json(await many(pool, `SELECT id, number, process_name, status, issue_date, expected_return_date, kg_sent, ack_kg, current_stage, ready_at,
-        round(kg_sent - kg_good - kg_rejected - kg_damaged - kg_process_loss, 3) AS kg_balance
+        round(kg_sent - kg_good - kg_rejected - kg_damaged - kg_process_loss - kg_quarantine, 3) AS kg_balance
       FROM job_orders WHERE mill_id = $1 AND status NOT IN ('draft','cancelled') ORDER BY CASE status WHEN 'issued' THEN 0 WHEN 'acknowledged' THEN 1 WHEN 'in_process' THEN 2 ELSE 3 END, issue_date DESC`, [millOf(req)]));
   });
 

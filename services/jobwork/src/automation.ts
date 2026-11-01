@@ -9,6 +9,14 @@ export async function runJobworkChecks(pool: Pool) {
     const unacked = await many<{ id: string; number: string; mill_name: string }>(c, `SELECT id, number, mill_name FROM job_orders WHERE status = 'issued' AND issue_date + $1::int < current_date`, [ackDays]);
     for (const o of unacked)
       await raiseException(c, { kind: 'mill_ack_overdue', severity: 'warning', ref_id: o.id, ref_label: `${o.number} · ${o.mill_name}`, message: `${o.mill_name} has not acknowledged ${o.number} within ${ackDays} days of dispatch`, notifyPermission: 'jobwork.order.manage', link: `/jobwork/orders/${o.id}` });
+    // Our goods sitting at the mill too long (not returned, or held back).
+    const maxDays = Number(await setting('jobwork.max_days_at_mill', 30));
+    const aged = await many<{ id: string; number: string; mill_name: string; kg: number; days: number }>(c, `
+      SELECT id, number, mill_name, round(kg_sent - kg_good - kg_rejected - kg_damaged - kg_process_loss - kg_quarantine, 1)::float AS kg, current_date - issue_date AS days
+      FROM job_orders WHERE status IN ('acknowledged','in_process','ready','partially_returned') AND issue_date + $1::int < current_date
+        AND kg_sent - kg_good - kg_rejected - kg_damaged - kg_process_loss - kg_quarantine > 0.5`, [maxDays]);
+    for (const o of aged)
+      await raiseException(c, { kind: 'aged_at_mill', severity: 'warning', ref_id: o.id, ref_label: `${o.number} · ${o.mill_name}`, message: `${o.kg} kg on ${o.number} has been at ${o.mill_name} for ${o.days} days (limit ${maxDays})`, notifyPermission: 'jobwork.order.manage', link: `/jobwork/orders/${o.id}` });
     const open = await many<{ id: string; number: string; mill_name: string; internal_due_date: string; statutory_days: number; operational_days: number }>(c, `
       SELECT id, number, mill_name, internal_due_date, statutory_due_date - current_date AS statutory_days, internal_due_date - current_date AS operational_days
       FROM job_orders WHERE status IN ('issued','acknowledged','in_process','ready','partially_returned')`);

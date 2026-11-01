@@ -4,6 +4,7 @@ import { HandCoins, LogOut, Plus, RefreshCw, UserPlus } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 import { Link } from '../../components/AppLink';
+import { DocumentPreviewButton } from '../../components/DocumentPreview';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { GST_STATES, fmtDate, fmtINR, fmtNum } from '../../lib/format';
@@ -97,6 +98,11 @@ export function AgentDetailPage() {
       <PageHeader title={a.firm ?? a.name} description={`${a.code} · ${a.name} · ${rateLabel(a)}`} meta={<StatusBadge status={a.status} />}
         breadcrumbs={[{ label: 'Sales & CRM', to: '/crm' }, { label: 'Agents', to: '/crm/agents' }, { label: a.code }]}
         actions={<>
+          <DocumentPreviewButton label="Commission statement" d={{ title: 'Commission statement', number: a.code, date: new Date().toISOString().slice(0, 10), seller: { name: 'Demo Textile Trading Pvt Ltd' }, party: { label: 'Agent', name: a.firm ?? a.name, lines: [a.name, a.pan ? `PAN ${a.pan}` : null] },
+            meta: [{ label: 'Rate', value: rateLabel(a) }, { label: 'Earned, to pay', value: fmtINR(a.totals.earned) }, { label: 'Awaiting approval', value: fmtINR(a.totals.in_payout) }],
+            lines: a.commissions.map((x) => ({ description: `${x.invoice_no} · ${x.customer_name} · ${fmtDate(x.invoice_date)}`, note: { pending: 'Customer to pay', earned: 'Earned', in_payout: 'Awaiting approval', paid: 'Approved for payment', cancelled: 'Cancelled' }[x.status], amount: Number(x.amount) })),
+            totals: [{ label: 'Pending', value: a.totals.pending }, { label: 'Earned', value: a.totals.earned }, { label: 'Approved for payment', value: a.totals.paid }, { label: 'Total commission', value: a.totals.pending + a.totals.earned + a.totals.in_payout + a.totals.paid, strong: true }],
+            footer: 'TDS under section 194H is deducted when a payout is posted.' }} />
           <Button icon={<RefreshCw className="size-4" />} onClick={async () => { const r = await api.post<{ accrued: number; earned: number }>(`/crm/agents/${a.id}/sync`, {}); toast({ tone: 'success', title: `${r.accrued} new invoices, ${r.earned} now paid` }); q.refetch(); }}>Check invoices</Button>
           {can('crm.config.manage') && <Button onClick={() => setModal('edit')}>Edit</Button>}
           {can('crm.config.manage') && <Button variant="primary" icon={<HandCoins className="size-4" />} disabled={!a.totals.earned} onClick={() => setModal('payout')}>Pay earned commission</Button>}

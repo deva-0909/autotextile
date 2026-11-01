@@ -17,6 +17,13 @@ function audienceClause(req: Request, params: unknown[]) {
 }
 
 export function routes(r: Router, { pool }: ServiceContext) {
+  // ---------- document versions (read-only history) ----------
+  r.get('/document-versions', requirePermission('crm.read', 'procurement.read', 'finance.read', 'jobwork.read', 'inventory.read', 'fulfilment.read', 'governance.document.read'), async (req, res) => {
+    const docType = String(req.query.doc_type ?? ''), docId = String(req.query.doc_id ?? '');
+    if (!docType || !/^[0-9a-f-]{36}$/i.test(docId)) { res.json([]); return; }
+    res.json(await many(pool, 'SELECT id, service, doc_type, doc_id, number, version, status, data, change_note, by_name, at FROM document_versions WHERE doc_type = $1 AND doc_id = $2 ORDER BY version DESC, id DESC', [docType, docId]));
+  });
+
   // ---------- audit trail ----------
   r.get('/audit', requirePermission('governance.audit.read'), async (req, res) => {
     const lq = listQuery(req, ['at', 'service', 'entity', 'action', 'user_name'], 'at');
@@ -269,6 +276,11 @@ export function consumers(): Record<string, Handler> {
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) ON CONFLICT (event_id) DO NOTHING`,
         [ev.id, p.service, p.entity, p.entityId, p.action, p.before === undefined ? null : JSON.stringify(p.before), p.after === undefined ? null : JSON.stringify(p.after),
           p.reason ?? null, p.approvedBy ?? null, p.userId ?? null, p.userName ?? null, p.sessionId ?? null, p.ip ?? null, p.userAgent ?? null, p.at]);
+    },
+    'document.version.recorded': async (ev: BusEvent, c: Client) => {
+      const p = ev.payload as { service: string; doc_type: string; doc_id: string; number?: string | null; version: number; status?: string | null; data: unknown; change_note?: string | null; by_name?: string | null };
+      await c.query(`INSERT INTO document_versions (event_id, service, doc_type, doc_id, number, version, status, data, change_note, by_name, at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, coalesce($11::timestamptz, now()))
+        ON CONFLICT DO NOTHING`, [ev.id, p.service, p.doc_type, p.doc_id, p.number ?? null, p.version, p.status ?? null, JSON.stringify(p.data ?? {}), p.change_note ?? null, p.by_name ?? null, (ev as { created_at?: string }).created_at ?? null]);
     },
     'notification.requested': async (ev: BusEvent, c: Client) => {
       const n = ev.payload as { user_id?: string | null; audience_permission?: string | null; kind?: string; title: string; body?: string | null; link?: string | null };
