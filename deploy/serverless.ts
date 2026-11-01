@@ -112,6 +112,8 @@ async function boot(): Promise<Booted> {
 let draining: Promise<void> | null = null;
 let lastDrain = 0;
 async function drainAll(services: RunningService[]) {
+  // While this instance reloads the demo, its consumers would only hold locks on tables being dropped.
+  if (resetting) return;
   if (draining) return draining;
   draining = (async () => {
     // Two rounds: handlers publish events that other services consume.
@@ -177,6 +179,8 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     return;
   }
   const { gateway, services, ports } = await (booted ??= boot().catch((e) => { booted = null; throw e; }));
+  // A reload in progress on this instance: every request waits for it rather than reading half-dropped data.
+  if (resetting) await resetting.catch(() => {});
   // A warm instance re-checks the setup marker at most once a minute, so deleting it (to reload the demo) takes effect
   // without waiting for a cold start.
   if (Date.now() - lastSetupCheck > 60_000) {
@@ -184,7 +188,11 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     const pool = services.find((s) => s.ctx.name === 'identity')!.ctx.pool;
     const ok = await pool.query(`SELECT to_regclass('identity.setup_state') IS NOT NULL AND EXISTS (SELECT 1 FROM identity.setup_state) AS ok`).then((r) => r.rows[0].ok as boolean, () => false);
     // The seed points service-to-service calls at its own temporary servers; point them back at this instance's.
-    if (!ok) { await (resetting ??= ensureSetUp((await database()).session).finally(() => { setServicePorts(ports); resetting = null; })); }
+    if (!ok) {
+      // Let a drain already running finish first, so its transactions are not left holding locks the reset needs.
+      await draining?.catch(() => {});
+      await (resetting ??= ensureSetUp((await database()).session).finally(() => { setServicePorts(ports); resetting = null; }));
+    }
   }
   if (url.startsWith('/api/_cron')) {
     if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {

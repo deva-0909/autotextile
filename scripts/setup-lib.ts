@@ -16,7 +16,24 @@ export async function setupDatabase({ reset = false, log = console.log }: { rese
     if (reset) {
       log('• Dropping the application schemas');
       const pool = createPool('identity');
-      for (const schema of [...SERVICES, 'bus']) await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      // Running instances of the app may still be mid-transaction on these tables. Each drop waits a few seconds for its
+      // locks; if it cannot get them, this login's transactions left idle (by an instance waiting on its own pool) are
+      // ended and the drop is tried again, so a reload can never wait on them for ever.
+      for (const schema of [...SERVICES, 'bus']) {
+        for (let attempt = 1; ; attempt++) {
+          try {
+            await pool.query(`SET LOCAL lock_timeout = '5s'; DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+            break;
+          } catch (e) {
+            if ((e as { code?: string }).code !== '55P03' || attempt >= 10) throw e;
+            const { rows } = await pool.query(`SELECT count(*)::int AS n FROM (SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+              WHERE usename = current_user AND pid <> pg_backend_pid() AND state LIKE 'idle in transaction%' AND now() - state_change > interval '3 seconds') t`);
+            log(`  … ${schema} was in use: ended ${rows[0].n} idle transaction(s), trying again`);
+          }
+        }
+      }
+      // Backstop for the app's own connections: a transaction left idle this long is ended by the server.
+      await pool.query(`ALTER ROLE current_user SET idle_in_transaction_session_timeout = '60s'`).catch(() => {});
       await pool.end();
     }
   }
