@@ -181,6 +181,17 @@ function Notifications() {
 
 interface SearchHit { kind: string; label: string; sub?: string; to: string }
 
+/** Extra words a page is found by in search, beyond its menu name. */
+const PAGE_WORDS: Record<string, string> = {
+  '/crm/quotations': 'quote quotation preview print pdf version history',
+  '/fulfilment/invoices': 'invoice tax invoice gst bill print pdf preview',
+  '/finance/invoices': 'invoice manual invoice bill print pdf preview version history',
+  '/finance/counter': 'invoice cash sale counter bill print',
+  '/commerce/orders': 'sales order proforma invoice print preview',
+  '/procurement/purchase-orders': 'po purchase order print preview pdf version history',
+  '/jobwork/orders': 'challan print preview mill',
+};
+
 function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const nav = useNavigate();
   const { can, sees } = useAuth();
@@ -192,7 +203,7 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
   useEffect(() => { if (open) { setQ(''); setActive(0); setTimeout(() => inputRef.current?.focus(), 10); } }, [open]);
 
   const pages = useMemo(
-    () => ALL_ITEMS.filter((i) => (!i.perms || can(...i.perms)) && sees(i.to) && i.label.toLowerCase().includes(q.toLowerCase())).map((i) => ({ kind: i.group, label: i.label, to: i.to })),
+    () => ALL_ITEMS.filter((i) => (!i.perms || can(...i.perms)) && sees(i.to) && `${i.label} ${PAGE_WORDS[i.to] ?? ''}`.toLowerCase().includes(q.toLowerCase())).map((i) => ({ kind: i.group, label: i.label, to: i.to })),
     [q, can, sees],
   );
 
@@ -204,6 +215,15 @@ function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void 
         const r = await api.get<Page<{ id: string; code: string; legal_name: string; party_type: string; gstin: string | null }>>(`/masters/parties${qs({ q, pageSize: 6 })}`).catch(() => null);
         r?.items.forEach((p) => out.push({ kind: p.party_type, label: p.legal_name, sub: `${p.code}${p.gstin ? ` · ${p.gstin}` : ''}`, to: `/partners/${p.party_type}/${p.id}` }));
       }
+      // Documents by number or party: quotations, sales orders, tax invoices and manual invoices open on their print-ready page.
+      const docs = async (path: string, map: (x: Record<string, string | number | null>) => SearchHit) => {
+        const r = await api.get<Record<string, string | number | null>[] | { items: Record<string, string | number | null>[] }>(path).catch(() => null);
+        (Array.isArray(r) ? r : r?.items ?? []).slice(0, 4).forEach((x) => out.push(map(x)));
+      };
+      if (can('crm.read')) await docs(`/crm/quotations${qs({ q })}`, (x) => ({ kind: 'quotation', label: `${x.number}${x.version ? ` v${x.version}` : ''}`, sub: `${x.customer_name ?? x.prospect_name ?? ''} · ${x.status}`, to: `/crm/quotations/${x.id}` }));
+      if (can('commerce.read')) await docs(`/commerce/orders${qs({ q })}`, (x) => ({ kind: 'sales order', label: String(x.number), sub: `${x.customer_name} · ${x.status}`, to: `/commerce/orders/${x.id}` }));
+      if (can('fulfilment.read')) await docs(`/fulfilment/invoices${qs({ q, limit: 4 })}`, (x) => ({ kind: 'tax invoice', label: String(x.invoice_no), sub: `${x.customer_name} · ${x.order_no}`, to: `/fulfilment/invoices/${x.id}` }));
+      if (can('finance.read')) await docs(`/finance/manual-invoices${qs({ q })}`, (x) => ({ kind: 'manual invoice', label: String(x.number ?? x.draft_no), sub: `${x.party_name} · ${x.status}`, to: `/finance/invoices/${x.id}` }));
       if (can('masters.product.read')) {
         const r = await api.get<Page<{ id: string; sku: string; name: string }>>(`/masters/products${qs({ q, pageSize: 4 })}`).catch(() => null);
         r?.items.forEach((p) => out.push({ kind: 'product', label: p.name, sub: p.sku, to: `/catalogue/products?open=${p.id}` }));

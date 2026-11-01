@@ -220,6 +220,17 @@ export function fulfilmentRoutes(r: Router, { pool }: ServiceContext) {
     res.json(out);
   });
 
+  /** Tax invoices raised at dispatch, newest first; q matches the invoice, order or customer. Each opens as the printable invoice. */
+  r.get('/invoices', requirePermission('fulfilment.read'), async (req, res) => {
+    const q = String(req.query.q ?? '').trim();
+    const params: unknown[] = [];
+    let where = 'invoice_no IS NOT NULL';
+    if (q) { params.push(`%${q}%`); where += ` AND (invoice_no ILIKE $1 OR order_no ILIKE $1 OR customer_name ILIKE $1)`; }
+    params.push(Math.min(Number(req.query.limit) || 200, 500));
+    res.json(await many(pool, `SELECT id, invoice_no, invoice_date::text, order_no, order_id, customer_name, warehouse_code, status, taxable::float, (cgst + sgst + igst)::float AS gst, invoice_total::float AS total, amount_settled::float AS settled
+      FROM fulfilments WHERE ${where} ORDER BY invoice_date DESC NULLS LAST, invoice_no DESC LIMIT $${params.length}`, params));
+  });
+
   /** Printable tax invoice. Customers see only their own. */
   r.get('/invoices/:id', requirePermission('fulfilment.read', 'portal.customer.accounts', 'portal.customer.order'), async (req, res) => {
     const f = await one<F & { invoice_date: string; customer_gstin: string | null }>(pool, 'SELECT * FROM fulfilments WHERE (id::text = $1 OR invoice_no = $1) AND invoice_no IS NOT NULL', [req.params.id]);

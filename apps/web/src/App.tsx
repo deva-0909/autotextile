@@ -51,6 +51,7 @@ import { CartPage, CustomerAccountPage, CustomerCompanyPage, CustomerOrderPage, 
 import { CommerceOrderDetailPage, CommerceOrdersPage, ComplaintsPage, PaymentsPage, RegistrationsPage, TokenPoliciesPage, WalletPage } from './pages/commerce/Admin';
 import { AllocationListPage, DispatchCockpit, FulfilmentDetailPage, OrderAllocationPage, ReturnDetailPage, ReturnsPage, ShipmentDetailPage, ShipmentsPage } from './pages/fulfilment/Fulfilment';
 import { InvoicePage } from './pages/fulfilment/Invoice';
+import { SalesInvoicesPage } from './pages/fulfilment/SalesInvoices';
 import { AgeingPage, ChartOfAccountsPage, FinanceOverview, LedgerPage, NewVoucherPage, PartyLedgerPage, VoucherDetailPage, VouchersPage } from './pages/finance/Ledger';
 import { AnomaliesPage, BankPage, ClosePage, GstPage, StatementsPage, TdsPage } from './pages/finance/Compliance';
 import { AllTasksPage, CommunicationsPage, ContractDetailPage, ContractsPage, HandoverPage, MyWorkPage, RuleEditorPage, RulesPage } from './pages/workflow/Workflow';
@@ -236,6 +237,7 @@ export default function App() {
         <Route path="/fulfilment" element={<Guard perms={['fulfilment.read']}><DispatchCockpit /></Guard>} />
         <Route path="/fulfilment/allocation" element={<Guard perms={['fulfilment.read']}><AllocationListPage /></Guard>} />
         <Route path="/fulfilment/orders/:orderId" element={<Guard perms={['fulfilment.read']}><OrderAllocationPage /></Guard>} />
+        <Route path="/fulfilment/invoices" element={<Guard perms={['fulfilment.read']}><SalesInvoicesPage /></Guard>} />
         <Route path="/fulfilment/invoices/:id" element={<Guard perms={['fulfilment.read']}><InvoicePage /></Guard>} />
         <Route path="/fulfilment/shipments" element={<Guard perms={['fulfilment.read']}><ShipmentsPage /></Guard>} />
         <Route path="/fulfilment/shipments/:id" element={<Guard perms={['fulfilment.read']}><ShipmentDetailPage /></Guard>} />

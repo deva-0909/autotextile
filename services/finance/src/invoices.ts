@@ -166,6 +166,7 @@ export function invoiceRoutes(r: Router, { pool }: ServiceContext) {
     if (req.query.kind) { p.push(req.query.kind); w.push(`kind = $${p.length}`); }
     if (req.query.mode) { p.push(req.query.mode); w.push(`mode = $${p.length}`); }
     if (req.query.status) { p.push(String(req.query.status).split(',')); w.push(`status = ANY($${p.length})`); }
+    if (req.query.q) { p.push(`%${req.query.q}%`); w.push(`(number ILIKE $${p.length} OR draft_no ILIKE $${p.length} OR party_name ILIKE $${p.length} OR supplier_invoice_no ILIKE $${p.length})`); }
     res.json(await many(pool, `SELECT id, root_id, version, kind, mode, status, number, draft_no, book_id, doc_date::text, party_name, party_gstin, supplier_invoice_no, taxable::float, total::float, payment_mode, created_by_name, approved_by_name, cancel_reason, created_at FROM manual_invoices WHERE ${w.join(' AND ')} ORDER BY created_at DESC LIMIT 300`, p));
   });
   r.get('/manual-invoices/:id', requirePermission('finance.read', 'fulfilment.read'), async (req, res) => {

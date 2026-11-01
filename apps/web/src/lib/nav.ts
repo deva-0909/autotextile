@@ -129,6 +129,7 @@ export const NAV: NavGroup[] = [
       { to: '/fulfilment', label: 'Dispatch cockpit', icon: Gauge, perms: ['fulfilment.read'] },
       { to: '/fulfilment/allocation', label: 'Warehouse allocation', icon: Shuffle, perms: ['fulfilment.read'] },
       { to: '/fulfilment/shipments', label: 'Shipments & freight', icon: Truck, perms: ['fulfilment.read'] },
+      { to: '/fulfilment/invoices', label: 'Sales invoices', icon: Receipt, perms: ['fulfilment.read'] },
       { to: '/fulfilment/returns', label: 'Returns', icon: Undo2, perms: ['fulfilment.read'] },
     ],
   },
