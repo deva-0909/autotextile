@@ -131,6 +131,14 @@ export function routes(r: Router, { pool }: ServiceContext) {
   });
 
   // ---------- documents ----------
+  // Personnel files (ID proofs, offer and relieving letters) are seen only by people who manage employees.
+  const PRIVATE: Record<string, string> = { employee: 'hrms.employee.manage' };
+  const mayOpen = (req: Request, entityType: string) => !PRIVATE[entityType] || hasPermission(req.user, PRIVATE[entityType]);
+  async function docFor(req: Request, id: string) {
+    const d = await one<{ id: string; entity_type: string; status: string; current_version: number }>(pool, 'SELECT * FROM documents WHERE id::text = $1', [id]);
+    if (!d || !mayOpen(req, d.entity_type)) throw notFound('Document');
+    return d;
+  }
   r.get('/documents', requirePermission('governance.document.read'), async (req, res) => {
     const lq = listQuery(req, ['title', 'updated_at', 'document_type', 'expires_on'], 'updated_at');
     const params: unknown[] = [];
@@ -139,6 +147,8 @@ export function routes(r: Router, { pool }: ServiceContext) {
     if (f.entityType) { params.push(f.entityType); where.push(`d.entity_type = $${params.length}`); }
     if (f.entityId) { params.push(f.entityId); where.push(`d.entity_id = $${params.length}`); }
     params.push(f.status ?? 'active'); where.push(`d.status = $${params.length}`);
+    const hidden = Object.keys(PRIVATE).filter((t) => !mayOpen(req, t));
+    if (hidden.length) { params.push(hidden); where.push(`NOT (d.entity_type = ANY($${params.length}))`); }
     if (lq.q) { params.push(`%${lq.q}%`); where.push(`(d.title ILIKE $${params.length} OR d.document_type ILIKE $${params.length})`); }
     const rows = await many<{ total_count: number }>(pool, `
       SELECT d.*, v.file_name, v.mime_type, v.size_bytes, v.uploaded_by_name, v.uploaded_at, count(*) OVER ()::int AS total_count
@@ -148,8 +158,7 @@ export function routes(r: Router, { pool }: ServiceContext) {
   });
 
   r.get('/documents/:id', requirePermission('governance.document.read'), async (req, res) => {
-    const d = await one<Record<string, unknown>>(pool, 'SELECT * FROM documents WHERE id = $1', [req.params.id]);
-    if (!d) throw notFound('Document');
+    const d = await docFor(req, String(req.params.id));
     const versions = await many(pool, 'SELECT id, version, file_name, mime_type, size_bytes, sha256, note, uploaded_by_name, uploaded_at FROM document_versions WHERE document_id = $1 ORDER BY version DESC', [req.params.id]);
     res.json({ ...d, versions });
   });
@@ -170,6 +179,7 @@ export function routes(r: Router, { pool }: ServiceContext) {
 
   r.post('/documents', requirePermission('governance.document.upload'), raw, async (req, res) => {
     const m = parse(meta, req.query);
+    if (!mayOpen(req, m.entity_type)) throw forbidden('Only HR can file documents for an employee');
     const body = req.body as Buffer;
     const { fileName, mime } = fileInfo(req);
     checkFile(mime, body);
@@ -190,6 +200,7 @@ export function routes(r: Router, { pool }: ServiceContext) {
 
   r.post('/documents/:id/versions', requirePermission('governance.document.upload'), raw, async (req, res) => {
     const { note } = parse(z.object({ note: optText(300) }), req.query);
+    await docFor(req, String(req.params.id));
     const body = req.body as Buffer;
     const { fileName, mime } = fileInfo(req);
     checkFile(mime, body);
@@ -211,6 +222,7 @@ export function routes(r: Router, { pool }: ServiceContext) {
   });
 
   r.get('/documents/:id/versions/:version/content', requirePermission('governance.document.read'), async (req, res) => {
+    await docFor(req, String(req.params.id));
     const v = await one<{ storage_key: string; mime_type: string; file_name: string }>(pool,
       'SELECT storage_key, mime_type, file_name FROM document_versions WHERE document_id = $1 AND version = $2', [req.params.id, Number(req.params.version)]);
     if (!v) throw notFound('Document version');
@@ -222,8 +234,11 @@ export function routes(r: Router, { pool }: ServiceContext) {
     res.send(body);
   });
 
-  r.post('/documents/:id/archive', requirePermission('governance.document.delete'), async (req, res) => {
+  // Archiving needs the archive right, except that HR manages its own personnel files.
+  r.post('/documents/:id/archive', requirePermission('governance.document.delete', 'hrms.employee.manage'), async (req, res) => {
     const { reason } = parse(z.object({ reason: reqText(300) }), req.body);
+    const d = await docFor(req, String(req.params.id));
+    if (!hasPermission(req.user, 'governance.document.delete') && !PRIVATE[d.entity_type]) throw forbidden('Archiving this document needs the archive permission');
     await tx(pool, async (c) => {
       const r1 = await c.query(`UPDATE documents SET status = 'archived', updated_at = now() WHERE id = $1 AND status = 'active'`, [req.params.id]);
       if (!r1.rowCount) throw notFound('Active document');

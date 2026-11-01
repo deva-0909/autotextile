@@ -224,6 +224,7 @@ function ApprovalDrawer({ id, onClose }: { id: string; onClose: () => void }) {
 }
 
 export function DocumentsPage() {
+  const { can } = useAuth();
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [versions, setVersions] = useState<string | null>(null);
   const [preview, setPreview] = useState<Doc | null>(null);
@@ -239,7 +240,7 @@ export function DocumentsPage() {
         searchPlaceholder="Search title or type…"
         onRowClick={(r) => setPreview(r)}
         toolbar={<>
-          <FilterSelect placeholder="All record types" value={filters.entityType} onChange={(v) => setFilters({ ...filters, entityType: v })} options={['customer', 'supplier', 'manufacturer', 'mill', 'transporter', 'product'].map((v) => ({ value: v, label: humanize(v) }))} />
+          <FilterSelect placeholder="All record types" value={filters.entityType} onChange={(v) => setFilters({ ...filters, entityType: v })} options={['customer', 'supplier', 'manufacturer', 'mill', 'transporter', 'product', ...(can('hrms.employee.manage') ? ['employee'] : [])].map((v) => ({ value: v, label: humanize(v) }))} />
           <FilterSelect placeholder="Active" value={filters.status} onChange={(v) => setFilters({ ...filters, status: v })} options={[{ value: 'archived', label: 'Archived' }]} />
         </>}
         empty={{ title: 'No documents yet', description: 'Open a business partner or product and use its Documents tab to upload.' }}

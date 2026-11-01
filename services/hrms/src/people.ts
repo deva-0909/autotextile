@@ -1,7 +1,8 @@
 import type { Router } from 'express';
 import { z } from 'zod';
 import { type ServiceContext, badRequest, callService, conflict, hasPermission, many, notFound, one, optText, parse, publish, reqText, requirePermission, tx } from '@erp/platform';
-import { S, assertSelfOr, auditReq, fyOf, localNumber, selfEmployee, today } from './common.ts';
+import { OFFICE_STATE, S, assertSelfOr, auditReq, daysIn, fyOf, localNumber, selfEmployee, today } from './common.ts';
+import { type PtSlab, computePayslip } from './statutory.ts';
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const ONBOARDING = ['Offer letter signed', 'ID and address proof', 'PAN and Aadhaar', 'Bank account details', 'PF nomination (Form 2) / UAN', 'ESIC declaration (if eligible)', 'Login and system access', 'Safety induction (warehouse)'];
@@ -62,6 +63,36 @@ export function peopleRoutes(r: Router, { pool }: ServiceContext) {
     ]);
     const comp = await one(pool, `SELECT coalesce(sum(days), 0)::float AS available FROM comp_offs WHERE employee_id = $1 AND status = 'available' AND expires_on >= current_date`, [e.id]);
     res.json({ ...e, events, checklist, salary, balances, leaves, attendance: att, comp_off: comp });
+  });
+
+  /**
+   * Salary register: what each person is paid now, their next revision if one is scheduled, a full-month estimate of
+   * deductions, employer contributions and take-home, and what they were actually paid in the latest payroll.
+   */
+  r.get('/salary-register', requirePermission('hrms.payroll.manage', 'hrms.payroll.approve'), async (req, res) => {
+    const st = req.query.status === 'all' ? ['onboarding', 'probation', 'active', 'notice', 'exited'] : ['onboarding', 'probation', 'active', 'notice'];
+    const rows = await many<{ pt_state: string; overtime_eligible: boolean; basic: number | null; hra: number; conveyance: number; special: number; other: number; pf_applicable: boolean; pf_on_capped_wage: boolean }>(pool, `
+      SELECT e.id, e.code, e.name, e.designation, e.department, e.location, e.status, e.date_of_joining::text, e.pt_state, e.overtime_eligible,
+        s.effective_from::text, s.basic::float, s.hra::float, s.conveyance::float, s.special::float, s.other::float, s.pf_applicable, s.pf_on_capped_wage,
+        (s.basic + s.hra + s.conveyance + s.special + s.other)::float AS gross,
+        prev.effective_from AS previous_from, prev.gross AS previous_gross,
+        nxt.effective_from AS next_from, nxt.gross AS next_gross,
+        lp.month AS last_month, lp.gross AS last_gross, lp.net AS last_net, lp.paid_days AS last_paid_days, lp.payslip_id AS last_payslip_id
+      FROM employees e
+      LEFT JOIN LATERAL (SELECT * FROM salary_structures x WHERE x.employee_id = e.id AND x.effective_from <= current_date ORDER BY x.effective_from DESC LIMIT 1) s ON true
+      LEFT JOIN LATERAL (SELECT x.effective_from::text, (x.basic + x.hra + x.conveyance + x.special + x.other)::float AS gross FROM salary_structures x WHERE x.employee_id = e.id AND x.effective_from < s.effective_from ORDER BY x.effective_from DESC LIMIT 1) prev ON true
+      LEFT JOIN LATERAL (SELECT x.effective_from::text, (x.basic + x.hra + x.conveyance + x.special + x.other)::float AS gross FROM salary_structures x WHERE x.employee_id = e.id AND x.effective_from > current_date ORDER BY x.effective_from LIMIT 1) nxt ON true
+      LEFT JOIN LATERAL (SELECT r.month::text AS month, p.gross::float, p.net::float, p.paid_days::float, p.id AS payslip_id FROM payslips p JOIN payroll_runs r ON r.id = p.run_id WHERE p.employee_id = e.id ORDER BY r.month DESC LIMIT 1) lp ON true
+      WHERE e.status = ANY($1) ORDER BY e.department, e.name`, [st]);
+    const slabs = await many<PtSlab & { state_code: string }>(pool, 'SELECT state_code, min_gross::float, max_gross::float, amount::float, feb_amount::float FROM pt_slabs');
+    const month = today().slice(0, 7);
+    const dim = daysIn(`${month}-01`);
+    res.json(rows.map((r) => {
+      if (r.basic == null) return { ...r, estimate: null };
+      const p = computePayslip(r as never, { daysInMonth: dim, paidDays: dim, overtimeHours: 0, overtimeEligible: r.overtime_eligible, month: Number(month.slice(5)), ptSlabs: slabs.filter((x) => x.state_code === r.pt_state), shiftHours: 8 });
+      const employer = Object.values(p.employer).reduce((t, v) => t + v, 0);
+      return { ...r, estimate: { deductions: p.total_deductions, net: p.net, employer, monthly_ctc: p.gross + employer, annual_ctc: (p.gross + employer) * 12 } };
+    }));
   });
 
   r.post('/employees', requirePermission('hrms.employee.manage'), async (req, res) => {
@@ -129,7 +160,7 @@ export function peopleRoutes(r: Router, { pool }: ServiceContext) {
       switch (b.action) {
         case 'start_probation': if (e.status !== 'onboarding') throw conflict('Not in onboarding'); await c.query(`UPDATE employees SET status = 'probation' WHERE id = $1`, [e.id]); await ev('probation_started', 'Onboarding complete'); break;
         case 'confirm': if (e.status !== 'probation') throw conflict('Only employees on probation can be confirmed'); await c.query(`UPDATE employees SET status = 'active', confirmed_on = $2 WHERE id = $1`, [e.id, b.effective_date]); await ev('confirmed', b.reason ?? 'Confirmed after probation'); break;
-        case 'transfer': if (!b.location) throw badRequest('Choose the new location'); await c.query(`UPDATE employees SET location = $2, department = coalesce($3, department) WHERE id = $1`, [e.id, b.location, b.department ?? null]); await ev('transferred', `${e.location} → ${b.location}${b.reason ? `: ${b.reason}` : ''}`); break;
+        case 'transfer': if (!b.location) throw badRequest('Choose the new location'); await c.query(`UPDATE employees SET location = $2, department = coalesce($3, department), pt_state = coalesce($4, pt_state) WHERE id = $1`, [e.id, b.location, b.department ?? null, OFFICE_STATE[b.location] ?? null]); await ev('transferred', `${e.location} → ${b.location}${b.reason ? `: ${b.reason}` : ''}`); break;
         case 'promote': if (!b.designation) throw badRequest('Give the new designation'); await c.query(`UPDATE employees SET designation = $2 WHERE id = $1`, [e.id, b.designation]); await ev('promoted', `${e.designation} → ${b.designation}`); break;
         case 'resign': {
           if (['notice', 'exited'].includes(e.status)) throw conflict(`Already ${e.status}`);

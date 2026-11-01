@@ -48,7 +48,7 @@ import { InvoicePage } from './pages/fulfilment/Invoice';
 import { AgeingPage, ChartOfAccountsPage, FinanceOverview, LedgerPage, NewVoucherPage, PartyLedgerPage, VoucherDetailPage, VouchersPage } from './pages/finance/Ledger';
 import { AnomaliesPage, BankPage, ClosePage, GstPage, StatementsPage, TdsPage } from './pages/finance/Compliance';
 import { AllTasksPage, CommunicationsPage, ContractDetailPage, ContractsPage, HandoverPage, MyWorkPage, RuleEditorPage, RulesPage } from './pages/workflow/Workflow';
-import { AttendancePage, EmployeeDetailPage, EmployeesPage, HrOverview, LeavePage, MyHrPage, PayrollPage, PayrollRunPage, PayslipPage, RecruitmentPage } from './pages/hr/Hr';
+import { AttendancePage, EmployeeDetailPage, EmployeesPage, HolidaysPage, HrOverview, LeavePage, MyHrPage, PayrollPage, PayrollRunPage, PayslipPage, RecruitmentPage, SalaryRegisterPage } from './pages/hr/Hr';
 import { AssistantPage, ControlTowerPage, ExceptionsPage, IntelligencePage, ReportBuilderPage, ReportsPage, SystemHealthPage } from './pages/insights/Insights';
 import { CutoverPage, GoLivePage, HypercarePage, MigrationPage, TrainingPage, UatPage } from './pages/golive/GoLive';
 import type { ReactNode } from 'react';
@@ -245,6 +245,8 @@ export default function App() {
         <Route path="/hr" element={<Guard perms={['hrms.read']}><HrOverview /></Guard>} />
         <Route path="/hr/employees" element={<Guard perms={['hrms.read']}><EmployeesPage /></Guard>} />
         <Route path="/hr/employees/:id" element={<EmployeeDetailPage />} />
+        <Route path="/hr/salaries" element={<Guard perms={['hrms.payroll.manage', 'hrms.payroll.approve']}><SalaryRegisterPage /></Guard>} />
+        <Route path="/hr/holidays" element={<Guard perms={['hrms.read']}><HolidaysPage /></Guard>} />
         <Route path="/hr/attendance" element={<Guard perms={['hrms.read']}><AttendancePage /></Guard>} />
         <Route path="/hr/leave" element={<Guard perms={['hrms.read']}><LeavePage /></Guard>} />
         <Route path="/hr/recruitment" element={<Guard perms={['hrms.read']}><RecruitmentPage /></Guard>} />

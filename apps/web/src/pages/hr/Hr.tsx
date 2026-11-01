@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { clsx } from 'clsx';
-import { Briefcase, CalendarCheck, CheckCircle2, Circle, Clock, Download, IndianRupee, LogIn, LogOut, Plus, UserPlus, Users } from 'lucide-react';
+import { Briefcase, CalendarCheck, CalendarDays, CheckCircle2, Circle, Clock, Download, IndianRupee, LogIn, LogOut, Plus, UserPlus, Users } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Link } from '../../components/AppLink';
@@ -8,6 +8,7 @@ import { api, invalidatePrefix } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtDate, fmtDateTime, fmtINR, humanize } from '../../lib/format';
 import { SimpleTable } from '../../components/DataTable';
+import { DocumentsPanel } from '../../components/Documents';
 import { ConfirmDialog, Modal, useToast } from '../../components/overlay';
 import { Badge, Button, Card, Checkbox, EmptyState, ErrorState, Input, KeyValue, Notice, PageHeader, Segmented, Select, Skeleton, Stat, StatusBadge, Tabs, Textarea } from '../../components/ui';
 
@@ -45,7 +46,7 @@ export function HrOverview() {
                 <li><Link className="link" to="/hr/recruitment">{d.candidates_open} candidates in the pipeline</Link></li>
               </ul>
             </Card>
-            <Card title="Go to"><ul className="space-y-2 text-[13.5px]">{[['/hr/employees', 'Employees'], ['/hr/attendance', 'Daily attendance'], ['/hr/leave', 'Leave'], ['/hr/payroll', 'Payroll'], ['/hr/recruitment', 'Recruitment'], ['/workflow/handover', 'Handover']].map(([to, l]) => <li key={to}><Link className="link" to={to!}>{l}</Link></li>)}</ul></Card>
+            <Card title="Go to"><ul className="space-y-2 text-[13.5px]">{[['/hr/employees', 'Employees'], ['/hr/salaries', 'Salary register'], ['/hr/attendance', 'Daily attendance'], ['/hr/holidays', 'Holiday calendar'], ['/hr/leave', 'Leave'], ['/hr/payroll', 'Payroll'], ['/hr/recruitment', 'Recruitment'], ['/workflow/handover', 'Handover']].map(([to, l]) => <li key={to}><Link className="link" to={to!}>{l}</Link></li>)}</ul></Card>
           </div>
         </>
       )}
@@ -125,7 +126,7 @@ export function EmployeeDetailPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['hr-emp', id], queryFn: () => api.get<EDetail>(`/hrms/employees/${id}`) });
-  const [tab, setTab] = useState<'profile' | 'attendance' | 'leave' | 'salary' | 'history'>('profile');
+  const [tab, setTab] = useState<'profile' | 'attendance' | 'leave' | 'salary' | 'documents' | 'history'>('profile');
   const [life, setLife] = useState<string | null>(null);
   const [lv, setLv] = useState({ effective_date: new Date().toISOString().slice(0, 10), last_working_day: '', location: '', designation: '', reason: '' });
   const [sal, setSal] = useState(false);
@@ -148,7 +149,7 @@ export function EmployeeDetailPage() {
         <Stat label="Comp-off available" value={e.comp_off.available} />
         <Stat label="Last 45 days" value={`${e.attendance.filter((a) => a.status === 'present').length} present`} sub={`${e.attendance.filter((a) => a.status === 'absent').length} absent · ${e.attendance.filter((a) => a.late_minutes > 0).length} late`} />
       </div>
-      <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ value: 'profile', label: 'Profile' }, { value: 'attendance', label: 'Attendance' }, { value: 'leave', label: 'Leave', count: e.leaves.length }, ...(can('hrms.payroll.manage') ? [{ value: 'salary' as const, label: 'Salary' }] : []), { value: 'history', label: 'History' }]} />
+      <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ value: 'profile', label: 'Profile' }, { value: 'attendance', label: 'Attendance' }, { value: 'leave', label: 'Leave', count: e.leaves.length }, ...(can('hrms.payroll.manage') ? [{ value: 'salary' as const, label: 'Salary' }] : []), ...(can('hrms.employee.manage') ? [{ value: 'documents' as const, label: 'Documents' }] : []), { value: 'history', label: 'History' }]} />
       {tab === 'profile' ? (
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="lg:col-span-2" title="Details"><KeyValue columns={2} items={[{ label: 'Mobile', value: e.phone ?? '—' }, { label: 'Email', value: e.email ?? '—' }, { label: 'Joined', value: fmtDate(e.date_of_joining) }, { label: 'Confirmed', value: e.confirmed_on ? fmtDate(e.confirmed_on) : `Probation ${e.probation_months} months` }, { label: 'Shift', value: e.shift_name ?? '—' }, { label: 'Weekly off', value: DAYS[e.weekly_off] }, { label: 'PAN', value: e.pan ?? '—', mono: true }, { label: 'UAN', value: e.uan ?? '—', mono: true }, { label: 'Salary account', value: e.bank_account ? `••••${e.bank_account.slice(-4)} · ${e.ifsc}` : '—', mono: true }, { label: 'Professional tax state', value: e.pt_state }, { label: 'Paid overtime', value: e.overtime_eligible ? 'Yes (2× hourly rate)' : 'No — comp-off for off-day work' }, { label: 'ERP login', value: e.user_id ? 'Linked' : 'None' }]} /></Card>
@@ -166,6 +167,10 @@ export function EmployeeDetailPage() {
             { key: 'f', header: 'From', render: (s) => fmtDate(s.effective_from) }, { key: 'b', header: 'Basic', align: 'right', render: (s) => money(s.basic) }, { key: 'h', header: 'HRA', align: 'right', render: (s) => money(s.hra) }, { key: 'c', header: 'Conveyance', align: 'right', render: (s) => money(s.conveyance) }, { key: 's', header: 'Special', align: 'right', render: (s) => money(s.special) },
             { key: 'g', header: 'Gross', align: 'right', render: (s) => <span className="font-semibold">{money(s.basic + s.hra + s.conveyance + s.special + s.other)}</span> }, { key: 'p', header: 'PF', render: (s) => (s.pf_applicable ? 'Yes' : 'No') },
           ]} />
+        </Card>
+      ) : tab === 'documents' ? (
+        <Card title="Personnel file" description="Offer letter, ID and address proof, PAN, education and previous-employment papers, nominations and exit documents. Only HR sees these; each upload keeps its earlier versions.">
+          <DocumentsPanel entityType="employee" entityId={e.id} />
         </Card>
       ) : (
         <Card><ul className="space-y-3">{e.events.map((x) => <li key={x.id} className="text-[13px]"><p className="font-medium">{humanize(x.kind)}{x.effective_date && <span className="font-normal text-slate-500"> · effective {fmtDate(x.effective_date)}</span>}</p>{x.detail && <p>{x.detail}</p>}<p className="text-[12px] text-slate-500">{x.by_name} · {fmtDateTime(x.at)}</p></li>)}</ul></Card>
@@ -223,7 +228,7 @@ function AttendanceGrid({ rows }: { rows: { day: string; status: string; in_time
 }
 
 // ---------------------------------------------------------------- daily attendance
-interface Muster { day: string; holiday: { name: string } | null; rows: { employee_id: string; code: string; name: string; department: string; location: string; shift: string | null; is_weekly_off: boolean; status: string | null; in_time: string | null; out_time: string | null; late_minutes: number | null; overtime_minutes: number | null; source: string | null }[] }
+interface Muster { day: string; holiday: { name: string } | null; rows: { employee_id: string; code: string; name: string; department: string; location: string; shift: string | null; is_weekly_off: boolean; holiday: string | null; status: string | null; in_time: string | null; out_time: string | null; late_minutes: number | null; overtime_minutes: number | null; source: string | null }[] }
 export function AttendancePage() {
   const { can } = useAuth();
   const qc = useQueryClient();
@@ -233,7 +238,7 @@ export function AttendancePage() {
   const [edits, setEdits] = useState<Record<string, { status: string; in_time: string; out_time: string }>>({});
   useEffect(() => setEdits({}), [day]);
   const rows = q.data?.rows ?? [];
-  const markAll = () => setEdits(Object.fromEntries(rows.filter((r) => !r.status).map((r) => [r.employee_id, { status: r.is_weekly_off ? 'weekly_off' : q.data?.holiday ? 'holiday' : 'present', in_time: '', out_time: '' }])));
+  const markAll = () => setEdits(Object.fromEntries(rows.filter((r) => !r.status).map((r) => [r.employee_id, { status: r.is_weekly_off ? 'weekly_off' : r.holiday ? 'holiday' : 'present', in_time: '', out_time: '' }])));
   const counts = useMemo(() => rows.reduce<Record<string, number>>((m, r) => { const s = edits[r.employee_id]?.status ?? r.status ?? 'unmarked'; m[s] = (m[s] ?? 0) + 1; return m; }, {}), [rows, edits]);
   return (
     <>
@@ -241,11 +246,11 @@ export function AttendancePage() {
         breadcrumbs={[{ label: 'HR & payroll', to: '/hr' }, { label: 'Attendance' }]} actions={<div className="flex gap-2"><Input type="date" value={day} onChange={(e) => setDay(e.target.value)} />{can('hrms.attendance.manage') && <><Button onClick={markAll}>Mark unmarked as present</Button><Button variant="primary" disabled={!Object.keys(edits).length} onClick={async () => {
           try { await api.put('/hrms/attendance', { day, entries: Object.entries(edits).map(([employee_id, e]) => ({ employee_id, status: e.status, in_time: e.in_time || null, out_time: e.out_time || null })) }); setEdits({}); invalidatePrefix(qc, 'hr-'); toast({ tone: 'success', title: 'Attendance saved' }); } catch (e) { toast({ tone: 'error', title: 'Not saved', body: errMsg(e) }); }
         }}>Save {Object.keys(edits).length || ''}</Button></>}</div>} />
-      {q.data?.holiday && <div className="mb-4"><Notice tone="info">Holiday: {q.data.holiday.name}</Notice></div>}
+      {q.data?.holiday && <div className="mb-4"><Notice tone="info">Holiday: {q.data.holiday.name}. Offices that observe it are marked holiday; the others work as usual. <Link className="link" to="/hr/holidays">Holiday calendar</Link></Notice></div>}
       <div className="mb-3 flex flex-wrap gap-3 text-[12.5px]">{Object.entries(counts).map(([k, n]) => <Badge key={k} tone={k === 'unmarked' ? 'warning' : 'neutral'}>{humanize(k)}: {n}</Badge>)}</div>
       <Card padded={false}>
         {!q.data ? <Skeleton className="m-5 h-40" /> : <SimpleTable rows={rows} rowKey={(r) => r.employee_id} columns={[
-          { key: 'n', header: 'Employee', render: (r) => <div><p className="font-medium">{r.name}</p><p className="text-[12px] text-slate-500">{r.code} · {r.location} · {r.shift ?? '—'}{r.is_weekly_off ? ' · weekly off' : ''}</p></div> },
+          { key: 'n', header: 'Employee', render: (r) => <div><p className="font-medium">{r.name}</p><p className="text-[12px] text-slate-500">{r.code} · {r.location} · {r.shift ?? '—'}{r.is_weekly_off ? ' · weekly off' : ''}{r.holiday ? ` · ${r.holiday}` : ''}</p></div> },
           { key: 's', header: 'Status', render: (r) => { const e = edits[r.employee_id]; const val = e?.status ?? r.status ?? ''; return r.status === 'leave' ? <Badge tone="violet">On leave</Badge> : <Select className="w-36" disabled={!can('hrms.attendance.manage')} value={val} onChange={(x) => setEdits({ ...edits, [r.employee_id]: { status: x.target.value, in_time: e?.in_time ?? r.in_time?.slice(0, 5) ?? '', out_time: e?.out_time ?? r.out_time?.slice(0, 5) ?? '' } })} placeholder="Not marked" options={['present', 'half_day', 'absent', 'weekly_off', 'holiday'].map((s) => ({ value: s, label: humanize(s) }))} />; } },
           { key: 'i', header: 'In', render: (r) => { const e = edits[r.employee_id]; return e ? <Input className="w-28" type="time" value={e.in_time} onChange={(x) => setEdits({ ...edits, [r.employee_id]: { ...e, in_time: x.target.value } })} /> : (r.in_time?.slice(0, 5) ?? '—'); } },
           { key: 'o', header: 'Out', render: (r) => { const e = edits[r.employee_id]; return e ? <Input className="w-28" type="time" value={e.out_time} onChange={(x) => setEdits({ ...edits, [r.employee_id]: { ...e, out_time: x.target.value } })} /> : (r.out_time?.slice(0, 5) ?? '—'); } },
@@ -411,11 +416,13 @@ export function PayslipPage() {
 }
 
 // ---------------------------------------------------------------- self-service
-interface Me { employee: { id: string; name: string; code: string; designation: string; department: string } | null; attendance: { day: string; status: string; in_time: string | null; out_time: string | null; late_minutes: number; overtime_minutes: number }[]; balances: { leave_type: string; name: string; entitled: number; used: number }[]; leaves: { id: string; number: string; leave_type: string; from_date: string; to_date: string; days: number; status: string; reason: string }[]; payslips: { id: string; month: string; gross: number; net: number }[]; comp_off: { available: number }; leave_types: { code: string; name: string }[] }
+interface Me { employee: { id: string; name: string; code: string; designation: string; department: string; location: string; pt_state: string } | null; attendance: { day: string; status: string; in_time: string | null; out_time: string | null; late_minutes: number; overtime_minutes: number }[]; balances: { leave_type: string; name: string; entitled: number; used: number }[]; leaves: { id: string; number: string; leave_type: string; from_date: string; to_date: string; days: number; status: string; reason: string }[]; payslips: { id: string; month: string; gross: number; net: number }[]; comp_off: { available: number }; leave_types: { code: string; name: string }[] }
 export function MyHrPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['hr-me'], queryFn: () => api.get<Me>('/hrms/me') });
+  const year = new Date().getFullYear();
+  const hols = useQuery({ queryKey: ['hr-holidays-me', year], queryFn: async () => [...(await api.get<HolidayYear>(`/hrms/holidays?year=${year}`)).holidays, ...(await api.get<HolidayYear>(`/hrms/holidays?year=${year + 1}`)).holidays] });
   const [apply, setApply] = useState(false);
   const [lv, setLv] = useState({ leave_type: 'CL', from_date: '', to_date: '', half_day: false, reason: '' });
   const [err, setErr] = useState<string | null>(null);
@@ -439,6 +446,7 @@ export function MyHrPage() {
         <div className="lg:col-span-2"><AttendanceGrid rows={d.attendance} /></div>
         <div className="space-y-4">
           <Card title="My leave" padded={false}>{d.leaves.length ? <ul className="divide-y divide-slate-100 text-[13px]">{d.leaves.map((l) => <li key={l.id} className="flex items-center justify-between px-4 py-2.5"><div><p>{l.leave_type} · {fmtDate(l.from_date)}{l.to_date !== l.from_date ? ` – ${fmtDate(l.to_date)}` : ''}</p><p className="text-[12px] text-slate-500">{l.days} day(s) · {l.reason}</p></div><StatusBadge status={l.status} /></li>)}</ul> : <p className="p-4 text-[13px] text-slate-500">None yet.</p>}</Card>
+          <Card title={`Holidays at ${d.employee.location}`} padded={false}>{(() => { const up = (hols.data ?? []).filter((h) => h.day >= new Date().toISOString().slice(0, 10) && (!h.state_code || h.state_code === d.employee!.pt_state)).slice(0, 6); return up.length ? <ul className="divide-y divide-slate-100 text-[13px]">{up.map((h) => <li key={h.day + h.name} className="flex justify-between px-4 py-2.5"><span>{h.name}</span><span className="text-slate-500">{fmtDate(h.day)} · {new Date(`${h.day}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short' })}</span></li>)}</ul> : <p className="p-4 text-[13px] text-slate-500">No more holidays listed this year.</p>; })()}</Card>
           <Card title="Payslips" padded={false}>{d.payslips.length ? <ul className="divide-y divide-slate-100 text-[13px]">{d.payslips.map((p) => <li key={p.id} className="flex justify-between px-4 py-2.5"><Link className="link" to={`/hr/payslips/${p.id}`}>{new Date(`${p.month}T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</Link><span className="tabular">{money(p.net)}</span></li>)}</ul> : <p className="p-4 text-[13px] text-slate-500">No payslips yet.</p>}</Card>
         </div>
       </div>
@@ -451,6 +459,108 @@ export function MyHrPage() {
           <Checkbox label="Half day" checked={lv.half_day} onChange={(e) => setLv({ ...lv, half_day: e.target.checked })} />
           <Textarea className="col-span-2" label="Reason" value={lv.reason} onChange={(e) => setLv({ ...lv, reason: e.target.value })} />
         </div>
+      </Modal>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- salary register
+interface SalRow { id: string; code: string; name: string; designation: string; department: string; location: string; status: string; date_of_joining: string; effective_from: string | null; basic: number | null; hra: number | null; conveyance: number | null; special: number | null; other: number | null; pf_applicable: boolean | null; gross: number | null;
+  previous_from: string | null; previous_gross: number | null; next_from: string | null; next_gross: number | null; last_month: string | null; last_gross: number | null; last_net: number | null; last_paid_days: number | null; last_payslip_id: string | null;
+  estimate: { deductions: number; net: number; employer: number; monthly_ctc: number; annual_ctc: number } | null }
+/** Who is paid what: current structure, scheduled revisions, take-home and cost to company, and the latest payroll. */
+export function SalaryRegisterPage() {
+  const nav = useNavigate();
+  const [status, setStatus] = useState('current');
+  const [dept, setDept] = useState('');
+  const q = useQuery({ queryKey: ['hr-salaries', status], queryFn: () => api.get<SalRow[]>(`/hrms/salary-register${status === 'all' ? '?status=all' : ''}`) });
+  const all = q.data ?? [];
+  const rows = dept ? all.filter((r) => r.department === dept) : all;
+  const withPay = rows.filter((r) => r.gross != null);
+  const total = (f: (r: SalRow) => number | null | undefined) => withPay.reduce((t, r) => t + (f(r) ?? 0), 0);
+  const missing = rows.filter((r) => r.gross == null && r.status !== 'exited');
+  const label = (m: string | null) => (m ? new Date(`${m}T00:00:00`).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : '—');
+  return (
+    <>
+      <PageHeader title="Salary register" description="What each person is paid now: the salary structure in force, any revision scheduled, an estimate of a full month's deductions, take-home and cost to the company, and what the latest payroll actually paid. Revise a salary from the person's Salary tab."
+        breadcrumbs={[{ label: 'HR & payroll', to: '/hr' }, { label: 'Salary register' }]} />
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat label="Monthly gross" value={money(total((r) => r.gross))} sub={`${withPay.length} people`} />
+        <Stat label="Monthly take-home (estimate)" value={money(total((r) => r.estimate?.net))} sub="full month, no loss of pay" />
+        <Stat label="Monthly cost to company" value={money(total((r) => r.estimate?.monthly_ctc))} sub={`${money(total((r) => r.estimate?.annual_ctc))} a year`} />
+        <Stat label="No salary structure" value={missing.length} sub={missing.length ? missing.map((r) => r.name).slice(0, 3).join(', ') : 'Everyone is set up'} tone={missing.length ? 'warning' : undefined} />
+      </div>
+      <div className="mb-4 flex flex-wrap gap-3">
+        <Segmented value={status} onChange={setStatus} options={[{ value: 'current', label: 'Current staff' }, { value: 'all', label: 'Including people who left' }]} />
+        <Select aria-label="Department" className="w-48" value={dept} onChange={(e) => setDept(e.target.value)} placeholder="All departments" options={[...new Set(all.map((r) => r.department))].sort().map((d) => ({ value: d, label: d }))} />
+      </div>
+      <Card padded={false}>{!q.data ? <Skeleton className="m-5 h-40" /> : <SimpleTable rows={rows} rowKey={(r) => r.id} pageSize={25} csvName="salary-register" onRowClick={(r) => nav(`/hr/employees/${r.id}`)} empty={<EmptyState icon={<IndianRupee className="size-5" />} title="Nobody here" />} columns={[
+        { key: 'e', header: 'Employee', render: (r) => <div><p className="font-medium">{r.name}</p><p className="text-[12px] text-slate-500">{r.code} · {r.designation}</p></div> },
+        { key: 'd', header: 'Department · location', render: (r) => <span className="text-[12.5px]">{r.department} · {r.location}</span> },
+        { key: 'b', header: 'Basic', align: 'right', render: (r) => money(r.basic) },
+        { key: 'h', header: 'HRA + allowances', align: 'right', render: (r) => (r.gross == null ? '—' : money(r.gross - (r.basic ?? 0))) },
+        { key: 'g', header: 'Monthly gross', align: 'right', render: (r) => (r.gross == null ? <Badge tone="warning">Not set</Badge> : <div><p className="font-semibold">{money(r.gross)}</p><p className="text-[11.5px] text-slate-500">from {fmtDate(r.effective_from)}{r.previous_gross != null && r.gross !== r.previous_gross ? ` · was ${money(r.previous_gross)}` : ''}</p></div>) },
+        { key: 'n', header: 'Take-home (est.)', align: 'right', render: (r) => (r.estimate ? <div><p>{money(r.estimate.net)}</p><p className="text-[11.5px] text-slate-500">after {money(r.estimate.deductions)}</p></div> : '—') },
+        { key: 'c', header: 'Annual CTC', align: 'right', render: (r) => (r.estimate ? money(r.estimate.annual_ctc) : '—') },
+        { key: 'x', header: 'Next revision', render: (r) => (r.next_from ? <span className="text-[12.5px]">{money(r.next_gross)} from {fmtDate(r.next_from)}</span> : <span className="text-[12px] text-slate-400">none</span>) },
+        { key: 'l', header: 'Last payroll', align: 'right', render: (r) => (r.last_payslip_id ? <div><Link className="link" to={`/hr/payslips/${r.last_payslip_id}`} onClick={(ev) => ev.stopPropagation()}>{money(r.last_net)}</Link><p className="text-[11.5px] text-slate-500">{label(r.last_month)} · {r.last_paid_days} days</p></div> : '—') },
+      ]} />}</Card>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- holiday calendar
+interface Holiday { day: string; name: string; state_code: string | null; state: string | null; offices: string[] }
+interface HolidayYear { year: number; offices: { office: string; state_code: string; state: string }[]; holidays: Holiday[] }
+/** The organisation's holiday list by year and office. Payroll, leave and attendance use it for each office's state. */
+export function HolidaysPage() {
+  const { can } = useAuth();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [office, setOffice] = useState('');
+  const q = useQuery({ queryKey: ['hr-holidays', year], queryFn: () => api.get<HolidayYear>(`/hrms/holidays?year=${year}`) });
+  const [adding, setAdding] = useState(false);
+  const [v, setV] = useState({ day: '', name: '', state_code: '' });
+  const [removing, setRemoving] = useState<Holiday | null>(null);
+  const [reason, setReason] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const rows = (q.data?.holidays ?? []).filter((h) => !office || h.offices.includes(office));
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const manage = can('hrms.attendance.manage');
+  const refresh = () => invalidatePrefix(qc, 'hr-');
+  return (
+    <>
+      <PageHeader title="Holiday calendar" description="Paid holidays for each office. National holidays apply everywhere; state holidays only to the office in that state. Attendance, leave (holidays inside leave are not counted) and payroll all read this list."
+        breadcrumbs={[{ label: 'HR & payroll', to: '/hr' }, { label: 'Holidays' }]} actions={manage && <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => { setErr(null); setV({ day: '', name: '', state_code: '' }); setAdding(true); }}>Add holiday</Button>} />
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Segmented value={String(year)} onChange={(x) => setYear(Number(x))} options={[year - 1, year, year + 1].filter((y, i, a) => a.indexOf(y) === i).map((y) => ({ value: String(y), label: String(y) }))} />
+        <Select aria-label="Office" className="w-56" value={office} onChange={(e) => setOffice(e.target.value)} placeholder="All offices" options={(q.data?.offices ?? []).map((o) => ({ value: o.office, label: `${o.office} (${o.state})` }))} />
+      </div>
+      {q.data && <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">{q.data.offices.map((o) => <Stat key={o.office} label={`${o.office} · ${o.state}`} value={q.data!.holidays.filter((h) => h.offices.includes(o.office)).length} sub={`holidays in ${year}`} />)}</div>}
+      <Card padded={false}>{!q.data ? <Skeleton className="m-5 h-40" /> : <SimpleTable rows={rows} rowKey={(h) => h.day + h.name} csvName={`holidays-${year}`} empty={<EmptyState icon={<CalendarDays className="size-5" />} title={`No holidays listed for ${year}`} description={manage ? 'Add each holiday with the office it applies to.' : undefined} />} columns={[
+        { key: 'd', header: 'Date', render: (h) => <span className={clsx(h.day < todayIso && 'text-slate-400')}>{fmtDate(h.day)}</span> },
+        { key: 'w', header: 'Day', render: (h) => DAYS[new Date(`${h.day}T00:00:00`).getDay()] },
+        { key: 'n', header: 'Holiday', render: (h) => <span className="font-medium">{h.name}</span> },
+        { key: 's', header: 'Applies to', render: (h) => (h.state ? <span><Badge tone="info">{h.state}</Badge> <span className="text-[12.5px] text-slate-500">{h.offices.join(', ') || 'no office in this state'}</span></span> : <Badge>All offices</Badge>) },
+        ...(manage ? [{ key: 'x', header: '', render: (h: Holiday) => <Button size="xs" variant="ghost" onClick={() => { setErr(null); setReason(''); setRemoving(h); }}>Remove</Button> }] : []),
+      ]} />}</Card>
+      <Modal open={adding} onClose={() => setAdding(false)} title="Add holiday" description="Days already marked for this date keep their mark; unmarked days become a holiday for the offices it applies to." footer={<><Button onClick={() => setAdding(false)}>Cancel</Button><Button variant="primary" onClick={async () => {
+        setErr(null);
+        try { await api.post('/hrms/holidays', { day: v.day, name: v.name, state_code: v.state_code || null }); setAdding(false); refresh(); toast({ tone: 'success', title: 'Holiday added' }); } catch (e) { setErr(errMsg(e)); }
+      }}>Add</Button></>}>
+        <div className="grid grid-cols-2 gap-3">
+          {err && <div className="col-span-2"><Notice tone="danger">{err}</Notice></div>}
+          <Input label="Date" type="date" value={v.day} onChange={(e) => setV({ ...v, day: e.target.value })} />
+          <Select label="Applies to" value={v.state_code} onChange={(e) => setV({ ...v, state_code: e.target.value })} options={[{ value: '', label: 'All offices (national)' }, ...(q.data?.offices ?? []).map((o) => ({ value: o.state_code, label: `${o.state} only (${o.office})` }))]} />
+          <Input className="col-span-2" label="Name" value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} placeholder="e.g. Raksha Bandhan" />
+        </div>
+      </Modal>
+      <Modal open={!!removing} onClose={() => setRemoving(null)} title={`Remove ${removing?.name ?? ''}?`} description="Days marked as this holiday go back to unmarked so attendance can be taken. Not possible once that month's payroll is submitted." footer={<><Button onClick={() => setRemoving(null)}>Cancel</Button><Button variant="danger" onClick={async () => {
+        setErr(null);
+        try { await api.post('/hrms/holidays/remove', { day: removing!.day, name: removing!.name, reason }); setRemoving(null); refresh(); toast({ tone: 'success', title: 'Holiday removed' }); } catch (e) { setErr(errMsg(e)); }
+      }}>Remove</Button></>}>
+        <div className="space-y-3">{err && <Notice tone="danger">{err}</Notice>}<Textarea label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} /></div>
       </Modal>
     </>
   );

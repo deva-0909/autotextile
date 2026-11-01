@@ -222,6 +222,52 @@ describe('P9 HRMS and payroll', () => {
     assert.equal((await h.call(t.sales!, 'GET', `/hrms/payslips/${slip.id}`)).status, 404);
   });
 
+  test('holidays follow the office state; salary register; personnel files only for HR; transfer moves the state', async () => {
+    const emp = (await h.ok(t.hr!, 'GET', '/hrms/employees')).find((x: { name: string }) => x.name === 'Sourav Ghosh');
+    // Two working days well ahead (not Sunday, the weekly off): one a Gujarat-only holiday, one national.
+    const listed = new Set<string>();
+    for (const y of new Set([addDays(60).slice(0, 4), addDays(90).slice(0, 4)])) for (const x of (await h.ok(t.hr!, 'GET', `/hrms/holidays?year=${y}`)).holidays) listed.add(x.day);
+    const ahead = [...Array(30).keys()].map((i) => addDays(60 + i)).filter((d) => new Date(`${d}T00:00:00Z`).getUTCDay() !== 0 && !listed.has(d));
+    const [gujDay, natDay] = [ahead[0]!, ahead[2]!];
+    await h.ok(t.hr!, 'POST', '/hrms/holidays', { day: gujDay, name: 'Test Gujarat holiday', state_code: '24' });
+    await h.ok(t.hr!, 'POST', '/hrms/holidays', { day: natDay, name: 'Test national holiday', state_code: null });
+    assert.equal((await h.call(t.hr!, 'POST', '/hrms/holidays', { day: natDay, name: 'Test national holiday' })).status, 409, 'no duplicates');
+    assert.equal((await h.call(t.east!, 'POST', '/hrms/holidays', { day: natDay, name: 'Mine' })).status, 403, 'only HR edits the calendar');
+    const cal = await h.ok(t.east!, 'GET', `/hrms/holidays?year=${gujDay.slice(0, 4)}`);
+    assert.deepEqual(cal.holidays.find((x: { name: string }) => x.name === 'Test Gujarat holiday').offices, ['Surat']);
+    assert.equal(cal.holidays.find((x: { name: string }) => x.name === 'Test Gujarat holiday').state, 'Gujarat');
+    // Kolkata works on the Gujarat holiday: leave that day counts; the national holiday is not a working day anywhere.
+    const lv = await h.ok(t.east!, 'POST', '/hrms/leave', { leave_type: 'CL', from_date: gujDay, to_date: gujDay, reason: 'Family function' });
+    assert.equal(lv.days, 1);
+    await h.ok(t.east!, 'POST', `/hrms/leave/${lv.id}/cancel`, { reason: 'Plans changed' });
+    assert.equal((await h.call(t.east!, 'POST', '/hrms/leave', { leave_type: 'CL', from_date: natDay, to_date: natDay, reason: 'x' })).status, 400);
+    const muster = await h.ok(t.hr!, 'GET', `/hrms/attendance?day=${gujDay}`);
+    assert.equal(muster.rows.find((r: { employee_id: string }) => r.employee_id === emp.id).holiday, null, 'not a holiday in Kolkata');
+    assert.match(muster.holiday.name, /Gujarat/);
+    await h.ok(t.hr!, 'POST', '/hrms/holidays/remove', { day: natDay, name: 'Test national holiday', reason: 'Entered by mistake' });
+    assert.equal((await h.call(t.hr!, 'POST', '/hrms/holidays/remove', { day: natDay, name: 'Test national holiday', reason: 'again' })).status, 404);
+    // Salary register: current structure, a full-month estimate, and the latest payroll actually paid.
+    const reg = await h.ok(t.hr!, 'GET', '/hrms/salary-register');
+    const row = reg.find((r: { id: string }) => r.id === emp.id);
+    assert.equal(row.gross, 20400);
+    assert.ok(row.estimate.net < row.gross && row.estimate.annual_ctc > row.gross * 12, 'take-home below gross, CTC above it');
+    assert.ok(row.last_net > 0 && row.last_payslip_id, 'latest payslip linked');
+    assert.equal((await h.call(t.sales!, 'GET', '/hrms/salary-register')).status, 403);
+    // Personnel file: HR files and reads it; others who can see documents do not.
+    const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
+    const q = new URLSearchParams({ title: 'Offer letter', document_type: 'OFFER_LETTER', entity_type: 'employee', entity_id: emp.id });
+    const doc = await h.ok(t.hr!, 'POST', `/governance/documents?${q}`, pdf, { 'content-type': 'application/pdf', 'x-file-name': 'offer.pdf' });
+    assert.equal((await h.ok(t.hr!, 'GET', `/governance/documents?f_entityType=employee&f_entityId=${emp.id}`)).total, 1);
+    assert.equal((await h.ok(t.sales!, 'GET', `/governance/documents?f_entityType=employee&f_entityId=${emp.id}`)).total, 0, 'hidden from sales');
+    assert.equal((await h.call(t.sales!, 'GET', `/governance/documents/${doc.id}/versions/1/content`)).status, 404);
+    assert.equal((await h.call(t.sales!, 'POST', `/governance/documents?${q}`, pdf, { 'content-type': 'application/pdf', 'x-file-name': 'x.pdf' })).status, 403);
+    await h.ok(t.hr!, 'POST', `/governance/documents/${doc.id}/archive`, { reason: 'Replaced by signed copy' });
+    // Transfer to Surat: the Gujarat holiday and Gujarat professional tax now apply.
+    await h.ok(t.hr!, 'POST', `/hrms/employees/${emp.id}/lifecycle`, { action: 'transfer', effective_date: today, location: 'Surat' });
+    assert.equal((await h.ok(t.hr!, 'GET', `/hrms/employees/${emp.id}`)).pt_state, '24');
+    assert.equal((await h.call(t.east!, 'POST', '/hrms/leave', { leave_type: 'CL', from_date: gujDay, to_date: gujDay, reason: 'x' })).status, 400, 'now a holiday for them');
+  });
+
   test('exit: resignation opens the checklist and a handover task; exit needs the checklist done and closes the login', async () => {
     const e = await h.ok(t.hr!, 'POST', '/hrms/employees', { name: 'Temp Picker', designation: 'Picker', department: 'Warehouse', location: 'Surat', date_of_joining: '2025-01-01', user_id: ids['dispatch@textile.local'] });
     await h.ok(t.hr!, 'POST', `/hrms/employees/${e.id}/lifecycle`, { action: 'resign', effective_date: today, last_working_day: addDays(10), reason: 'Higher studies' });

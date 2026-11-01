@@ -16,6 +16,17 @@ export function eachDay(from: string, to: string) {
 }
 export const dow = (day: string) => new Date(`${day}T00:00:00Z`).getUTCDay();
 
+/** The state (GST state code) of each office. An employee's state decides their professional tax and regional holidays. */
+export const OFFICE_STATE: Record<string, string> = { Surat: '24', Kolkata: '19', Tiruppur: '33' };
+export const STATE_NAME: Record<string, string> = { '24': 'Gujarat', '19': 'West Bengal', '33': 'Tamil Nadu', '27': 'Maharashtra' };
+
+/** Holidays an office in this state observes between two dates: national ones plus that state's own. */
+export async function holidaysFor(c: Parameters<typeof one>[0], state: string, from: string, to: string) {
+  const { rows } = await (c as { query: (q: string, v: unknown[]) => Promise<{ rows: { day: string }[] }> }).query(
+    'SELECT day::text FROM holidays WHERE day BETWEEN $1 AND $2 AND (state_code IS NULL OR state_code = $3)', [from, to, state]);
+  return new Set(rows.map((h) => h.day));
+}
+
 export async function auditReq(c: Client, req: Request, entity: string, entityId: string, action: string, extra: { before?: unknown; after?: unknown; reason?: string | null } = {}) {
   await audit(c, S, contextOf(req), { entity, entityId, action, ...extra });
 }

@@ -1,21 +1,21 @@
 import type { Router } from 'express';
 import { z } from 'zod';
 import { type Client, type ServiceContext, badRequest, conflict, hasPermission, many, notFound, one, optText, parse, publish, reqText, requirePermission, tx } from '@erp/platform';
-import { S, assertSelfOr, auditReq, dow, eachDay, fyOf, localNumber, requestApproval, selfEmployee, today } from './common.ts';
+import { OFFICE_STATE, S, STATE_NAME, assertSelfOr, auditReq, dow, eachDay, fyOf, holidaysFor, localNumber, requestApproval, selfEmployee, today } from './common.ts';
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Time as HH:MM (24-hour)');
 type Status = 'present' | 'absent' | 'half_day' | 'leave' | 'weekly_off' | 'holiday';
 
 /** Marks one day; works out lateness and overtime against the shift, credits comp-off for work on an off day, and tells CRM. */
-async function mark(c: Client, e: { id: string; user_id: string | null; weekly_off: number; overtime_eligible: boolean; shift_id: string | null }, day: string, a: { status: Status; in_time?: string | null; out_time?: string | null; source: string; note?: string | null; lat?: number | null; lng?: number | null }, by: string) {
+async function mark(c: Client, e: { id: string; user_id: string | null; weekly_off: number; overtime_eligible: boolean; shift_id: string | null; pt_state: string }, day: string, a: { status: Status; in_time?: string | null; out_time?: string | null; source: string; note?: string | null; lat?: number | null; lng?: number | null }, by: string) {
   const shift = e.shift_id ? await one<{ start_time: string; end_time: string; grace_minutes: number; hours: number }>(c, 'SELECT start_time::text, end_time::text, grace_minutes, hours::float FROM shifts WHERE id = $1', [e.shift_id]) : null;
   const mins = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
   let late = 0, ot = 0;
   if (shift && a.in_time && a.status === 'present') late = Math.max(0, mins(a.in_time) - mins(shift.start_time) - shift.grace_minutes);
   if (shift && a.in_time && a.out_time) ot = Math.max(0, mins(a.out_time) - mins(a.in_time) - shift.hours * 60 - 30);
-  const holiday = await one(c, 'SELECT 1 FROM holidays WHERE day = $1', [day]);
-  const offDay = dow(day) === e.weekly_off || !!holiday;
+  const holiday = (await holidaysFor(c, e.pt_state, day, day)).has(day);
+  const offDay = dow(day) === e.weekly_off || holiday;
   await c.query(`INSERT INTO attendance (employee_id, day, status, in_time, out_time, late_minutes, overtime_minutes, source, lat, lng, note, marked_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
     ON CONFLICT (employee_id, day) DO UPDATE SET status = EXCLUDED.status, in_time = EXCLUDED.in_time, out_time = EXCLUDED.out_time, late_minutes = EXCLUDED.late_minutes, overtime_minutes = EXCLUDED.overtime_minutes, source = EXCLUDED.source, lat = EXCLUDED.lat, lng = EXCLUDED.lng, note = EXCLUDED.note, marked_by_name = EXCLUDED.marked_by_name, marked_at = now()`,
   [e.id, day, a.status, a.in_time ?? null, a.out_time ?? null, late, offDay && !e.overtime_eligible ? 0 : ot, a.source, a.lat ?? null, a.lng ?? null, a.note ?? null, by]);
@@ -26,27 +26,59 @@ async function mark(c: Client, e: { id: string; user_id: string | null; weekly_o
 }
 
 /** Working days requested (weekly offs and holidays excluded). */
-async function leaveDays(c: Client | ServiceContext['pool'], e: { weekly_off: number }, from: string, to: string, half: boolean) {
-  const hol = new Set((await many<{ day: string }>(c, 'SELECT day::text FROM holidays WHERE day BETWEEN $1 AND $2', [from, to])).map((h) => h.day));
+async function leaveDays(c: Client | ServiceContext['pool'], e: { weekly_off: number; pt_state: string }, from: string, to: string, half: boolean) {
+  const hol = await holidaysFor(c, e.pt_state, from, to);
   const n = eachDay(from, to).filter((d) => dow(d) !== e.weekly_off && !hol.has(d)).length;
   return half ? Math.min(n, 0.5) : n;
 }
 
 export function timeRoutes(r: Router, { pool }: ServiceContext) {
   r.get('/shifts', async (_req, res) => { res.json(await many(pool, 'SELECT *, start_time::text, end_time::text FROM shifts ORDER BY code')); });
-  r.get('/holidays', async (_req, res) => { res.json(await many(pool, `SELECT day::text, name, state_code FROM holidays WHERE day >= current_date - 365 ORDER BY day`)); });
+  /** The holiday calendar for a year, with which offices observe each holiday. */
+  r.get('/holidays', async (req, res) => {
+    const year = /^\d{4}$/.test(String(req.query.year ?? '')) ? Number(req.query.year) : new Date().getUTCFullYear();
+    const offices = Object.entries(OFFICE_STATE).map(([office, state]) => ({ office, state_code: state, state: STATE_NAME[state] ?? state }));
+    const rows = await many<{ day: string; name: string; state_code: string | null }>(pool, `SELECT day::text, name, state_code FROM holidays WHERE extract(year FROM day) = $1 ORDER BY day, name`, [year]);
+    res.json({ year, offices, holidays: rows.map((h) => ({ ...h, state: h.state_code ? STATE_NAME[h.state_code] ?? h.state_code : null,
+      offices: h.state_code ? offices.filter((o) => o.state_code === h.state_code).map((o) => o.office) : offices.map((o) => o.office) })) });
+  });
+  /** Payroll for a month already approved or paid was worked out with that month's holidays, so they are fixed from then on. */
+  async function assertMonthOpen(c: Client, day: string) {
+    const run = await one<{ status: string }>(c, `SELECT status FROM payroll_runs WHERE month = date_trunc('month', $1::date)::date`, [day]);
+    if (run && ['pending_approval', 'approved', 'paid'].includes(run.status)) throw conflict(`Payroll for ${day.slice(0, 7)} is ${run.status.replace('_', ' ')}; its holidays can no longer change`);
+  }
+  const holidayBody = z.object({ day: date, name: reqText(80), state_code: z.enum(Object.keys(STATE_NAME) as [string, ...string[]]).nullable().optional() });
   r.post('/holidays', requirePermission('hrms.attendance.manage'), async (req, res) => {
-    const b = parse(z.object({ day: date, name: reqText(80), state_code: z.string().length(2).nullable().optional() }), req.body);
-    await tx(pool, async (c) => { await c.query('INSERT INTO holidays (day, name, state_code) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [b.day, b.name, b.state_code ?? null]); await auditReq(c, req, 'holiday', b.day, 'added', { after: b }); });
+    const b = parse(holidayBody, req.body);
+    await tx(pool, async (c) => {
+      await assertMonthOpen(c, b.day);
+      if (await one(c, 'SELECT 1 FROM holidays WHERE day = $1 AND name = $2', [b.day, b.name])) throw conflict('That holiday is already in the calendar');
+      await c.query('INSERT INTO holidays (day, name, state_code) VALUES ($1,$2,$3)', [b.day, b.name, b.state_code ?? null]);
+      await auditReq(c, req, 'holiday', b.day, 'added', { after: b });
+    });
     res.status(201).json({ ok: true });
+  });
+  r.post('/holidays/remove', requirePermission('hrms.attendance.manage'), async (req, res) => {
+    const b = parse(z.object({ day: date, name: reqText(80), reason: reqText(300) }), req.body);
+    await tx(pool, async (c) => {
+      await assertMonthOpen(c, b.day);
+      const gone = await one(c, 'DELETE FROM holidays WHERE day = $1 AND name = $2 RETURNING *', [b.day, b.name]);
+      if (!gone) throw notFound('Holiday');
+      // Days already marked as this holiday go back to unmarked, so attendance is taken for them again.
+      await c.query(`DELETE FROM attendance WHERE day = $1 AND status = 'holiday'`, [b.day]);
+      await auditReq(c, req, 'holiday', b.day, 'removed', { before: gone, reason: b.reason });
+    });
+    res.json({ ok: true });
   });
 
   /** Daily muster: everyone and their mark for the day (blank when not marked yet). */
   r.get('/attendance', requirePermission('hrms.read'), async (req, res) => {
     const day = (req.query.day as string) || today();
-    res.json({ day, holiday: await one(pool, 'SELECT name FROM holidays WHERE day = $1', [day]), rows: await many(pool, `
+    const hols = await many<{ name: string; state_code: string | null }>(pool, 'SELECT name, state_code FROM holidays WHERE day = $1 ORDER BY name', [day]);
+    res.json({ day, holiday: hols.length ? { name: hols.map((h) => `${h.name}${h.state_code ? ` (${STATE_NAME[h.state_code] ?? h.state_code})` : ''}`).join(', ') } : null, rows: await many(pool, `
       SELECT e.id AS employee_id, e.code, e.name, e.department, e.location, e.weekly_off, s.code AS shift, a.status, a.in_time::text, a.out_time::text, a.late_minutes, a.overtime_minutes, a.source, a.note,
-        (extract(dow FROM $1::date) = e.weekly_off) AS is_weekly_off
+        (extract(dow FROM $1::date) = e.weekly_off) AS is_weekly_off,
+        (SELECT h.name FROM holidays h WHERE h.day = $1::date AND (h.state_code IS NULL OR h.state_code = e.pt_state) ORDER BY h.state_code NULLS FIRST LIMIT 1) AS holiday
       FROM employees e LEFT JOIN shifts s ON s.id = e.shift_id LEFT JOIN attendance a ON a.employee_id = e.id AND a.day = $1::date
       WHERE e.status <> 'exited' AND e.date_of_joining <= $1::date ORDER BY e.location, e.name`, [day]) });
   });
@@ -58,7 +90,7 @@ export function timeRoutes(r: Router, { pool }: ServiceContext) {
     await tx(pool, async (c) => {
       for (const x of b.entries) {
         if (!hr) await assertSelfOr(c, req, x.employee_id, 'hrms.attendance.manage');
-        const e = await one<{ id: string; user_id: string | null; weekly_off: number; overtime_eligible: boolean; shift_id: string | null; status: string }>(c, 'SELECT * FROM employees WHERE id = $1', [x.employee_id]);
+        const e = await one<{ id: string; user_id: string | null; weekly_off: number; overtime_eligible: boolean; shift_id: string | null; status: string; pt_state: string }>(c, 'SELECT * FROM employees WHERE id = $1', [x.employee_id]);
         if (!e || e.status === 'exited') throw notFound('Employee');
         const cur = await one<{ status: string }>(c, 'SELECT status FROM attendance WHERE employee_id = $1 AND day = $2', [e.id, b.day]);
         if (cur?.status === 'leave') continue; // approved leave stands until the leave is cancelled
@@ -101,7 +133,7 @@ export function timeRoutes(r: Router, { pool }: ServiceContext) {
       const empId = b.employee_id ?? me?.id;
       if (!empId) throw badRequest('No employee record is linked to your login');
       await assertSelfOr(c, req, empId, 'hrms.attendance.manage');
-      const e = await one<{ id: string; name: string; weekly_off: number; status: string }>(c, 'SELECT * FROM employees WHERE id = $1', [empId]);
+      const e = await one<{ id: string; name: string; weekly_off: number; status: string; pt_state: string }>(c, 'SELECT * FROM employees WHERE id = $1', [empId]);
       if (!e || e.status === 'exited') throw notFound('Employee');
       if (b.to_date < b.from_date) throw badRequest('The end date is before the start date');
       const days = await leaveDays(c, e, b.from_date, b.to_date, b.half_day);
@@ -166,8 +198,8 @@ export async function applyLeaveDecision(c: Client, p: { ref_id: string; decisio
   const l = await one<{ id: string; employee_id: string; status: string; leave_type: string; from_date: string; to_date: string; days: number; half_day: boolean }>(c, 'SELECT *, from_date::text, to_date::text, days::float FROM leave_requests WHERE id = $1 FOR UPDATE', [p.ref_id]);
   if (!l || l.status !== 'pending') return;
   if (p.decision !== 'approved') { await c.query(`UPDATE leave_requests SET status = 'rejected', decided_by_name = $2, decided_at = now(), comment = $3 WHERE id = $1`, [l.id, p.decided_by_name, p.comment]); return; }
-  const e = (await one<{ id: string; name: string; user_id: string | null; weekly_off: number; overtime_eligible: boolean; shift_id: string | null }>(c, 'SELECT * FROM employees WHERE id = $1', [l.employee_id]))!;
-  const hol = new Set((await many<{ day: string }>(c, 'SELECT day::text FROM holidays WHERE day BETWEEN $1 AND $2', [l.from_date, l.to_date])).map((h) => h.day));
+  const e = (await one<{ id: string; name: string; user_id: string | null; weekly_off: number; overtime_eligible: boolean; shift_id: string | null; pt_state: string }>(c, 'SELECT * FROM employees WHERE id = $1', [l.employee_id]))!;
+  const hol = await holidaysFor(c, e.pt_state, l.from_date, l.to_date);
   for (const d of eachDay(l.from_date, l.to_date).filter((x) => dow(x) !== e.weekly_off && !hol.has(x)))
     await c.query(`INSERT INTO attendance (employee_id, day, status, source, note, marked_by_name) VALUES ($1,$2,$3,'leave',$4,$5) ON CONFLICT (employee_id, day) DO UPDATE SET status = EXCLUDED.status, source = 'leave', note = EXCLUDED.note, marked_by_name = EXCLUDED.marked_by_name, marked_at = now()`,
       [e.id, d, l.half_day ? 'half_day' : l.leave_type === 'LOP' ? 'absent' : 'leave', `${l.leave_type} leave`, p.decided_by_name]);

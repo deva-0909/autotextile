@@ -161,7 +161,9 @@ export const NAV: NavGroup[] = [
     items: [
       { to: '/hr', label: 'People', icon: Users2, perms: ['hrms.read'] },
       { to: '/hr/employees', label: 'Employees', icon: Briefcase, perms: ['hrms.read'] },
+      { to: '/hr/salaries', label: 'Salary register', icon: BadgeIndianRupee, perms: ['hrms.payroll.manage', 'hrms.payroll.approve'] },
       { to: '/hr/attendance', label: 'Attendance', icon: CalendarCheck, perms: ['hrms.read'] },
+      { to: '/hr/holidays', label: 'Holidays', icon: CalendarDays, perms: ['hrms.read'] },
       { to: '/hr/leave', label: 'Leave', icon: CalendarDays, perms: ['hrms.read'] },
       { to: '/hr/recruitment', label: 'Recruitment', icon: UserPlus, perms: ['hrms.read'] },
       { to: '/hr/payroll', label: 'Payroll', icon: IndianRupee, perms: ['hrms.payroll.manage', 'hrms.payroll.approve'] },

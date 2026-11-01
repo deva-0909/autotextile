@@ -1,7 +1,7 @@
 import type { Router } from 'express';
 import { z } from 'zod';
 import { type Client, type ServiceContext, badRequest, callService, conflict, hasPermission, many, notFound, one, parse, publish, requirePermission, tx } from '@erp/platform';
-import { S, auditReq, daysIn, dow, eachDay, requestApproval, selfEmployee } from './common.ts';
+import { S, auditReq, daysIn, dow, eachDay, holidaysFor, requestApproval, selfEmployee } from './common.ts';
 import { type PtSlab, type Structure, computePayslip } from './statutory.ts';
 
 const monthParam = (m: string) => { if (!/^\d{4}-\d{2}/.test(m)) throw badRequest('Month as YYYY-MM'); return `${m.slice(0, 7)}-01`; };
@@ -17,12 +17,12 @@ async function prepare(c: Client, month: string, by: string) {
     SELECT e.*, e.date_of_joining::text, e.exited_on::text, s.hours::float AS shift_hours FROM employees e LEFT JOIN shifts s ON s.id = e.shift_id
     WHERE e.date_of_joining <= $2 AND (e.exited_on IS NULL OR e.exited_on >= $1) ORDER BY e.code`, [month, end]);
   const dim = daysIn(month);
-  const hol = new Set((await many<{ day: string }>(c, 'SELECT day::text FROM holidays WHERE day BETWEEN $1 AND $2', [month, end])).map((h) => h.day));
   const missing: string[] = [];
   let count = 0;
   for (const e of emps) {
     const s = await one<Structure>(c, `SELECT basic::float, hra::float, conveyance::float, special::float, other::float, pf_applicable, pf_on_capped_wage FROM salary_structures WHERE employee_id = $1 AND effective_from <= $2 ORDER BY effective_from DESC LIMIT 1`, [e.id, end]);
     if (!s) { missing.push(e.name); continue; }
+    const hol = await holidaysFor(c, e.pt_state, month, end);
     const att = await many<{ day: string; status: string; overtime_minutes: number }>(c, 'SELECT day::text, status, overtime_minutes FROM attendance WHERE employee_id = $1 AND day BETWEEN $2 AND $3', [e.id, month, end]);
     // Loss of pay: absences, half days, days before joining or after exit. Unmarked working days count as present.
     let lop = 0;
