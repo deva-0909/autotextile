@@ -319,7 +319,7 @@ export function invoiceRoutes(r: Router, { pool }: ServiceContext) {
     const rows = await many<{ debit: number; credit: number }>(pool, `SELECT v.id AS voucher_id, v.number, v.voucher_type, v.voucher_date::text AS date, v.narration, v.party_name, l.debit::float, l.credit::float FROM voucher_lines l JOIN vouchers v ON v.id = l.voucher_id JOIN accounts a ON a.id = l.account_id
       WHERE a.system_key = 'cash' AND v.status IN ('posted','reversed') AND v.voucher_date BETWEEN $1 AND $2 AND ($3 = '' OR v.book_id::text = $3) ORDER BY v.voucher_date, v.created_at`, [from, to, bookId]);
     let bal = opening!.b;
-    res.json({ from, to, opening: round2(opening!.b), rows: rows.map((x) => ({ ...x, balance: round2((bal += Number(x.debit) - Number(x.credit))) })), closing: round2(bal), closings: await many(pool, `SELECT *, day::text FROM cash_closings WHERE day BETWEEN $1 AND $2 AND ($3 = '' OR book_id::text = $3) ORDER BY day DESC`, [from, to, bookId]) });
+    res.json({ from, to, opening: round2(opening!.b), rows: rows.map((x) => ({ ...x, balance: round2((bal += Number(x.debit) - Number(x.credit))) })), closing: round2(bal), closings: await many(pool, `SELECT *, day::text FROM cash_closings WHERE cash_closings.day BETWEEN $1 AND $2 AND ($3 = '' OR book_id::text = $3) ORDER BY cash_closings.day DESC`, [from, to, bookId]) });
   });
   r.post('/cash-closings', requirePermission('finance.voucher.post'), async (req, res) => {
     const b = parse(z.object({ book_id: z.uuid(), day: date.default(today()), counted: z.number().min(0), denominations: z.record(z.string(), z.number().int().min(0)).nullable().optional(), note: optText(500) }), req.body);

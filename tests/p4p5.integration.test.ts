@@ -207,6 +207,13 @@ describe('P4 inventory', () => {
     const unk = await h.ok(t.stores!, 'POST', `/inventory/stocktakes/${st.id}/count`, { barcode: 'LOT-XXX-99999-001' });
     assert.equal(unk.known, false);
     assert.equal((await h.call(t.stores!, 'POST', `/inventory/stocktakes/${st.id}/submit`, {})).status, 400, 'variance needs a reason');
+    // Every difference needs its own reason before the count can be submitted.
+    assert.equal((await h.call(t.stores!, 'POST', `/inventory/stocktakes/${st.id}/submit`, { reason: 'Quarterly count' })).status, 400, 'a reason per difference');
+    await h.ok(t.stores!, 'PUT', `/inventory/stocktakes/${st.id}/reasons`, { reasons: [
+      { barcode: missing.barcode, reason_code: 'not_found', note: 'Searched both bays' },
+      { barcode: heavy.barcode, reason_code: 'weight_moisture', note: 'Monsoon moisture' },
+      { barcode: 'LOT-XXX-99999-001', reason_code: 'found_unrecorded', note: 'Label from another unit' },
+    ] });
     const sub = await h.ok(t.stores!, 'POST', `/inventory/stocktakes/${st.id}/submit`, { reason: 'Quarterly count' });
     assert.equal(sub.status, 'submitted');
     assert.equal(sub.variance.missing_kg, Number(missing.weight_kg));

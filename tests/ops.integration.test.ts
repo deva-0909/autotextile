@@ -238,7 +238,9 @@ describe('Stock counts', () => {
   });
 
   test('a count schedule opens blind counts when due and moves to its next date', async () => {
-    const s = await h.ok(t.stores!, 'POST', '/inventory/count-schedules', { name: 'Weekly high value, Surat', warehouse_id: ids.SRT, scope: 'high_value', top_n: 2, frequency: 'weekly', next_due: daysAgo(0), blind: true });
+    // Stores staff are the ones counted, so they cannot set the schedule; the checker does.
+    assert.equal((await h.call(t.stores!, 'POST', '/inventory/count-schedules', { name: 'x', warehouse_id: ids.SRT, scope: 'full', frequency: 'weekly', next_due: daysAgo(0) })).status, 403);
+    const s = await h.ok(t.accounts!, 'POST', '/inventory/count-schedules', { name: 'Weekly high value, Surat', warehouse_id: ids.SRT, scope: 'high_value', top_n: 2, frequency: 'weekly', next_due: daysAgo(0), blind: true });
     const n = await runCountSchedules(h.svc('inventory').ctx.pool);
     assert.equal(n, 1);
     const list = await h.ok(t.stores!, 'GET', '/inventory/count-schedules');

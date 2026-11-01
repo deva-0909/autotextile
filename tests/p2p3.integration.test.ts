@@ -233,9 +233,15 @@ describe('P3 job work', () => {
     assert.ok((await h.ok(t.millops!, 'GET', '/jobwork/exceptions')).some((e: { kind: string }) => e.kind === 'low_yield'));
     const claim = await h.ok(t.millops!, 'POST', '/jobwork/claims', { job_order_id: jw.id, defect_types: ['Shade variation'], description: 'Shade off on 8 rolls', kg_affected: 200, amount: 6800 });
     await h.ok(t.mill!, 'POST', `/jobwork/portal/mill/claims/${claim.id}/respond`, { response: 'Will re-dye at no cost' });
+    // Closing first raises a shortage claim on the mill for what it still owes (40 kg plus loss above the allowance).
+    const first = await h.ok(t.millops!, 'POST', `/jobwork/orders/${jw.id}/close`, {});
+    assert.equal(first.closed, false);
+    assert.ok(first.shortage_claim.number, 'shortage claim raised');
     assert.equal((await h.call(t.millops!, 'POST', `/jobwork/orders/${jw.id}/close`, {})).status, 400, 'unaccounted 40 kg needs a reason');
     assert.equal((await h.call(t.millops!, 'POST', `/jobwork/orders/${jw.id}/close`, { reason: 'Short-received at mill, see claim' })).status, 409, 'open claim blocks closing');
     await h.ok(t.millops!, 'PATCH', `/jobwork/claims/${claim.id}`, { status: 'closed', responsibility: 'mill', claim_type: 'rework', amount: 0, resolution: 'Mill re-dyed 200 kg free of charge' });
+    const short = await h.ok(t.millops!, 'GET', `/jobwork/claims/${first.shortage_claim.id}`);
+    await h.ok(t.millops!, 'PATCH', `/jobwork/claims/${short.id}`, { status: 'accepted', responsibility: 'mill', claim_type: 'shortage', amount: Number(short.amount), resolution: 'Mill accepts the shortage' });
     await h.ok(t.millops!, 'POST', `/jobwork/orders/${jw.id}/close`, { reason: 'Short-received at mill, see claim' });
     assert.equal((await h.ok(t.millops!, 'GET', `/jobwork/orders/${jw.id}`)).status, 'closed');
   });

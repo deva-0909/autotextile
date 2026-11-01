@@ -15,6 +15,7 @@ import { runScheduled } from '../services/workflow/src/engine.ts';
 import { runCrmChecks } from '../services/crm/src/automation.ts';
 import { seedLeadDesk } from './seed-leads.ts';
 import { seedOpsExtras } from './seed-ops-extras.ts';
+import { seedCoverage } from './seed-coverage.ts';
 
 export async function seedOperations(services: RunningService[]) {
   const ports: Partial<Record<ServiceName, number>> = {};
@@ -772,6 +773,7 @@ export async function seedOperations(services: RunningService[]) {
     await drain();
     try { await seedOpsExtras({ call: call as never, login, party, drain }); } catch (e) { console.error(`[seed] operations demo skipped: ${(e as Error).message}`); }
     try { await seedLeadDesk({ call: call as never, login, crm: services.find((s) => s.ctx.name === 'crm')!.ctx.pool, party, drain }); } catch (e) { console.error(`[seed] lead management demo skipped: ${(e as Error).message}`); }
+    try { await seedCoverage({ call: call as never, login, party, drain }); } catch (e) { console.error(`[seed] coverage demo skipped: ${(e as Error).message}`); }
     await drain();
     await runProcurementChecks(services.find((s) => s.ctx.name === 'procurement')!.ctx.pool);
     await runJobworkChecks(services.find((s) => s.ctx.name === 'jobwork')!.ctx.pool);
