@@ -59,6 +59,8 @@ function classify(sql: string): { kind: Kind | 'begin' | 'commit' | 'rollback' |
   if (w === 'ROLLBACK') return { kind: /^ROLLBACK\s+TO\b/i.test(t) ? 'rollback_to' : 'rollback', write: false, lock, deferrable: false };
   if (w === 'SAVEPOINT') return { kind: 'savepoint', write: false, lock, deferrable: false };
   if (w === 'RELEASE') return { kind: 'release', write: false, lock, deferrable: false };
+  // A lock or notification whose result nobody reads (the event bus's publish): queued, applied at commit.
+  if (w === 'SELECT' && /^SELECT\s+pg_(advisory_xact_lock|notify)\s*\([^;()]*(\([^;()]*\)[^;()]*)*\)\s*;?\s*$/i.test(t)) return { kind: 'rows', write: true, lock, deferrable: true };
   if (w === 'SELECT' || w === 'VALUES' || w === 'TABLE') return { kind: 'rows', write: SIDE_EFFECT_FN.test(t), lock, deferrable: false };
   if (w === 'WITH') {
     // A data-modifying WITH cannot be wrapped in a subquery: run it as is (its RETURNING rows are not available).

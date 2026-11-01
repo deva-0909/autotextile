@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import pg from 'pg';
-import { type RunningService, type ServiceName, bootService, config, setServicePorts, tx } from '@erp/platform';
+import { type RunningService, type ServiceName, bootService, config, drainMany, setServicePorts, tx } from '@erp/platform';
 import { syncRoles } from '../services/identity/src/service.ts';
 import { SERVICE_DEFS } from '../scripts/services.ts';
 import { createGateway } from '../services/gateway/src/app.ts';
@@ -65,7 +65,7 @@ export async function bootAll(dbSuffix: string) {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     return r.body.accessToken as string;
   }
-  const drain = async () => { for (let i = 0; i < 2; i++) for (const s of services) await s.consumer?.drain(); };
+  const drain = () => drainMany(services[0]!.ctx.pool, services.map((s) => s.consumer));
   async function close() {
     for (const s of servers) { s.close(); s.closeAllConnections(); }
     for (const s of services) await s.close();

@@ -14,7 +14,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { waitUntil } from '@vercel/functions';
 import pg from 'pg';
-import { type Pool, type RunningService, type ServiceName, bootService, createPool, setServicePorts, transportMode } from '@erp/platform';
+import { type Pool, type RunningService, type ServiceName, bootService, createPool, drainMany, setServicePorts, transportMode } from '@erp/platform';
 import { SERVICE_DEFS } from '../scripts/services.ts';
 import { createGateway } from '../services/gateway/src/app.ts';
 import { runCommerceChecks } from '../services/commerce/src/automation.ts';
@@ -153,9 +153,8 @@ async function drainAll(services: RunningService[]) {
       ? `SELECT NOT EXISTS (SELECT 1 FROM public.erp_locks WHERE name = 'setup' AND until > now()) AS free`
       : `SELECT pg_try_advisory_xact_lock_shared(hashtext('erp:setup')) AS free`).then((r) => r.rows[0].free as boolean, () => false);
     if (!free) return;
-    // Two rounds: handlers publish events that other services consume.
-    for (let round = 0; round < 2; round++)
-      for (const s of services) await s.consumer?.drain().catch((e) => console.error(`[drain:${s.ctx.name}]`, (e as Error).message));
+    // Rounds until no consumer is behind (handlers publish events that other services consume); one shared check a round.
+    await drainMany(services[0]!.ctx.pool, services.map((s) => s.consumer)).catch((e) => console.error('[drain]', (e as Error).message));
     lastDrain = Date.now();
   })().finally(() => { draining = null; });
   return draining;

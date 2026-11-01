@@ -4,7 +4,7 @@
  */
 import { seedScenarios } from '../services/golive/src/readiness.ts';
 import type { AddressInfo } from 'node:net';
-import { type RunningService, type ServiceName, setServicePorts } from '@erp/platform';
+import { type RunningService, type ServiceName, drainMany, setServicePorts } from '@erp/platform';
 import { DEMO_PASSWORD } from './seed-data.ts';
 import { runProcurementChecks } from '../services/procurement/src/automation.ts';
 import { runJobworkChecks } from '../services/jobwork/src/automation.ts';
@@ -22,7 +22,7 @@ export async function seedOperations(services: RunningService[]) {
     return srv;
   });
   setServicePorts(ports);
-  const drain = async () => { for (let i = 0; i < 2; i++) for (const s of services) await s.consumer?.drain(); };
+  const drain = () => drainMany(services[0]!.ctx.pool, services.map((s) => s.consumer));
   const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
   const inDays = (n: number) => daysAgo(-n);
 

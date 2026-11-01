@@ -2,7 +2,7 @@
  * Migrations and demo data, shared by `npm run setup` (local) and the deployed function's one-time setup endpoint.
  * The database must exist; on hosted Postgres (DB_ROLE_PER_SERVICE=1) a reset drops the application schemas.
  */
-import { SERVICES, bootService, createPool, publish, tx } from '@erp/platform';
+import { SERVICES, bootService, createPool, publish, transportMode, tx } from '@erp/platform';
 import { syncRoles } from '../services/identity/src/service.ts';
 import { SERVICE_DEFS } from './services.ts';
 import { hashPassword } from '../services/identity/src/security.ts';
@@ -41,7 +41,8 @@ export async function setupDatabase({ reset = false, log = console.log }: { rese
   log('• Running migrations');
   const services = [];
   for (const def of SERVICE_DEFS) {
-    services.push(await bootService(def, { pollMs: 200 }));
+    // Over the web API the seed drains events itself; polling timers would only add calls.
+    services.push(await bootService(def, { pollMs: 200, manualBus: transportMode() !== 'pg' }));
     log(`  ✓ ${def.name}`);
   }
   const [governance, identity, , masters] = services;

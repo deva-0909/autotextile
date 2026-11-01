@@ -63,6 +63,8 @@ export type Handler = (event: BusEvent, c: Client) => Promise<void>;
 
 export interface Consumer {
   stop(): Promise<void>;
+  /** Highest event id this consumer has already looked at. */
+  seen(): number;
   /** Processes everything pending now; resolves when caught up. Used by tests and on startup. */
   drain(): Promise<void>;
 }
@@ -80,14 +82,21 @@ export function subscribe(pool: Pool, consumer: string, handlers: Record<string,
    * twice (the second one's guarded update finds the offset already moved, and its transaction is undone).
    * A failing event is parked in bus.dead_letters and the consumer moves on.
    */
+  let seen = 0; // highest event id this consumer has looked at
   async function batch(): Promise<number> {
-    await pool.query('INSERT INTO bus.offsets (consumer) VALUES ($1) ON CONFLICT DO NOTHING', [consumer]);
-    const { rows: [off] } = await pool.query('SELECT last_id FROM bus.offsets WHERE consumer = $1', [consumer]);
+    // One call: the offset, what is pending after it, and whether replays were asked for.
+    const read = () => pool.query(`SELECT o.last_id,
+        (SELECT coalesce(json_agg(e ORDER BY e.id), '[]') FROM (SELECT id, type, source, payload, occurred_at FROM bus.events WHERE id > o.last_id ORDER BY id LIMIT 200) e) AS events,
+        EXISTS (SELECT 1 FROM bus.dead_letters d WHERE d.consumer = o.consumer AND d.replay_requested_at IS NOT NULL AND d.replayed_at IS NULL) AS replays
+      FROM bus.offsets o WHERE o.consumer = $1`, [consumer]);
+    let r = await read();
+    if (!r.rows.length) {
+      await pool.query('INSERT INTO bus.offsets (consumer) VALUES ($1) ON CONFLICT DO NOTHING', [consumer]);
+      r = await read();
+    }
+    const off = r.rows[0] as { last_id: number; events: BusEvent[]; replays: boolean };
     let last = Number(off.last_id);
-    const { rows } = await pool.query(
-      `SELECT id, type, source, payload, occurred_at FROM bus.events WHERE id > $1 ORDER BY id LIMIT 200`,
-      [last],
-    );
+    const rows = off.events;
     const advance = async (c: Client, to: number) => {
       const r = await c.query('UPDATE bus.offsets SET last_id = $3 WHERE consumer = $1 AND last_id = $2', [consumer, last, to]);
       if (!r.rowCount) throw Object.assign(new Error('another instance handled this event'), { taken: true });
@@ -117,8 +126,9 @@ export function subscribe(pool: Pool, consumer: string, handlers: Record<string,
     }
     // Events this consumer does not handle: just move past them.
     if (skipTo) await tx(pool, async (c) => { await advance(c, skipTo); }).then(() => { last = skipTo; }, () => undefined);
+    seen = Math.max(seen, last);
     // Parked events an operator asked to replay (after fixing the cause) run once more for this consumer only.
-    const { rows: replays } = await pool.query(
+    const { rows: replays } = !off.replays ? { rows: [] } : await pool.query(
       `SELECT d.id AS dl_id, e.id, e.type, e.source, e.payload, e.occurred_at FROM bus.dead_letters d JOIN bus.events e ON e.id = d.event_id
        WHERE d.consumer = $1 AND d.replay_requested_at IS NOT NULL AND d.replayed_at IS NULL ORDER BY d.id LIMIT 50`, [consumer]);
     for (const r of replays as (BusEvent & { dl_id: number })[]) {
@@ -168,6 +178,7 @@ export function subscribe(pool: Pool, consumer: string, handlers: Record<string,
 
   return {
     drain,
+    seen: () => seen,
     async stop() {
       stopped = true;
       if (timer) clearInterval(timer);
@@ -183,4 +194,19 @@ export function subscribe(pool: Pool, consumer: string, handlers: Record<string,
 /** Queues a notification for governance to deliver (same transaction as the triggering change). */
 export async function notify(c: Client, source: string, n: { user_id?: string | null; audience_permission?: string | null; kind?: string; title: string; body?: string | null; link?: string | null }) {
   await publish(c, source, 'notification.requested', n);
+}
+
+/**
+ * Drains several consumers until none has work, asking the database once per round for the newest event instead of
+ * every consumer checking on its own (over the web API each check is a call).
+ */
+export async function drainMany(pool: Pool, consumers: (Consumer | undefined)[], maxRounds = 6) {
+  const list = consumers.filter(Boolean) as Consumer[];
+  for (let round = 0; round < maxRounds; round++) {
+    const { rows: [m] } = await pool.query('SELECT coalesce(max(id), 0)::bigint AS id FROM bus.events');
+    const newest = Number(m.id);
+    const behind = list.filter((c) => c.seen() < newest);
+    if (!behind.length) return;
+    for (const c of behind) await c.drain();
+  }
 }

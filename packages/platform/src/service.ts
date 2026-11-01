@@ -33,7 +33,7 @@ export interface RunningService {
 }
 
 /** Builds and initialises a service (schema migrations, event consumers). Call `listen` on `app` to serve. */
-export async function bootService(def: ServiceDefinition, opts: { databaseUrl?: string; pollMs?: number; serverless?: boolean } = {}): Promise<RunningService> {
+export async function bootService(def: ServiceDefinition, opts: { databaseUrl?: string; pollMs?: number; serverless?: boolean; manualBus?: boolean } = {}): Promise<RunningService> {
   const pool = createPool(def.name, opts.databaseUrl);
   // Serverless instances start often and sit behind a transaction pooler: the schema is migrated once by setup
   // (which uses session locks), and events are drained explicitly instead of by a timer and LISTEN.
@@ -79,7 +79,7 @@ export async function bootService(def: ServiceDefinition, opts: { databaseUrl?: 
   });
 
   const handlers = def.consumers?.(ctx);
-  const consumer = handlers ? subscribe(pool, def.name, handlers, { pollMs: opts.pollMs, manual: opts.serverless }) : undefined;
+  const consumer = handlers ? subscribe(pool, def.name, handlers, { pollMs: opts.pollMs, manual: opts.serverless || opts.manualBus }) : undefined;
 
   return {
     app,
