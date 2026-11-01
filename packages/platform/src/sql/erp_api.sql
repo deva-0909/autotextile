@@ -133,3 +133,18 @@ END $$;
 
 -- Coordination without a session: a named lock with an expiry (used while the demo data is loaded).
 CREATE TABLE IF NOT EXISTS public.erp_locks (name text PRIMARY KEY, holder text NOT NULL, until timestamptz NOT NULL);
+
+-- Nothing here is for the public REST API: only erp_run, and only for the server-side key (service_role).
+REVOKE ALL ON FUNCTION public.erp_uuid(), public.erp_nextval(regclass), public.erp_hash(jsonb), public.erp_normalize_defaults(text) FROM PUBLIC;
+REVOKE ALL ON TABLE public.erp_locks FROM PUBLIC;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    EXECUTE 'REVOKE ALL ON FUNCTION public.erp_uuid(), public.erp_nextval(regclass), public.erp_hash(jsonb), public.erp_normalize_defaults(text) FROM anon, authenticated';
+    EXECUTE 'REVOKE ALL ON TABLE public.erp_locks FROM anon, authenticated';
+  END IF;
+  -- The app's own role uses the key generators in column defaults.
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'erp_owner') THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.erp_uuid(), public.erp_nextval(regclass), public.erp_hash(jsonb), public.erp_normalize_defaults(text) TO erp_owner';
+    EXECUTE 'GRANT ALL ON TABLE public.erp_locks TO erp_owner';
+  END IF;
+END $$;
