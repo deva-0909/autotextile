@@ -214,7 +214,18 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     }
     return;
   }
-  const { gateway, services, ports } = await (booted ??= boot().catch((e) => { booted = null; throw e; }));
+  let started: Booted;
+  try {
+    started = await (booted ??= boot().catch((e) => { booted = null; throw e; }));
+  } catch (e) {
+    // Say why instead of crashing the function: the message names the problem (never a key or password).
+    const msg = String((e as Error)?.message ?? e).replace(/(sb_secret_|eyJ)[\w.-]+/g, '***').slice(0, 500);
+    console.error('[boot] failed:', (e as Error)?.stack ?? e);
+    res.statusCode = 503;
+    res.setHeader('content-type', 'application/json');
+    return res.end(JSON.stringify({ error: { code: 'starting', message: `The server could not start: ${msg}` } }));
+  }
+  const { gateway, services, ports } = started;
   // A reload in progress on this instance: every request waits for it rather than reading half-dropped data.
   if (resetting) await resetting.catch(() => {});
   // A warm instance re-checks the setup marker at most once a minute, so deleting it (to reload the demo) takes effect

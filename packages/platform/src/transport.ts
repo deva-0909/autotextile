@@ -106,21 +106,23 @@ const isConflict = (e: unknown) => (e as { code?: string })?.code === '40001';
 /** HTTPS to Supabase: POST /rest/v1/rpc/erp_run with the server-only key. */
 export function httpRunner(url: string, key: string): RunFn {
   const endpoint = `${url.replace(/\/$/, '')}/rest/v1/rpc/erp_run`;
+  // Legacy service_role keys are JWTs sent as both headers; newer secret keys (sb_secret_…) go in apikey only.
+  const headers: Record<string, string> = { apikey: key, 'content-type': 'application/json', ...(key.startsWith('sb_') ? {} : { authorization: `Bearer ${key}` }) };
   return async (p) => {
     apiCalls[p.mode]++;
     for (let attempt = 1; ; attempt++) {
       let res: Response;
       try {
-        res = await fetch(endpoint, { method: 'POST', headers: { apikey: key, authorization: `Bearer ${key}`, 'content-type': 'application/json', prefer: 'return=representation' }, body: JSON.stringify({ p }) });
+        res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ p }) });
       } catch (e) {
         if (attempt < 3) continue; // network blip: the call is atomic, so retrying is safe
-        throw new RpcError(`Database API unreachable: ${(e as Error).message}`, '08006');
+        throw new RpcError(`Database API unreachable at ${endpoint}: ${(e as Error).message}${(e as { cause?: { code?: string } }).cause?.code ? ` (${(e as { cause?: { code?: string } }).cause!.code})` : ''}`, '08006');
       }
       const body = await res.json().catch(() => null) as { code?: string; message?: string; details?: string; hint?: string } | RunResult | null;
       if (res.ok) return body as RunResult;
       const err = (body ?? {}) as { code?: string; message?: string; details?: string; hint?: string };
       if ((res.status === 503 || res.status === 502 || res.status === 504) && attempt < 3) continue;
-      throw new RpcError(err.message ?? `Database API error ${res.status}`, err.code, err.details, err.hint);
+      throw new RpcError(err.message ? `${err.message}${res.status === 401 || res.status === 403 ? ` (HTTP ${res.status} from the database API: check SUPABASE_SERVICE_ROLE_KEY)` : ''}` : `Database API error ${res.status}`, err.code, err.details, err.hint);
     }
   };
 }
