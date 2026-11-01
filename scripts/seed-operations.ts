@@ -493,9 +493,11 @@ export async function seedOperations(services: RunningService[]) {
     // Loaded the way the client will load theirs: sales and purchase history CSVs through Go-live → Data migration
     // (posted on their own dates to sales, purchases, GST and party accounts), monthly overheads, and the GSTR-3B
     // payments. Purchases match what was sold at cost, so today's physical stock is unaffected.
-    // Trading moved to the ERP at the start of the month its own sales begin; HR and payroll moved a month earlier
-    // (the payroll below covers that month), so the previous system's books stop there for salaries.
-    const goLive = `${daysAgo(30).slice(0, 7)}-01`;
+    // Trading moved to the ERP at the start of this month: the ERP's own sales in the demo are recent, so every earlier
+    // month is the previous system's. HR and payroll moved earlier (the payroll below covers those months), so the
+    // previous system's books stop there for salaries.
+    const goLive = `${daysAgo(0).slice(0, 7)}-01`;
+    const erpRentMonth = daysAgo(6).slice(0, 7);
     const erpPayrollMonth = daysAgo(60).slice(0, 7);
     const legacyMonths: string[] = [];
     for (let d = new Date('2026-04-01T00:00:00Z'); d.toISOString().slice(0, 10) < goLive; d.setUTCMonth(d.getUTCMonth() + 1)) legacyMonths.push(d.toISOString().slice(0, 7));
@@ -567,7 +569,7 @@ export async function seedOperations(services: RunningService[]) {
         const end = day(m, 28);
         if (m < erpPayrollMonth) await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: end, narration: `Salaries for ${m} (previous system)`, reference: `SAL-${m}`,
           lines: [{ account_id: a('5400'), debit: 905000 }, { account_id: a('5410'), debit: 51500 }, { account_id: a('1200'), credit: 956500 }] });
-        await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: day(m, 5), narration: `Godown rent, Surat — ${m} (previous system)`, reference: `RENT-${m}`,
+        if (m !== erpRentMonth) await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: day(m, 5), narration: `Godown rent, Surat — ${m} (previous system)`, reference: `RENT-${m}`,
           lines: [{ account_id: a('5500'), debit: 85000 }, { account_id: a('1200'), credit: 85000 }] });
         // The last month's power bill is paid after go-live, in the ERP (below).
         const power = m === legacyMonths[legacyMonths.length - 1] ? 0 : 19800;
@@ -578,11 +580,11 @@ export async function seedOperations(services: RunningService[]) {
       // and the older open bills are paid.
       for (const o of openSales) {
         if (o.customer === 'Ludhiana Knit Exports' || o === heldOpen) continue;
-        await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'receipt', book_id: surat.id, date: [o.due, daysAgo(2)].sort()[0], narration: `Received from ${o.customer} against ${o.doc}`, reference: `NEFT-IN-${o.doc.slice(-4)}`,
+        await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'receipt', book_id: surat.id, date: [goLive, [o.due, daysAgo(2)].sort()[0]!].sort()[1], narration: `Received from ${o.customer} against ${o.doc}`, reference: `NEFT-IN-${o.doc.slice(-4)}`,
           lines: [{ account_id: a('1200'), debit: o.total }, { account_id: a('1300'), credit: o.total, party_id: party(o.customer), bill_ref: o.doc }] });
       }
       for (const [i, o] of openBuys.entries())
-        if (o.date < plusDays(goLive, -15)) await call('finance', accounts, 'POST', '/supplier-payments', { party_id: party(o.supplier), invoice_number: o.doc, date: [plusDays(goLive, 5 + (i * 5) % 45), daysAgo(2)].sort()[0], mode: 'neft', reference: `NEFT-OUT-${o.doc.slice(-4)}` });
+        if (o.date < plusDays(goLive, -15)) await call('finance', accounts, 'POST', '/supplier-payments', { party_id: party(o.supplier), invoice_number: o.doc, date: [goLive, [plusDays(goLive, 5 + (i * 5) % 45), daysAgo(2)].sort()[0]!].sort()[1], mode: 'neft', reference: `NEFT-OUT-${o.doc.slice(-4)}` });
       await decideAll();
       // GSTR-3B paid on the 20th of each following month, for every month the return is due.
       for (const m of [...legacyMonths, ...[daysAgo(60), daysAgo(30)].map((d) => d.slice(0, 7))].filter((x, i, arr) => arr.indexOf(x) === i)) {
@@ -591,7 +593,7 @@ export async function seedOperations(services: RunningService[]) {
         await call('finance', accounts, 'POST', '/gst/payments', { book_id: surat.id, period: `${m}-01`, paid_on: paidOn, arn: `AA24${m.replace('-', '')}0${String(m.slice(5)).padStart(2, '0')}1`, challan_ref: `CPIN-${m.replace('-', '')}` }).catch((e) => console.error(`[seed] GSTR-3B ${m}: ${(e as Error).message}`));
       }
     } catch (e) { console.error(`[seed] history before go-live skipped: ${(e as Error).message}`); }
-    await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(6), narration: 'Godown rent, Surat — October', reference: 'NEFT 2610-778', lines: [{ account_id: a('5500'), debit: 85000 }, { account_id: a('1200'), credit: 85000 }] });
+    await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(6), narration: `Godown rent, Surat — ${new Date(`${erpRentMonth}-01T00:00:00Z`).toLocaleString('en-IN', { month: 'long', timeZone: 'UTC' })}`, reference: 'NEFT 2610-778', lines: [{ account_id: a('5500'), debit: 85000 }, { account_id: a('1200'), credit: 85000 }] });
     await call('finance', accounts, 'POST', '/vouchers', { voucher_type: 'payment', book_id: surat.id, date: daysAgo(4), narration: `DGVCL power bill — ${new Date(`${legacyMonths[legacyMonths.length - 1] ?? daysAgo(30).slice(0, 7)}-01T00:00:00Z`).toLocaleString('en-IN', { month: 'long', timeZone: 'UTC' })}`, lines: [{ account_id: a('5510'), debit: 18450 }, { account_id: a('1200'), credit: 18450 }] });
     // Pay the oldest supplier bill outstanding.
     const apAge = await call<{ rows: { party_id: string; party_name: string; balance: number }[] }>('finance', accounts, 'GET', '/ageing/payables');
