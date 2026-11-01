@@ -21,7 +21,7 @@ export function routes(r: Router, { pool }: ServiceContext) {
   r.get('/document-versions', requirePermission('crm.read', 'procurement.read', 'finance.read', 'jobwork.read', 'inventory.read', 'fulfilment.read', 'governance.document.read'), async (req, res) => {
     const docType = String(req.query.doc_type ?? ''), docId = String(req.query.doc_id ?? '');
     if (!docType || !/^[0-9a-f-]{36}$/i.test(docId)) { res.json([]); return; }
-    res.json(await many(pool, 'SELECT id, service, doc_type, doc_id, number, version, status, data, change_note, by_name, at FROM document_versions WHERE doc_type = $1 AND doc_id = $2 ORDER BY version DESC, id DESC', [docType, docId]));
+    res.json(await many(pool, 'SELECT id, service, doc_type, doc_id, number, version, status, data, change_note, by_name, at FROM record_versions WHERE doc_type = $1 AND doc_id = $2 ORDER BY version DESC, id DESC', [docType, docId]));
   });
 
   // ---------- audit trail ----------
@@ -279,7 +279,7 @@ export function consumers(): Record<string, Handler> {
     },
     'document.version.recorded': async (ev: BusEvent, c: Client) => {
       const p = ev.payload as { service: string; doc_type: string; doc_id: string; number?: string | null; version: number; status?: string | null; data: unknown; change_note?: string | null; by_name?: string | null };
-      await c.query(`INSERT INTO document_versions (event_id, service, doc_type, doc_id, number, version, status, data, change_note, by_name, at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, coalesce($11::timestamptz, now()))
+      await c.query(`INSERT INTO record_versions (event_id, service, doc_type, doc_id, number, version, status, data, change_note, by_name, at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, coalesce($11::timestamptz, now()))
         ON CONFLICT DO NOTHING`, [ev.id, p.service, p.doc_type, p.doc_id, p.number ?? null, p.version, p.status ?? null, JSON.stringify(p.data ?? {}), p.change_note ?? null, p.by_name ?? null, (ev as { created_at?: string }).created_at ?? null]);
     },
     'notification.requested': async (ev: BusEvent, c: Client) => {
