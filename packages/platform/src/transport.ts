@@ -105,7 +105,10 @@ const isConflict = (e: unknown) => (e as { code?: string })?.code === '40001';
 // ------------------------------------------------------------------ transports
 /** HTTPS to Supabase: POST /rest/v1/rpc/erp_run with the server-only key. */
 export function httpRunner(url: string, key: string): RunFn {
-  const endpoint = `${url.replace(/\/$/, '')}/rest/v1/rpc/erp_run`;
+  // Forgiving about how the address was typed: https://<ref>.supabase.co, without the scheme, a slip in it, or the ref.
+  const host = url.trim().replace(/^[a-z]*:?\/\//i, '').replace(/\/.*$/, '');
+  const base = /^[a-z0-9]{20}$/i.test(host) ? `https://${host}.supabase.co` : `https://${host}`;
+  const endpoint = `${base}/rest/v1/rpc/erp_run`;
   // Legacy service_role keys are JWTs sent as both headers; newer secret keys (sb_secret_…) go in apikey only.
   const headers: Record<string, string> = { apikey: key, 'content-type': 'application/json', ...(key.startsWith('sb_') ? {} : { authorization: `Bearer ${key}` }) };
   return async (p) => {
