@@ -302,7 +302,7 @@ export function workRoutes(r: Router, { pool }: ServiceContext) {
     const rest = leads.filter((l) => l.first_response_at);
     const overdue = rest.filter((l) => !l.next_action_at || ist(new Date(l.next_action_at)) < today).sort(byScore);
     const dueToday = rest.filter((l) => l.next_action_at && ist(new Date(l.next_action_at)) === today).sort(byScore);
-    const upcoming = rest.filter((l) => l.next_action_at && ist(new Date(l.next_action_at)) > today).sort((a, b) => a.next_action_at!.localeCompare(b.next_action_at!));
+    const upcoming = rest.filter((l) => l.next_action_at && ist(new Date(l.next_action_at)) > today).sort((a, b) => new Date(a.next_action_at!).getTime() - new Date(b.next_action_at!).getTime());
     const engagements = await many(pool, `SELECT e.*, l.number AS lead_number, l.name AS lead_name, l.company FROM lead_engagements e JOIN leads l ON l.id = e.lead_id
       WHERE e.owner_id = $1 AND e.outcome IS NULL AND e.status NOT IN ('cancelled','no_show') AND l.status = 'open' ORDER BY coalesce(e.scheduled_at, e.created_at)`, [who]);
     const member = await one<{ name: string }>(pool, 'SELECT name FROM sales_team WHERE user_id = $1', [who]);
