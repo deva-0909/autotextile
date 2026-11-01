@@ -140,7 +140,7 @@ export function insightRoutes(r: Router, { pool }: ServiceContext) {
   });
   r.post('/system/backups', requirePermission('system.backup.manage'), async (req, res) => {
     // pg_dump needs a direct database connection; on the hosted web API, Supabase's own daily backups apply.
-    if (transportMode() === 'http') throw new AppError(501, 'not_available', 'Backups here are taken by Supabase (daily, kept 7 days on the free plan). Manual backups need a direct database connection (on-premise installs).');
+    if (transportMode() === 'http') throw new AppError(501, 'not_available', 'Supabase backs up projects on its Pro plan and above daily (kept 7 days on Pro). Free-plan projects are not backed up: export them regularly with `supabase db dump`, or run backups from here with a direct database connection.');
     if (await one(pool, `SELECT 1 FROM backups WHERE status = 'running' AND started_at > now() - interval '1 hour'`)) throw conflict('A backup is already running');
     const out = await runBackup(pool, req.user!.name);
     await tx(pool, (c) => audit(c, 'insights', contextOf(req), { entity: 'backup', entityId: String((out as { id: string }).id), action: 'created', after: { status: (out as { status: string }).status } }));
