@@ -293,27 +293,6 @@ export function commissionApprovedConsumer() {
   };
 }
 
-/** Accepted claim on a mill (quality debit note or shortage) → debit note: reduces what we owe the mill, so it comes off its next bill. */
-export function millClaimConsumer() {
-  return async (ev: BusEvent, c: Client) => {
-    const p = ev.payload as { claim_id: string; number: string; mill_id: string; mill_name?: string; amount: number; claim_type: string; reason: string | null; date?: string };
-    const party = await getParty(p.mill_id);
-    const book = await primaryBook(c);
-    const date = (p.date ?? new Date().toISOString()).slice(0, 10);
-    const amount = round2(Number(p.amount));
-    if (amount <= 0) return;
-    await post(c, {
-      type: 'debit_note', book_id: book.id, date, auto: true, by: SYSTEM, approved_by: 'job-work claim accepted',
-      narration: `${p.claim_type === 'shortage' ? 'Shortage' : 'Quality'} claim ${p.number} on ${party.legal_name}${p.reason ? ` — ${p.reason}` : ''}`, party_id: party.id, party_name: party.legal_name,
-      source: { service: 'jobwork', type: 'mill_claim', id: p.claim_id, ref: p.number },
-      lines: [
-        { account: 'payables', debit: amount, party_id: party.id, party_name: party.legal_name, bill_ref: p.number },
-        { account: p.claim_type === 'shortage' ? 'purchases' : 'jobwork', credit: amount },
-      ],
-    });
-  };
-}
-
 /**
  * Approved stock-count difference → reclassified from the change in inventory to its own expense line. Stock is valued
  * periodically, so the closing stock already reflects the count; this only makes the loss (or gain) visible.

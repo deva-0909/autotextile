@@ -280,7 +280,7 @@ export function consumers(): Record<string, Handler> {
     'document.version.recorded': async (ev: BusEvent, c: Client) => {
       const p = ev.payload as { service: string; doc_type: string; doc_id: string; number?: string | null; version: number; status?: string | null; data: unknown; change_note?: string | null; by_name?: string | null };
       await c.query(`INSERT INTO record_versions (event_id, service, doc_type, doc_id, number, version, status, data, change_note, by_name, at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, coalesce($11::timestamptz, now()))
-        ON CONFLICT DO NOTHING`, [ev.id, p.service, p.doc_type, p.doc_id, p.number ?? null, p.version, p.status ?? null, JSON.stringify(p.data ?? {}), p.change_note ?? null, p.by_name ?? null, (ev as { created_at?: string }).created_at ?? null]);
+        ON CONFLICT DO NOTHING`, [String(ev.id), p.service, p.doc_type, p.doc_id, p.number ?? null, p.version, p.status ?? null, JSON.stringify(p.data ?? {}), p.change_note ?? null, p.by_name ?? null, (ev as { created_at?: string }).created_at ?? null]);
     },
     'notification.requested': async (ev: BusEvent, c: Client) => {
       const n = ev.payload as { user_id?: string | null; audience_permission?: string | null; kind?: string; title: string; body?: string | null; link?: string | null };

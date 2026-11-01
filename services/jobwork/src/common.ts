@@ -1,5 +1,5 @@
 import type { Request } from 'express';
-import { type AppError, type Client, type Pool, audit, callService, contextOf, notify } from '@erp/platform';
+import { type AppError, type Client, type Pool, audit, callService, contextOf, notify, publish } from '@erp/platform';
 
 export const S = 'jobwork';
 export const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -61,3 +61,22 @@ export const addDays = (iso: string, days: number) => {
 };
 export const today = () => new Date().toISOString().slice(0, 10);
 export type { Pool };
+
+/**
+ * Tell Accounts what is held or deducted from a mill. Finance posts it to the mill's ledger straight away (so it is held
+ * from payments), turns it into a debit note when confirmed, and reverses it when released.
+ */
+export async function millDeduction(c: Client, p: {
+  key: string; mill_id: string; mill_name: string; kind: 'quality_claim' | 'shortage_claim' | 'quarantine'; source_id: string; ref: string; job_ref?: string | null;
+  reason?: string | null; state: 'held' | 'confirmed' | 'released'; amount: number; expense_account?: 'purchases' | 'jobwork'; by?: string | null;
+}) {
+  await publish(c, S, 'jobwork.mill_deduction', { ...p, amount: Math.round(Number(p.amount) * 100) / 100, date: new Date().toISOString().slice(0, 10) });
+}
+
+/** Value of the fabric sent on a job order, per kg: its grey cost, or the set rate when the cost is not known. */
+export async function greyRateOf(c: Client | Pool, jobOrderId: string) {
+  const { rows: [r] } = await c.query(`SELECT (sum(l.kg_sent * s.cost_per_kg) / nullif(sum(l.kg_sent) FILTER (WHERE s.cost_per_kg IS NOT NULL), 0))::float AS rate
+    FROM job_order_lines l LEFT JOIN mill_stock s ON s.id = l.mill_stock_id WHERE l.job_order_id = $1`, [jobOrderId]);
+  const fallback = await setting('jobwork.shortage_rate_per_kg', 240);
+  return Math.round(Number(r?.rate ?? fallback) * 100) / 100;
+}

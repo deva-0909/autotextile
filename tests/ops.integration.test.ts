@@ -56,8 +56,27 @@ describe('Mill shortages and wrong goods', () => {
     assert.equal(d.reconciliation.kg_quarantine, 60);
     assert.equal(d.reconciliation.kg_balance_at_mill, 80);
     assert.equal(d.quarantine.length, 1);
-    // Other party's goods go back to the mill: our 60 kg is still owed.
-    await h.ok(t.millops!, 'POST', `/jobwork/quarantine/${d.quarantine[0].id}/resolve`, { action: 'return_to_mill', note: 'Sent back on the next lorry' });
+    // The whole value of the wrong goods is held from the mill's payments at once, in the mill's ledger.
+    await h.drain();
+    const qh = d.quarantine[0];
+    assert.ok(Number(qh.hold_amount) > 0 && qh.hold_state === 'held');
+    let ded = await h.ok(t.accounts!, 'GET', '/finance/mill-deductions');
+    const held = ded.rows.find((x: { ref: string }) => x.ref === qh.number);
+    assert.equal(held.state, 'held');
+    assert.equal(held.held_amount, Number(qh.hold_amount));
+    assert.ok(ded.by_mill.some((m: { mill_id: string }) => m.mill_id === mill), 'pending to apply, by mill');
+    const dn = await h.ok(t.accounts!, 'GET', '/finance/vouchers?type=debit_note');
+    assert.ok(dn.some((x: { source_ref: string }) => x.source_ref === qh.number), 'in the ledger the moment it is held');
+    assert.equal((await h.call(t.millops!, 'POST', `/jobwork/quarantine/${qh.id}/settle-hold`, { action: 'release', note: 'x' })).status, 409, 'decide the goods first');
+    // Other party's goods go back to the mill: our 60 kg is still owed, and the hold stays until the right goods come back.
+    await h.ok(t.millops!, 'POST', `/jobwork/quarantine/${qh.id}/resolve`, { action: 'return_to_mill', note: 'Sent back on the next lorry' });
+    await h.drain();
+    ded = await h.ok(t.accounts!, 'GET', '/finance/mill-deductions');
+    assert.equal(ded.rows.find((x: { ref: string }) => x.ref === qh.number).state, 'held');
+    await h.ok(t.millops!, 'POST', `/jobwork/quarantine/${qh.id}/settle-hold`, { action: 'release', note: 'Our navy rolls came back on challan PCW-118' });
+    await h.drain();
+    ded = await h.ok(t.accounts!, 'GET', '/finance/mill-deductions?filter=released');
+    assert.ok(ded.rows.some((x: { ref: string }) => x.ref === qh.number), 'released once the right goods are back');
     d = await h.ok(t.millops!, 'GET', `/jobwork/orders/${jw.id}`);
     assert.equal(d.reconciliation.kg_quarantine, 0);
     assert.equal(d.reconciliation.kg_balance_at_mill, 140);
@@ -70,10 +89,22 @@ describe('Mill shortages and wrong goods', () => {
     const claims = (await h.ok(t.millops!, 'GET', '/jobwork/claims')).items;
     const c = claims.find((x: { job_order_id: string; claim_type: string }) => x.job_order_id === jw.id && x.claim_type === 'shortage');
     assert.equal(Number(c.kg_affected), 170);
+    // The claim is held from the mill's payments as soon as it is raised, before the mill agrees.
+    await h.drain();
+    ded = await h.ok(t.accounts!, 'GET', '/finance/mill-deductions');
+    assert.equal(ded.rows.find((x: { ref: string }) => x.ref === c.number).held_amount, Number(c.amount));
+    const cand = await h.ok(t.accounts!, 'GET', '/finance/payment-run/candidates');
+    for (const b of cand.filter((x: { party_id: string }) => x.party_id === mill)) assert.ok(b.deductions_pending > 0, 'shown wherever the mill is paid');
     await h.ok(t.millops!, 'PATCH', `/jobwork/claims/${c.id}`, { status: 'accepted', responsibility: 'mill', claim_type: 'shortage', amount: Number(c.amount) || 40800, resolution: 'Mill agreed to the shortage' });
     await h.drain();
     const v = await h.ok(t.accounts!, 'GET', '/finance/vouchers?type=debit_note');
     assert.ok(v.some((x: { source_ref: string }) => x.source_ref === c.number), 'debit note posted against the mill');
+    ded = await h.ok(t.accounts!, 'GET', '/finance/mill-deductions');
+    const conf = ded.rows.find((x: { ref: string }) => x.ref === c.number);
+    assert.equal(conf.state, 'confirmed');
+    assert.equal(conf.held_amount, 0);
+    // Matched to a mill bill, it leaves the pending list.
+    assert.equal((await h.call(t.accounts!, 'POST', `/finance/mill-deductions/${conf.id}/apply`, { bill_ref: 'NOT-A-BILL' })).status, 400);
     const loss = await h.ok(t.millops!, 'GET', '/jobwork/analytics/mill-loss');
     const row = loss.find((r: { mill_id: string }) => r.mill_id === mill);
     assert.ok(row.loss_pct > 0 && row.claims >= 1);
@@ -87,23 +118,31 @@ describe('Counter cash sale', () => {
     assert.equal(pv.taxable, 30000);
     assert.equal(pv.total, 31500, '5% GST, intra-state');
     assert.equal(pv.b2c, true);
-    assert.equal((await h.call(t.accounts!, 'POST', '/finance/counter-sales', { book_id: ids.book, barcodes: [rolls[0]!.barcode, rolls[1]!.barcode], payment_mode: 'cash', amount_received: 20000 })).status, 400, 'paid in full');
+    assert.equal(pv.pan_required, false);
+    const who = { buyer_name: 'Ramesh', buyer_mobile: '9876500111' };
+    assert.equal((await h.call(t.accounts!, 'POST', '/finance/counter-sales', { book_id: ids.book, barcodes: [rolls[0]!.barcode, rolls[1]!.barcode], payment_mode: 'cash', amount_received: 31500 })).status, 400, 'name and mobile are required');
+    assert.equal((await h.call(t.accounts!, 'POST', '/finance/counter-sales', { book_id: ids.book, buyer_name: 'Ramesh', buyer_mobile: '98765', barcodes: [rolls[0]!.barcode, rolls[1]!.barcode], payment_mode: 'cash', amount_received: 31500 })).status, 400, 'a real mobile number');
+    assert.equal((await h.call(t.accounts!, 'POST', '/finance/counter-sales', { book_id: ids.book, ...who, barcodes: [rolls[0]!.barcode, rolls[1]!.barcode], payment_mode: 'cash', amount_received: 20000 })).status, 400, 'paid in full');
     const sale = await h.ok(t.accounts!, 'POST', '/finance/counter-sales', { book_id: ids.book, buyer_name: 'Ramesh', buyer_mobile: '9876500111', barcodes: [rolls[0]!.barcode, rolls[1]!.barcode], payment_mode: 'cash', amount_received: 32000 });
     assert.equal(sale.change, 500);
     const scan = await h.ok(t.stores!, 'GET', `/inventory/scan/${rolls[0]!.barcode}`);
     assert.equal(scan.roll.state, 'dispatched');
-    assert.equal((await h.call(t.accounts!, 'POST', '/finance/counter-sales', { book_id: ids.book, barcodes: [rolls[0]!.barcode], payment_mode: 'cash', amount_received: 20000 })).status, 409, 'a sold roll cannot be sold again');
+    assert.equal((await h.call(t.accounts!, 'POST', '/finance/counter-sales', { book_id: ids.book, ...who, barcodes: [rolls[0]!.barcode], payment_mode: 'cash', amount_received: 20000 })).status, 409, 'a sold roll cannot be sold again');
     const inv = await h.ok(t.accounts!, 'GET', `/finance/manual-invoices/${sale.id}`);
     assert.equal(inv.status, 'posted');
     assert.equal(inv.mode, 'counter');
     const cb = await h.ok(t.accounts!, 'GET', `/finance/cash-book?book_id=${ids.book}`);
     assert.ok(cb.rows.some((r: { debit: number; narration: string }) => r.debit === 31500 && r.narration.includes(sale.number)));
-    // Section 269ST: the same buyer cannot pay ₹2 lakh or more in cash in a day.
+    // Cash from one buyer is capped at ₹2 lakh for the whole financial year; above ₹49,999 without a GSTIN, PAN is required.
     const big = await stock(14, 50, 240, 300);
-    const p2 = await h.ok(t.accounts!, 'POST', '/finance/counter-sales', { book_id: ids.book, buyer_mobile: '9876500111', barcodes: big.map((x) => x.barcode), payment_mode: 'cash', amount_received: 0, preview: true });
-    assert.ok(p2.warning && /269ST/.test(p2.warning));
-    assert.equal((await h.call(t.accounts!, 'POST', '/finance/counter-sales', { book_id: ids.book, buyer_mobile: '9876500111', barcodes: big.map((x) => x.barcode), payment_mode: 'cash', amount_received: p2.total })).status, 400);
-    await h.ok(t.accounts!, 'POST', '/finance/counter-sales', { book_id: ids.book, buyer_mobile: '9876500111', barcodes: big.slice(0, 2).map((x) => x.barcode), payment_mode: 'upi', amount_received: 31500 });
+    const p2 = await h.ok(t.accounts!, 'POST', '/finance/counter-sales', { book_id: ids.book, ...who, barcodes: big.map((x) => x.barcode), payment_mode: 'cash', amount_received: 0, preview: true });
+    assert.ok(p2.warning && /financial year/.test(p2.warning));
+    assert.equal(p2.cash_this_year, 31500);
+    assert.equal(p2.cash_left, 168500);
+    assert.equal(p2.pan_required, true);
+    assert.equal((await h.call(t.accounts!, 'POST', '/finance/counter-sales', { book_id: ids.book, ...who, buyer_pan: 'ABCDE1234F', barcodes: big.map((x) => x.barcode), payment_mode: 'cash', amount_received: p2.total })).status, 400, 'over the yearly cash limit');
+    assert.equal((await h.call(t.accounts!, 'POST', '/finance/counter-sales', { book_id: ids.book, ...who, barcodes: big.slice(0, 4).map((x) => x.barcode), payment_mode: 'upi', amount_received: 63000 })).status, 400, 'PAN for ₹50,000 and more');
+    await h.ok(t.accounts!, 'POST', '/finance/counter-sales', { book_id: ids.book, ...who, barcodes: big.slice(0, 2).map((x) => x.barcode), payment_mode: 'upi', amount_received: 31500 });
     // Closing: a difference needs an explanation.
     assert.equal((await h.call(t.accounts!, 'POST', '/finance/cash-closings', { book_id: ids.book, counted: cb.closing - 200 })).status, 400);
     const cl = await h.ok(t.accounts!, 'POST', '/finance/cash-closings', { book_id: ids.book, counted: cb.closing - 200, note: '₹200 paid for tea and courier, slip missing' });

@@ -198,15 +198,15 @@ export function CounterSalePage() {
   const toast = useToast();
   const books = useBooks();
   const nav = useNavigate();
-  const [v, setV] = useState({ book_id: '', buyer_name: '', buyer_mobile: '', buyer_gstin: '', payment_mode: 'cash', amount_received: '', notes: '' });
+  const [v, setV] = useState({ book_id: '', buyer_name: '', buyer_mobile: '', buyer_gstin: '', buyer_pan: '', payment_mode: 'cash', amount_received: '', notes: '' });
   const [codes, setCodes] = useState<string[]>([]);
   const [rolls, setRolls] = useState<RollRow[]>([]);
   const [code, setCode] = useState('');
   const [prices, setPrices] = useState<Record<string, string>>({});
-  const [pv, setPv] = useState<{ total: number; taxable: number; cgst: number; sgst: number; igst: number; kg: number; warning: string | null; b2c: boolean; lines: Line[]; round_off: number } | null>(null);
+  const [pv, setPv] = useState<{ total: number; taxable: number; cgst: number; sgst: number; igst: number; kg: number; warning: string | null; b2c: boolean; lines: Line[]; round_off: number; cash_this_year?: number; cash_limit?: number; cash_left?: number; pan_required?: boolean; missing?: Record<string, string> } | null>(null);
   const [done, setDone] = useState<{ id: string; number: string; total: number; change: number } | null>(null);
   useEffect(() => { if (!v.book_id && books.data?.length) setV((x) => ({ ...x, book_id: books.data!.find((b) => b.is_primary)?.id ?? books.data![0]!.id })); }, [books.data, v.book_id]);
-  const body = (preview: boolean) => ({ book_id: v.book_id, buyer_name: v.buyer_name || null, buyer_mobile: v.buyer_mobile || null, buyer_gstin: v.buyer_gstin || null, barcodes: codes, prices: Object.entries(prices).filter(([, x]) => Number(x) > 0).map(([sku, rate]) => ({ sku, rate: Number(rate) })), payment_mode: v.payment_mode, amount_received: Number(v.amount_received || 0), notes: v.notes || null, preview });
+  const body = (preview: boolean) => ({ book_id: v.book_id, buyer_name: v.buyer_name || null, buyer_mobile: v.buyer_mobile || null, buyer_gstin: v.buyer_gstin || null, buyer_pan: v.buyer_pan || null, barcodes: codes, prices: Object.entries(prices).filter(([, x]) => Number(x) > 0).map(([sku, rate]) => ({ sku, rate: Number(rate) })), payment_mode: v.payment_mode, amount_received: Number(v.amount_received || 0), notes: v.notes || null, preview });
   const refresh = async (list = codes) => {
     if (!list.length) { setPv(null); return; }
     try { setPv(await api.post('/finance/counter-sales', { ...body(true), barcodes: list })); } catch (e) { toast({ tone: 'error', title: (e as Error).message }); }
@@ -226,7 +226,7 @@ export function CounterSalePage() {
     <>
       <PageHeader title={`Sold: ${done.number}`} breadcrumbs={[{ label: 'Accounts', to: '/finance' }, { label: 'Counter sale' }]} />
       <Notice tone="success" title={`${fmtINR(done.total)} received`}>{done.change > 0 ? `Give back ${fmtINR(done.change)} change. ` : ''}The rolls are out of stock, the invoice is in the sales register and GST, and the money is in the cash book.</Notice>
-      <div className="mt-4 flex gap-2"><Button variant="primary" onClick={() => nav(`/finance/invoices/${done.id}`)}>Open and print the invoice</Button><Button onClick={() => { setDone(null); setCodes([]); setRolls([]); setPv(null); setV({ ...v, buyer_name: '', buyer_mobile: '', buyer_gstin: '', amount_received: '', notes: '' }); }}>Next sale</Button></div>
+      <div className="mt-4 flex gap-2"><Button variant="primary" onClick={() => nav(`/finance/invoices/${done.id}`)}>Open and print the invoice</Button><Button onClick={() => { setDone(null); setCodes([]); setRolls([]); setPv(null); setV({ ...v, buyer_name: '', buyer_mobile: '', buyer_gstin: '', buyer_pan: '', amount_received: '', notes: '' }); }}>Next sale</Button></div>
     </>
   );
   return (
@@ -250,9 +250,10 @@ export function CounterSalePage() {
         <Card title="Buyer and payment">
           <div className="space-y-3">
             <Select label="Sell from (GSTIN)" value={v.book_id} onChange={(e) => setV({ ...v, book_id: e.target.value })} options={(books.data ?? []).map((b) => ({ value: b.id, label: `${b.code} · ${b.gstin}` }))} />
-            <Input label="Buyer name (optional)" value={v.buyer_name} onChange={(e) => setV({ ...v, buyer_name: e.target.value })} />
-            <Input label="Mobile (optional)" value={v.buyer_mobile} onChange={(e) => setV({ ...v, buyer_mobile: e.target.value })} />
+            <Input label="Buyer name" required value={v.buyer_name} onChange={(e) => setV({ ...v, buyer_name: e.target.value })} />
+            <Input label="Mobile" required inputMode="numeric" hint="10 digits; cash taken from this buyer is counted against the yearly limit" value={v.buyer_mobile} onChange={(e) => setV({ ...v, buyer_mobile: e.target.value })} onBlur={() => void refresh()} />
             <Input label="GSTIN (optional)" hint="Blank: B2C sale" value={v.buyer_gstin} onChange={(e) => setV({ ...v, buyer_gstin: e.target.value.toUpperCase() })} onBlur={() => void refresh()} />
+            {(pv?.pan_required || v.buyer_pan) && <Input label={pv?.pan_required ? 'PAN (required: sale above ₹49,999 without a GSTIN)' : 'PAN'} required={!!pv?.pan_required} value={v.buyer_pan} onChange={(e) => setV({ ...v, buyer_pan: e.target.value.toUpperCase() })} />}
             <Segmented value={v.payment_mode} onChange={(m) => { setV({ ...v, payment_mode: m }); }} options={[{ value: 'cash', label: 'Cash' }, { value: 'upi', label: 'UPI' }, { value: 'card', label: 'Card' }, { value: 'bank', label: 'Bank' }]} />
             {pv && <div className="rounded-lg bg-slate-50 p-3 text-[13px]">
               <div className="flex justify-between"><span>{fmtNum(pv.kg)} kg · taxable</span><span>{fmtINR(pv.taxable)}</span></div>
@@ -260,12 +261,13 @@ export function CounterSalePage() {
               <div className="flex justify-between border-t border-slate-200 pt-1 text-[15px] font-bold"><span>To collect</span><span>{fmtINR(pv.total)}</span></div>
               <p className="mt-1 text-[12px] text-slate-500">{pv.b2c ? 'B2C sale (no GSTIN)' : 'B2B sale'}</p>
             </div>}
-            {pv?.warning && v.payment_mode === 'cash' && <Notice tone="danger" title="Cash limit">{pv.warning}</Notice>}
+            {pv?.warning && v.payment_mode === 'cash' && <Notice tone="danger" title="Yearly cash limit">{pv.warning}</Notice>}
+            {pv && !pv.warning && v.payment_mode === 'cash' && pv.cash_limit != null && !!pv.cash_this_year && <p className="text-[12px] text-slate-500">Cash from this buyer this financial year: {fmtINR(pv.cash_this_year)} of {fmtINR(pv.cash_limit)}.</p>}
             <Input label="Amount received" prefix="₹" type="number" value={v.amount_received} onChange={(e) => setV({ ...v, amount_received: e.target.value })} hint={pv && Number(v.amount_received) > pv.total ? `Change to give: ${fmtINR(Number(v.amount_received) - pv.total)}` : undefined} />
             <Textarea label="Notes" rows={2} value={v.notes} onChange={(e) => setV({ ...v, notes: e.target.value })} />
             <div className="flex gap-2">
               {pv && <DocumentPreviewButton draft d={invoiceDoc({ kind: 'sales', mode: 'counter', number: null, draft_no: 'COUNTER SALE', doc_date: new Date().toISOString().slice(0, 10), party_name: v.buyer_name || 'Walk-in buyer', party_gstin: v.buyer_gstin || null, party_state: v.buyer_gstin ? v.buyer_gstin.slice(0, 2) : null, party_mobile: v.buyer_mobile || null, supplier_invoice_no: null, lines: pv.lines, taxable: pv.taxable, cgst: pv.cgst, sgst: pv.sgst, igst: pv.igst, round_off: pv.round_off, total: pv.total, notes: v.notes || null, payment_mode: v.payment_mode, status: 'draft' }, null)} />}
-              <Button variant="primary" className="flex-1" disabled={!pv || Number(v.amount_received) + 0.5 < (pv?.total ?? 0) || (!!pv?.warning && v.payment_mode === 'cash')} onClick={async () => {
+              <Button variant="primary" className="flex-1" disabled={!pv || !v.buyer_name.trim() || v.buyer_mobile.replace(/\D/g, '').length < 10 || (!!pv?.pan_required && !v.buyer_pan) || Number(v.amount_received) + 0.5 < (pv?.total ?? 0) || (!!pv?.warning && v.payment_mode === 'cash')} onClick={async () => {
                 try { setDone(await api.post('/finance/counter-sales', body(false))); } catch (e) { toast({ tone: 'error', title: (e as Error).message }); }
               }}>Complete sale</Button>
             </div>

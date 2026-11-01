@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import { AlertTriangle, Download, Send } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { Link } from '../../components/AppLink';
 import { api, invalidatePrefix } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { fmtDate, fmtINR, fmtRelative } from '../../lib/format';
@@ -9,7 +10,7 @@ import { SimpleTable } from '../../components/DataTable';
 import { useToast } from '../../components/overlay';
 import { Badge, Button, Card, EmptyState, Input, Notice, PageHeader, Select, Skeleton, Stat } from '../../components/ui';
 
-interface Candidate { party_id: string; party_name: string; doc_no: string; doc_date: string; due_date: string; outstanding: number; days_overdue: number; bank: { name: string; account: string; ifsc: string; bank_name: string | null } | null; bank_changed_recently: boolean; awaiting_approval: boolean }
+interface Candidate { party_id: string; party_name: string; doc_no: string; doc_date: string; due_date: string; outstanding: number; days_overdue: number; bank: { name: string; account: string; ifsc: string; bank_name: string | null } | null; bank_changed_recently: boolean; awaiting_approval: boolean; deductions_pending?: number; deductions_count?: number }
 interface RunItem { party?: string; party_id?: string; invoice: string; amount?: number; voucher?: string; status: string; error?: string }
 interface Run { id: string; number: string; total: number; released: number; items: RunItem[]; bank_file: string | null }
 interface RunRow { id: string; number: string; run_date: string; mode: string; total: number; released: number; waiting: number; count: number; created_by_name: string; created_at: string }
@@ -103,7 +104,7 @@ export function PaymentRunPage() {
             { key: 'due', header: 'Due', render: (c) => <span className={clsx(c.days_overdue > 0 && 'font-medium text-rose-600')}>{fmtDate(c.due_date)}{c.days_overdue > 0 && <span className="ml-1 text-[11.5px]">({c.days_overdue}d overdue)</span>}</span> },
             { key: 'o', header: 'Owed', align: 'right', render: (c) => <span className="tabular">{fmtINR(c.outstanding)}</span> },
             { key: 'bank', header: 'Pay to', render: (c) => c.bank ? <span className="text-[12.5px] text-slate-600">{c.bank.bank_name ?? c.bank.ifsc} {c.bank.account}</span> : <span className="text-[12.5px] text-rose-600">No approved bank account</span> },
-            { key: 'f', header: '', render: (c) => <span className="flex gap-1">{c.awaiting_approval && <Badge tone="warning">Awaiting approval</Badge>}{c.bank_changed_recently && <Badge tone="danger"><AlertTriangle className="mr-1 inline size-3" />Bank changed</Badge>}</span> },
+            { key: 'f', header: '', render: (c) => <span className="flex gap-1">{c.awaiting_approval && <Badge tone="warning">Awaiting approval</Badge>}{!!c.deductions_pending && <Link to="/finance/mill-deductions" title="Claims and quarantine holds on this mill, already deducted from its balance: apply them to this bill"><Badge tone="warning">Mill deductions {fmtINR(c.deductions_pending)}</Badge></Link>}{c.bank_changed_recently && <Badge tone="danger"><AlertTriangle className="mr-1 inline size-3" />Bank changed</Badge>}</span> },
           ]} />
         )}
       </Card>

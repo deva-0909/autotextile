@@ -18,6 +18,10 @@ CREATE TABLE quarantine_holds (
   status text NOT NULL DEFAULT 'held' CHECK (status IN ('held','returned_to_mill','rework','accepted')),
   resolution text, challan_no text,
   resolved_by_name text, resolved_at timestamptz,
+  -- The whole value of the goods is held from the mill's payments until they are accepted, replaced or charged.
+  rate_per_kg numeric, hold_amount numeric NOT NULL DEFAULT 0,
+  hold_state text NOT NULL DEFAULT 'held' CHECK (hold_state IN ('held','released','confirmed')),
+  hold_note text, hold_settled_by_name text, hold_settled_at timestamptz,
   created_by_name text, created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX quarantine_holds_order ON quarantine_holds (job_order_id);

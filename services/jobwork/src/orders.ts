@@ -1,10 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import type { Request, Router } from 'express';
 import { z } from 'zod';
 import {
   type BusEvent, type Client, type Pool, type ServiceContext, badRequest, conflict, listQuery, many, notFound, notify, one, optText, orderLimit, page, parse,
   publish, reqText, requirePermission, tx,
 } from '@erp/platform';
-import { S, addDays, auditReq, getParty, getProduct, getWarehouses, nextNumber, portalUsers, raiseException, resolveException, round2, setting, today } from './common.ts';
+import { S, addDays, auditReq, getParty, getProduct, getWarehouses, greyRateOf, millDeduction, nextNumber, portalUsers, raiseException, resolveException, round2, setting, today } from './common.ts';
 import { chargeFor, describeCard, pickRateCard } from './rates.ts';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
@@ -309,8 +310,14 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
         [o.id, b.return_date, w.id, `${w.code} · ${w.name}`, b.mill_challan_no ?? null, b.lr_number ?? null, b.kg_good, b.kg_rejected, b.kg_damaged, b.kg_process_loss, b.rolls ?? null, b.lot_ref ?? null, b.loss_reason ?? null, charge, req.user!.name, b.kg_quarantine]);
       if (b.kg_quarantine > 0) {
         const qn = await nextNumber(c, 'quarantine', 'QH-');
-        await c.query(`INSERT INTO quarantine_holds (number, job_order_id, return_id, mill_id, mill_name, warehouse_id, warehouse_name, kg, rolls, reason_type, description, created_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-          [qn, o.id, ret!.id, o.mill_id, o.mill_name, w.id, `${w.code} · ${w.name}`, b.kg_quarantine, b.quarantine_rolls ?? null, b.quarantine_reason, b.quarantine_note, req.user!.name]);
+        const qid = randomUUID();
+        const rate = await greyRateOf(c, o.id);
+        const value = round2(b.kg_quarantine * rate);
+        await c.query(`INSERT INTO quarantine_holds (id, number, job_order_id, return_id, mill_id, mill_name, warehouse_id, warehouse_name, kg, rolls, reason_type, description, created_by_name, rate_per_kg, hold_amount) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+          [qid, qn, o.id, ret!.id, o.mill_id, o.mill_name, w.id, `${w.code} · ${w.name}`, b.kg_quarantine, b.quarantine_rolls ?? null, b.quarantine_reason, b.quarantine_note, req.user!.name, rate, value]);
+        // The whole value is held from the mill's payments until the goods are accepted, replaced or charged to the mill.
+        if (value > 0) await millDeduction(c, { key: `quarantine:${qid}`, mill_id: o.mill_id, mill_name: o.mill_name, kind: 'quarantine', source_id: qid, ref: qn, job_ref: o.number,
+          reason: `${b.kg_quarantine} kg wrong goods (${b.quarantine_reason!.replace(/_/g, ' ')}) at ₹${rate}/kg: ${b.quarantine_note}`, state: 'held', amount: value, expense_account: 'purchases', by: req.user!.name });
         await raiseException(c, { kind: 'quarantine_held', severity: 'warning', ref_id: o.id, ref_label: `${o.number} · ${o.mill_name}`, message: `${b.kg_quarantine} kg returned on ${o.number} held in quarantine: ${b.quarantine_note}`, notifyPermission: 'jobwork.claim.manage', link: `/jobwork/orders/${o.id}` });
       }
       const after = await one<{ kg_sent: number; kg_good: number; kg_rejected: number; kg_damaged: number; kg_process_loss: number }>(c, `
@@ -389,7 +396,7 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
   r.post('/quarantine/:id/resolve', requirePermission('jobwork.claim.manage'), async (req, res) => {
     const b = parse(z.object({ action: z.enum(['return_to_mill', 'rework', 'accept']), note: reqText(500), challan_no: optText(40) }), req.body);
     const out = await tx(pool, async (c) => {
-      const h = await one<{ id: string; number: string; job_order_id: string; kg: number; status: string; warehouse_id: string; warehouse_name: string; rolls: number | null; return_id: string }>(c, 'SELECT * FROM quarantine_holds WHERE id = $1 FOR UPDATE', [req.params.id]);
+      const h = await one<{ id: string; number: string; job_order_id: string; kg: number; status: string; warehouse_id: string; warehouse_name: string; rolls: number | null; return_id: string; mill_id: string; mill_name: string; hold_amount: number; hold_state: string }>(c, 'SELECT * FROM quarantine_holds WHERE id = $1 FOR UPDATE', [req.params.id]);
       if (!h) throw notFound('Quarantine hold');
       if (h.status !== 'held') throw conflict(`Already ${h.status.replace(/_/g, ' ')}`);
       const o = await one<{ id: string; number: string; mill_name: string; process_code: string; status: string }>(c, 'SELECT * FROM job_orders WHERE id = $1 FOR UPDATE', [h.job_order_id]);
@@ -404,6 +411,11 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
           FROM job_order_lines l LEFT JOIN mill_stock s ON s.id = l.mill_stock_id WHERE l.job_order_id = $1 GROUP BY l.product_id, l.sku, l.product_name ORDER BY min(l.line_no)`, [o!.id]);
         await publish(c, S, 'jobwork.return.recorded', { job_order_id: o!.id, number: o!.number, return_id: h.return_id, return_date: today(), mill_name: o!.mill_name, process_code: o!.process_code, warehouse_id: h.warehouse_id, warehouse_name: h.warehouse_name,
           kg_good: kg, kg_rejected: 0, kg_consumed: kg, rolls: h.rolls, lot_ref: `${h.number}`, charge: 0, products, source: 'quarantine' });
+        // Goods accepted: nothing is owed by the mill, so the hold on its payments is released.
+        if (h.hold_state === 'held') {
+          await c.query(`UPDATE quarantine_holds SET hold_state = 'released', hold_note = $2, hold_settled_by_name = $3, hold_settled_at = now() WHERE id = $1`, [h.id, `Goods accepted: ${b.note}`, req.user!.name]);
+          if (Number(h.hold_amount) > 0) await millDeduction(c, { key: `quarantine:${h.id}`, mill_id: h.mill_id, mill_name: h.mill_name, kind: 'quarantine', source_id: h.id, ref: h.number, job_ref: o!.number, reason: `Goods accepted: ${b.note}`, state: 'released', amount: 0, by: req.user!.name });
+        }
       } else {
         // Back to the mill (someone else's fabric, or for rework): our fabric is still at the mill.
         await c.query(`UPDATE job_orders SET kg_quarantine = kg_quarantine - $2, status = CASE WHEN status IN ('returned','closed') THEN 'partially_returned' ELSE status END, updated_at = now() WHERE id = $1`, [o!.id, kg]);
@@ -416,6 +428,28 @@ export function orderRoutes(r: Router, { pool }: ServiceContext) {
       return { status: b.action, challan_no: challan };
     });
     res.json(out);
+  });
+
+  /**
+   * After goods went back to the mill (or for rework), the payment hold stays until the right goods come back
+   * (release) or the mill is charged for them (confirm: a debit note for the value).
+   */
+  r.post('/quarantine/:id/settle-hold', requirePermission('jobwork.claim.manage'), async (req, res) => {
+    const b = parse(z.object({ action: z.enum(['release', 'confirm']), note: reqText(500), amount: z.number().min(0).optional() }), req.body);
+    res.json(await tx(pool, async (c) => {
+      const h = await one<{ id: string; number: string; job_order_id: string; status: string; mill_id: string; mill_name: string; hold_amount: number; hold_state: string }>(c, 'SELECT * FROM quarantine_holds WHERE id = $1 FOR UPDATE', [req.params.id]);
+      if (!h) throw notFound('Quarantine hold');
+      if (h.hold_state !== 'held') throw conflict(`The payment hold was already ${h.hold_state}`);
+      if (h.status === 'held') throw conflict('Decide what happens to the goods first (return to mill, rework or accept)');
+      const o = await one<{ number: string }>(c, 'SELECT number FROM job_orders WHERE id = $1', [h.job_order_id]);
+      const amount = b.action === 'confirm' ? round2(b.amount ?? Number(h.hold_amount)) : 0;
+      await c.query(`UPDATE quarantine_holds SET hold_state = $2, hold_note = $3, hold_settled_by_name = $4, hold_settled_at = now(), hold_amount = CASE WHEN $2 = 'confirmed' THEN $5 ELSE hold_amount END WHERE id = $1`,
+        [h.id, b.action === 'release' ? 'released' : 'confirmed', b.note, req.user!.name, amount]);
+      await millDeduction(c, { key: `quarantine:${h.id}`, mill_id: h.mill_id, mill_name: h.mill_name, kind: 'quarantine', source_id: h.id, ref: h.number, job_ref: o?.number ?? null, reason: b.note,
+        state: b.action === 'release' ? 'released' : 'confirmed', amount, by: req.user!.name });
+      await auditReq(c, req, 'quarantine_hold', h.id, `hold_${b.action}`, { after: { amount }, reason: b.note });
+      return { hold_state: b.action === 'release' ? 'released' : 'confirmed', amount };
+    }));
   });
 
   /** Loss by mill and process: what went out, what came back good, what was lost, held or claimed. */
@@ -513,8 +547,7 @@ export async function shortageOf(c: Client | ServiceContext['pool'], o: JobForLo
   const rec = reconcile(o);
   const excessLoss = Math.max(0, Number(o.kg_process_loss) - (Number(o.kg_sent) * allowed) / 100);
   const kg = round2(Math.max(0, rec.kg_balance_at_mill) + excessLoss);
-  const cost = await one<{ rate: number | null }>(c, `SELECT (sum(l.kg_sent * s.cost_per_kg) / nullif(sum(l.kg_sent) FILTER (WHERE s.cost_per_kg IS NOT NULL), 0))::float AS rate FROM job_order_lines l LEFT JOIN mill_stock s ON s.id = l.mill_stock_id WHERE l.job_order_id = $1`, [o.id]);
-  const rate = round2(cost?.rate ?? Number(await setting('jobwork.shortage_rate_per_kg', 240)));
+  const rate = await greyRateOf(c as Client, o.id);
   return { kg, kg_not_returned: round2(Math.max(0, rec.kg_balance_at_mill)), kg_excess_loss: round2(excessLoss), allowed_loss_pct: allowed, rate_per_kg: rate, amount: round2(kg * rate) };
 }
 
@@ -524,6 +557,7 @@ export async function raiseShortageClaim(c: Client, by: string, o: JobForLoss, s
   const q = await one<{ id: string; number: string }>(c, `INSERT INTO quality_claims (number, job_order_id, mill_id, mill_name, defect_types, description, kg_affected, claim_type, amount, rate_per_kg, responsibility, auto_raised, raised_by_name)
     VALUES ($1,$2,$3,$4,'{Short quantity}',$5,$6,'shortage',$7,$8,'mill',true,$9) RETURNING id, number`, [number, o.id, o.mill_id, o.mill_name, `Shortage on ${o.number}: ${desc}, at ₹${sh.rate_per_kg}/kg`, sh.kg, sh.amount, sh.rate_per_kg, by]);
   for (const uid of await portalUsers(o.mill_id)) await notify(c, S, { user_id: uid, kind: 'warning', title: `Shortage claim ${number} on ${o.number}: ${sh.kg} kg`, body: desc, link: `/portal/claims/${q!.id}` });
+  if (sh.amount > 0) await millDeduction(c, { key: `claim:${q!.id}`, mill_id: o.mill_id, mill_name: o.mill_name, kind: 'shortage_claim', source_id: q!.id, ref: number, job_ref: o.number, reason: desc, state: 'held', amount: sh.amount, expense_account: 'purchases', by });
   await raiseException(c, { kind: 'mill_shortage', severity: 'warning', ref_id: o.id, ref_label: `${o.number} · ${o.mill_name}`, message: `Shortage claim ${number} raised on ${o.mill_name}: ${sh.kg} kg, ₹${sh.amount.toLocaleString('en-IN')}`, notifyPermission: 'jobwork.claim.manage', link: `/jobwork/claims` });
   return q;
 }

@@ -5,6 +5,7 @@ import { S, auditReq, getParty, round2, today } from './common.ts';
 import { openBills } from './ledger.ts';
 import { recentBankChange } from './postings.ts';
 import { paySupplierBill } from './vouchers.ts';
+import { pendingByParty } from './deductions.ts';
 
 /**
  * Supplier payment runs: choose the bills to pay (due and overdue first), pay them together through the same rules as
@@ -30,6 +31,7 @@ export function paymentRunRoutes(r: Router, { pool }: ServiceContext) {
     const pending = await many<{ party_id: string; bill_ref: string }>(pool, `SELECT l.party_id, l.bill_ref FROM voucher_lines l JOIN vouchers v ON v.id = l.voucher_id
       WHERE v.status = 'pending_approval' AND v.source_type = 'supplier_payment' AND l.bill_ref IS NOT NULL`);
     const t = today();
+    const held = new Map((await pendingByParty(pool)).map((d) => [d.party_id, d]));
     res.json(await Promise.all(open.map(async (b) => {
       const bank = banks.get(b.party_id) ?? null;
       return {
@@ -38,6 +40,9 @@ export function paymentRunRoutes(r: Router, { pool }: ServiceContext) {
         bank: bank ? { name: bank.account_name, account: `••••${bank.account_number.slice(-4)}`, ifsc: bank.ifsc, bank_name: bank.bank_name } : null,
         bank_changed_recently: !!(await recentBankChange(pool as never, b.party_id)),
         awaiting_approval: pending.some((p) => p.party_id === b.party_id && p.bill_ref === b.doc_no),
+        // Claims and quarantine holds already reduce the mill's balance; shown so they are applied to this bill.
+        deductions_pending: held.has(b.party_id) ? round2(held.get(b.party_id)!.held + held.get(b.party_id)!.confirmed) : 0,
+        deductions_count: held.get(b.party_id)?.count ?? 0,
       };
     })));
   });

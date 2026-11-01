@@ -1,7 +1,7 @@
 import type { Request, Router } from 'express';
 import { z } from 'zod';
 import { type Client, type Pool, type ServiceContext, badRequest, callService, conflict, many, notFound, one, optText, parse, recordVersion, reqText, requirePermission, tx } from '@erp/platform';
-import { S, addDays, auditReq, books, getParty, localNumber, raiseAnomaly, requestApproval, round2, setting, today } from './common.ts';
+import { S, addDays, auditReq, books, fyOf, fyStart, getParty, localNumber, raiseAnomaly, requestApproval, round2, setting, today } from './common.ts';
 import { periodOpen, post, reverse, type TaxLine } from './ledger.ts';
 import { tdsFor } from './postings.ts';
 
@@ -255,7 +255,7 @@ export function invoiceRoutes(r: Router, { pool }: ServiceContext) {
   // ---------- counter cash sale ----------
   r.post('/counter-sales', requirePermission('finance.voucher.post', 'fulfilment.invoice'), async (req, res) => {
     const b = parse(z.object({
-      book_id: z.uuid(), buyer_name: optText(160), buyer_mobile: optText(20), buyer_gstin: optText(15), buyer_state: optText(2),
+      book_id: z.uuid(), buyer_name: optText(160), buyer_mobile: optText(20), buyer_gstin: optText(15), buyer_pan: optText(10), buyer_state: optText(2),
       barcodes: z.array(z.string().trim().min(3)).min(1).max(200), prices: z.array(z.object({ sku: z.string(), rate: z.number().positive() })).default([]),
       payment_mode: z.enum(['cash', 'upi', 'card', 'bank']), amount_received: z.number().nonnegative(), notes: optText(500), preview: z.boolean().default(false),
     }), req.body);
@@ -266,20 +266,36 @@ export function invoiceRoutes(r: Router, { pool }: ServiceContext) {
     const given = b.prices.map((p) => ({ sku: p.sku, rate: p.rate })) as Line[];
     const { lines, kg } = await rollLines(b.barcodes, { type: 'counter_sale', id, no: 'PREVIEW', holder: null }, true, given);
     const t = computeTotals(lines, bk.state_code, state);
-    // Income-tax section 269ST: ₹2 lakh or more in cash from one person in a day is not allowed.
-    const limit = Number(await setting('finance.cash_receipt_limit', 200000));
+    // Who bought: name and mobile always; PAN as well for a sale of ₹50,000 or more to a buyer without a GSTIN.
     const mobile = b.buyer_mobile?.replace(/\D/g, '').slice(-10) || null;
-    const earlier = b.payment_mode === 'cash' && (mobile || b.buyer_name) ? await one<{ s: number }>(pool, `SELECT coalesce(sum(amount_received), 0)::float AS s FROM manual_invoices WHERE mode = 'counter' AND status = 'posted' AND payment_mode = 'cash' AND doc_date = current_date AND (party_mobile = $1 OR ($1 IS NULL AND party_name = $2))`, [mobile, b.buyer_name ?? '']) : { s: 0 };
-    const cashToday = round2((earlier?.s ?? 0) + (b.payment_mode === 'cash' ? Math.min(b.amount_received, t.total) : 0));
-    const warning = b.payment_mode === 'cash' && cashToday >= limit ? `Cash of ₹${cashToday.toLocaleString('en-IN')} from one buyer today: receipts of ₹${limit.toLocaleString('en-IN')} or more in cash are not allowed (Income-tax section 269ST). Take UPI, card or bank transfer for the rest.` : null;
-    if (b.preview) { res.json({ preview: true, kg, ...t, warning, b2c: !gstin }); return; }
-    if (warning) throw badRequest(warning, { fields: { payment_mode: 'Choose UPI, card or bank' } });
+    const pan = b.buyer_pan ? b.buyer_pan.toUpperCase() : null;
+    const panAbove = Number(await setting('finance.counter_pan_above', 49999));
+    const fields: Record<string, string> = {};
+    if (!b.buyer_name?.trim()) fields.buyer_name = 'Buyer name is required';
+    if (!mobile || mobile.length !== 10) fields.buyer_mobile = 'A 10-digit mobile number is required';
+    if (!gstin && t.total > panAbove && !pan) fields.buyer_pan = `PAN is required for a sale above ₹${panAbove.toLocaleString('en-IN')} without a GSTIN`;
+    if (pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) fields.buyer_pan = 'PAN looks wrong (5 letters, 4 digits, 1 letter)';
+    if (gstin && !/^[0-9]{2}[A-Z0-9]{13}$/.test(gstin)) fields.buyer_gstin = 'GSTIN looks wrong (15 characters)';
+    // Cash from one buyer is capped for the whole financial year (₹2 lakh by default), which also keeps every
+    // single day inside Income-tax section 269ST. The buyer is matched by mobile, PAN or GSTIN.
+    const limit = Number(await setting('finance.cash_receipt_limit', 200000));
+    const fy = fyOf(today());
+    const ids = [mobile, pan, gstin].filter(Boolean) as string[];
+    const earlier = ids.length ? await one<{ s: number }>(pool, `SELECT coalesce(sum(amount_received), 0)::float AS s FROM manual_invoices
+      WHERE mode = 'counter' AND status = 'posted' AND payment_mode = 'cash' AND doc_date >= $1::date AND (party_mobile = ANY($2) OR party_pan = ANY($2) OR party_gstin = ANY($2))`, [fyStart(fy), ids]) : { s: 0 };
+    const cashThisYear = round2((earlier?.s ?? 0) + t.total);
+    const cashLeft = round2(Math.max(0, limit - (earlier?.s ?? 0)));
+    const warning = cashThisYear > limit
+      ? `Cash from this buyer this financial year would be ₹${cashThisYear.toLocaleString('en-IN')}; the limit is ₹${limit.toLocaleString('en-IN')} a year (₹${cashLeft.toLocaleString('en-IN')} left). Take UPI, card or bank transfer.` : null;
+    if (b.preview) { res.json({ preview: true, kg, ...t, warning, b2c: !gstin, cash_this_year: round2(earlier?.s ?? 0), cash_limit: limit, cash_left: cashLeft, pan_required: !gstin && t.total > panAbove, missing: fields }); return; }
+    if (Object.keys(fields).length) throw badRequest(Object.values(fields)[0]!, { fields });
+    if (warning && b.payment_mode === 'cash') throw badRequest(warning, { fields: { payment_mode: 'Choose UPI, card or bank' } });
     if (b.amount_received + 0.5 < t.total) throw badRequest(`₹${t.total.toLocaleString('en-IN')} is due; ₹${b.amount_received.toLocaleString('en-IN')} received. A counter sale is paid in full.`, { fields: { amount_received: 'Collect the full amount' } });
     const out = await tx(pool, async (c) => {
       const draft = await localNumber(c, 'counter_draft', 'CS-');
-      await c.query(`INSERT INTO manual_invoices (id, root_id, kind, mode, status, draft_no, book_id, doc_date, party_name, party_gstin, party_state, party_mobile, lines, barcodes, taxable, cgst, sgst, igst, round_off, total, payment_mode, amount_received, notes, created_by, created_by_name)
-        VALUES ($1,$1,'sales','counter','pending_approval',$2,$3,current_date,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
-        [id, draft, bk.id, b.buyer_name || 'Walk-in buyer', gstin, state, mobile, JSON.stringify(t.lines), b.barcodes.map((x) => x.toUpperCase()), t.taxable, t.cgst, t.sgst, t.igst, t.round_off, t.total, b.payment_mode, t.total, b.notes ?? null, req.user!.id.startsWith('svc:') ? null : req.user!.id, req.user!.name]);
+      await c.query(`INSERT INTO manual_invoices (id, root_id, kind, mode, status, draft_no, book_id, doc_date, party_name, party_gstin, party_state, party_mobile, lines, barcodes, taxable, cgst, sgst, igst, round_off, total, payment_mode, amount_received, notes, created_by, created_by_name, party_pan)
+        VALUES ($1,$1,'sales','counter','pending_approval',$2,$3,current_date,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+        [id, draft, bk.id, b.buyer_name!.trim(), gstin, state, mobile, JSON.stringify(t.lines), b.barcodes.map((x) => x.toUpperCase()), t.taxable, t.cgst, t.sgst, t.igst, t.round_off, t.total, b.payment_mode, t.total, b.notes ?? null, req.user!.id.startsWith('svc:') ? null : req.user!.id, req.user!.name, pan]);
       const i = (await one<Inv>(c, 'SELECT *, doc_date::text FROM manual_invoices WHERE id = $1', [id]))!;
       const posted = await postInvoice(c, i, req.user!.name, `${req.user!.name} (counter)`);
       const rcpt = await post(c, {

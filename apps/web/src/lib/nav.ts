@@ -144,6 +144,7 @@ export const NAV: NavGroup[] = [
       { to: '/finance/accounts', label: 'Chart of accounts', icon: BookOpen, perms: ['finance.read'] },
       { to: '/finance/receivables', label: 'Receivables', icon: ArrowDownToLine, perms: ['finance.read'] },
       { to: '/finance/payables', label: 'Payables', icon: HandCoins, perms: ['finance.read'] },
+      { to: '/finance/mill-deductions', label: 'Mill deductions', icon: HandCoins, perms: ['finance.read'] },
       { to: '/finance/payment-run', label: 'Payment run', icon: Send, perms: ['finance.voucher.post'] },
       { to: '/finance/bank', label: 'Bank reconciliation', icon: Landmark, perms: ['finance.read'] },
       { to: '/finance/gst', label: 'GST', icon: FileSpreadsheet, perms: ['finance.read'] },

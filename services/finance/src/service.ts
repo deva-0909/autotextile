@@ -2,10 +2,11 @@ import { legacyRoutes } from './legacy.ts';
 import { paymentRunRoutes } from './payrun.ts';
 import { type ServiceDefinition, migrationsOf } from '@erp/platform';
 import { applyFinanceDecision, voucherRoutes } from './vouchers.ts';
-import { approvalDecidedConsumer, commissionApprovedConsumer, creditNoteConsumer, millClaimConsumer, stockCountConsumer, orderCancelledConsumer, payrollApprovedConsumer, payrollPaidConsumer, paymentReceivedConsumer, paymentRefundedConsumer, salesInvoiceConsumer, supplierInvoiceConsumer, transferConsumer } from './postings.ts';
+import { approvalDecidedConsumer, commissionApprovedConsumer, creditNoteConsumer, stockCountConsumer, orderCancelledConsumer, payrollApprovedConsumer, payrollPaidConsumer, paymentReceivedConsumer, paymentRefundedConsumer, salesInvoiceConsumer, supplierInvoiceConsumer, transferConsumer } from './postings.ts';
 import { partyRoutes } from './parties.ts';
 import { applyInvoiceDecision, invoiceRoutes } from './invoices.ts';
 import { gstRoutes } from './gst.ts';
+import { millDeductionConsumer, millDeductionRoutes } from './deductions.ts';
 import { tdsRoutes } from './tds.ts';
 import { bankRoutes } from './bank.ts';
 import { reportRoutes } from './reports.ts';
@@ -23,6 +24,7 @@ export const financeService: ServiceDefinition = {
     legacyRoutes(r, ctx);
     paymentRunRoutes(r, ctx);
     invoiceRoutes(r, ctx);
+    millDeductionRoutes(r, ctx);
   },
   consumers: () => ({
     'approval.decided': approvalDecidedConsumer(async (c, p) => { await applyFinanceDecision(c, p); await applyInvoiceDecision(c, p); }),
@@ -36,7 +38,7 @@ export const financeService: ServiceDefinition = {
     'hrms.payroll.approved': payrollApprovedConsumer(),
     'hrms.payroll.paid': payrollPaidConsumer(),
     'crm.commission.approved': commissionApprovedConsumer(),
-    'jobwork.claim.accepted': millClaimConsumer(),
+    'jobwork.mill_deduction': millDeductionConsumer(),
     'inventory.stocktake.posted': stockCountConsumer(),
   }),
 };

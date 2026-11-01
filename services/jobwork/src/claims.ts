@@ -1,7 +1,9 @@
 import type { Router } from 'express';
 import { z } from 'zod';
-import { type ServiceContext, badRequest, conflict, listQuery, many, notFound, notify, one, optText, orderLimit, page, parse, publish, reqText, requirePermission, tx } from '@erp/platform';
-import { S, auditReq, nextNumber, portalUsers } from './common.ts';
+import { type ServiceContext, badRequest, conflict, listQuery, many, notFound, notify, one, optText, orderLimit, page, parse, reqText, requirePermission, tx } from '@erp/platform';
+import { S, auditReq, millDeduction, nextNumber, portalUsers } from './common.ts';
+
+const MONEY = ['debit_note', 'shortage'];
 
 const DEFECTS = ['Shade variation', 'Uneven dyeing', 'Holes', 'Stains / oil marks', 'GSM out of tolerance', 'Width out of tolerance', 'Shrinkage', 'Pilling', 'Finishing defect', 'Short quantity'];
 
@@ -44,6 +46,10 @@ export function claimRoutes(r: Router, { pool }: ServiceContext) {
         [await nextNumber(c, 'quality_claim', 'QC-'), o.id, o.mill_id, o.mill_name, b.defect_types, b.description, b.kg_affected, b.samples ?? null, b.claim_type, b.amount, req.user!.name]);
       for (const uid of await portalUsers(o.mill_id))
         await notify(c, S, { user_id: uid, kind: 'warning', title: `Quality claim ${q!.number} on ${o.number}`, body: b.defect_types.join(', '), link: `/portal/claims/${q!.id}` });
+      // In the mill's ledger from the moment it is raised: held from payments until it is decided.
+      if (MONEY.includes(b.claim_type) && b.amount > 0)
+        await millDeduction(c, { key: `claim:${q!.id}`, mill_id: o.mill_id, mill_name: o.mill_name, kind: b.claim_type === 'shortage' ? 'shortage_claim' : 'quality_claim', source_id: q!.id, ref: q!.number, job_ref: o.number,
+          reason: `${b.defect_types.join(', ')}: ${b.description}`, state: 'held', amount: b.amount, expense_account: b.claim_type === 'shortage' ? 'purchases' : 'jobwork', by: req.user!.name });
       await auditReq(c, req, 'quality_claim', q!.id, 'raised', { after: b });
       return q;
     });
@@ -58,15 +64,20 @@ export function claimRoutes(r: Router, { pool }: ServiceContext) {
     }), req.body);
     if (['accepted', 'rejected', 'closed'].includes(b.status) && !b.resolution) throw badRequest('Record the resolution', { fields: { resolution: 'Required' } });
     res.json(await tx(pool, async (c) => {
-      const before = await one<{ status: string; mill_id: string; number: string; mill_name: string; amount: number }>(c, 'SELECT * FROM quality_claims WHERE id = $1 FOR UPDATE', [req.params.id]);
+      const before = await one<{ status: string; mill_id: string; number: string; mill_name: string; amount: number; job_order_id: string }>(c, 'SELECT * FROM quality_claims WHERE id = $1 FOR UPDATE', [req.params.id]);
       if (!before) throw notFound('Quality claim');
       if (before.status === 'closed') throw conflict('This claim is closed');
       const after = await one(c, `UPDATE quality_claims SET status = $2, root_cause = $3, responsibility = $4, claim_type = $5, amount = $6, resolution = $7, updated_at = now(),
         closed_at = CASE WHEN $2 = 'closed' THEN now() END WHERE id = $1 RETURNING *`,
         [req.params.id, b.status, b.root_cause ?? null, b.responsibility, b.claim_type, b.amount, b.resolution ?? null]);
-      // Accounting (P8) raises the debit note from this event.
-      if (b.status === 'accepted' && ['debit_note', 'shortage'].includes(b.claim_type) && b.amount > 0 && before.status !== 'accepted')
-        await publish(c, S, 'jobwork.claim.accepted', { claim_id: req.params.id, number: before.number, mill_id: before.mill_id, mill_name: before.mill_name, amount: b.amount, claim_type: b.claim_type, reason: b.resolution ?? null, date: new Date().toISOString().slice(0, 10) });
+      // Accounts follows every change: held while open, a debit note when accepted, reversed when rejected.
+      if (!['accepted', 'rejected'].includes(before.status)) {
+        const money = MONEY.includes(b.claim_type);
+        const state = b.status === 'accepted' ? (money && b.amount > 0 ? 'confirmed' : 'released') : b.status === 'rejected' || b.status === 'closed' ? 'released' : 'held';
+        const job = await one<{ number: string }>(c, 'SELECT number FROM job_orders WHERE id = $1', [before.job_order_id]);
+        await millDeduction(c, { key: `claim:${req.params.id}`, mill_id: before.mill_id, mill_name: before.mill_name, kind: b.claim_type === 'shortage' ? 'shortage_claim' : 'quality_claim', source_id: String(req.params.id), ref: before.number, job_ref: job?.number ?? null,
+          reason: b.resolution ?? null, state, amount: money ? b.amount : 0, expense_account: b.claim_type === 'shortage' ? 'purchases' : 'jobwork', by: req.user!.name });
+      }
       await auditReq(c, req, 'quality_claim', String(req.params.id), 'updated', { before, after, reason: b.resolution });
       return after;
     }));

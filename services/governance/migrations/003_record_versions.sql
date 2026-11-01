@@ -2,7 +2,7 @@
 -- Only the latest version of a document can be edited, in its own service; older ones are only viewed here.
 CREATE TABLE record_versions (
   id bigserial PRIMARY KEY,
-  event_id uuid UNIQUE,
+  event_id text UNIQUE,
   service text NOT NULL,
   doc_type text NOT NULL,
   doc_id uuid NOT NULL,

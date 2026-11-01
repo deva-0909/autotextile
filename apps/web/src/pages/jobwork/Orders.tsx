@@ -31,7 +31,7 @@ export interface JobDetail extends OrderRow {
   reconciliation: { kg_sent: number; kg_good: number; kg_rejected: number; kg_damaged: number; kg_process_loss: number; kg_quarantine: number; kg_balance_at_mill: number; yield_pct: number | null; loss_pct: number | null };
 }
 
-interface Hold { id: string; number: string; kg: number; rolls: number | null; reason_type: string; description: string; status: string; resolution: string | null; challan_no: string | null; resolved_by_name: string | null; created_at: string; warehouse_name: string | null }
+interface Hold { id: string; number: string; kg: number; rolls: number | null; reason_type: string; description: string; status: string; resolution: string | null; challan_no: string | null; resolved_by_name: string | null; created_at: string; warehouse_name: string | null; hold_amount: number | string; hold_state: string; rate_per_kg: number | string | null; hold_note: string | null }
 const HOLD_REASON: Record<string, string> = { other_party: 'Another party’s fabric', wrong_shade: 'Wrong shade', wrong_gsm: 'Wrong GSM', wrong_quality: 'Wrong quality', other: 'Other' };
 
 export function JobOrdersPage() {
@@ -387,12 +387,34 @@ function QuarantineCard({ holds, onDone }: { holds: Hold[]; onDone: () => void }
   const { can } = useAuth();
   const toast = useToast();
   const [act, setAct] = useState<{ id: string; action: string; note: string; challan_no: string } | null>(null);
+  const [settle, setSettle] = useState<{ id: string; action: 'release' | 'confirm'; note: string; amount: string } | null>(null);
   return (
-    <Card title="Quarantine" description="Wrong goods sent back by the mill: not in sellable stock until resolved.">
+    <Card title="Quarantine" description="Wrong goods sent back by the mill: not in sellable stock, and their full value is held from the mill's payments until settled.">
       <ul className="space-y-3">{holds.map((h) => (
         <li key={h.id} className="rounded-lg border border-slate-200 p-3 text-[12.5px]">
           <div className="flex items-center justify-between"><span className="font-medium">{h.number} · {fmtNum(h.kg)} kg{h.rolls ? `, ${h.rolls} rolls` : ''}</span><Badge tone={h.status === 'held' ? 'warning' : 'neutral'}>{h.status === 'held' ? 'Held' : h.status === 'accepted' ? 'Accepted' : h.status === 'rework' ? 'Sent for rework' : 'Sent back to mill'}</Badge></div>
           <p className="text-slate-600">{HOLD_REASON[h.reason_type]}: {h.description}</p>
+          {Number(h.hold_amount) > 0 && (
+            <p className="mt-1 flex flex-wrap items-center gap-1.5">
+              <Badge tone={h.hold_state === 'held' ? 'warning' : h.hold_state === 'confirmed' ? 'danger' : 'success'}>{h.hold_state === 'held' ? 'Payment hold' : h.hold_state === 'confirmed' ? 'Charged to mill' : 'Hold released'}</Badge>
+              <span>{fmtINR(Number(h.hold_amount))}{h.rate_per_kg ? ` (${fmtNum(h.kg)} kg × ${fmtINR(Number(h.rate_per_kg))})` : ''} {h.hold_state === 'held' ? 'debited to the mill in Accounts' : ''}</span>
+              {h.hold_note && <span className="text-slate-500">— {h.hold_note}</span>}
+            </p>
+          )}
+          {h.status !== 'held' && h.hold_state === 'held' && Number(h.hold_amount) > 0 && can('jobwork.claim.manage') && (settle?.id === h.id ? (
+            <div className="mt-2 space-y-2">
+              <Input placeholder={settle.action === 'release' ? 'What came back (challan, rolls) — required' : 'Why the mill is charged — required'} value={settle.note} onChange={(e) => setSettle({ ...settle, note: e.target.value })} />
+              {settle.action === 'confirm' && <Input type="number" placeholder="Amount charged" value={settle.amount} onChange={(e) => setSettle({ ...settle, amount: e.target.value })} />}
+              <div className="flex gap-1.5"><Button size="sm" variant="primary" disabled={settle.note.trim().length < 2} onClick={async () => {
+                try { await api.post(`/jobwork/quarantine/${h.id}/settle-hold`, { action: settle.action, note: settle.note, amount: settle.action === 'confirm' && settle.amount ? Number(settle.amount) : undefined }); setSettle(null); onDone(); toast({ tone: 'success', title: settle.action === 'release' ? 'Hold released' : 'Charged to the mill' }); } catch (e) { toast({ tone: 'error', title: (e as Error).message }); }
+              }}>Confirm</Button><Button size="sm" variant="ghost" onClick={() => setSettle(null)}>Cancel</Button></div>
+            </div>
+          ) : (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <Button size="sm" onClick={() => setSettle({ id: h.id, action: 'release', note: '', amount: '' })}>Right goods received: release hold</Button>
+              <Button size="sm" variant="ghost" onClick={() => setSettle({ id: h.id, action: 'confirm', note: '', amount: String(h.hold_amount) })}>Charge the mill (debit note)</Button>
+            </div>
+          ))}
           {h.resolution && <p className="text-slate-500">{h.challan_no ? `${h.challan_no} · ` : ''}{h.resolution} — {h.resolved_by_name}</p>}
           {h.status === 'held' && can('jobwork.claim.manage') && (act?.id === h.id ? (
             <div className="mt-2 space-y-2">

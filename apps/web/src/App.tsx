@@ -29,6 +29,7 @@ import { JobOrderDetailPage, JobOrdersPage } from './pages/jobwork/Orders';
 import { MillDetailPage, MillsPage } from './pages/jobwork/Mills';
 import { ClaimsPage } from './pages/jobwork/Claims';
 import { MillLossPage } from './pages/jobwork/MillLoss';
+import { MillDeductionsPage } from './pages/finance/MillDeductions';
 import { CashBookPage, CounterSalePage, CounterSalesListPage, ManualInvoiceDetailPage, ManualInvoiceEditPage, ManualInvoicesPage } from './pages/finance/Invoices';
 import { InventoryOverview } from './pages/inventory/Overview';
 import { InwardDetailPage, InwardsPage } from './pages/inventory/Inward';
@@ -248,6 +249,7 @@ export default function App() {
         <Route path="/finance/counter" element={<Guard perms={['finance.read']}><CounterSalesListPage /></Guard>} />
         <Route path="/finance/counter/new" element={<Guard perms={['finance.voucher.post', 'fulfilment.invoice']}><CounterSalePage /></Guard>} />
         <Route path="/finance/cash-book" element={<Guard perms={['finance.read']}><CashBookPage /></Guard>} />
+        <Route path="/finance/mill-deductions" element={<Guard perms={['finance.read']}><MillDeductionsPage /></Guard>} />
         <Route path="/finance" element={<Guard perms={['finance.read']}><FinanceOverview /></Guard>} />
         <Route path="/finance/accounts" element={<Guard perms={['finance.read']}><ChartOfAccountsPage /></Guard>} />
         <Route path="/finance/ledger/:id" element={<Guard perms={['finance.read']}><LedgerPage /></Guard>} />

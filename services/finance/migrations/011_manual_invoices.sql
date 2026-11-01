@@ -11,7 +11,7 @@ CREATE TABLE manual_invoices (
   book_id uuid NOT NULL REFERENCES books(id),
   doc_date date NOT NULL,
   due_date date,
-  party_id uuid, party_name text NOT NULL, party_gstin text, party_state text, party_mobile text,
+  party_id uuid, party_name text NOT NULL, party_gstin text, party_state text, party_mobile text, party_pan text,
   supplier_invoice_no text,
   lines jsonb NOT NULL,
   barcodes text[] NOT NULL DEFAULT '{}',
