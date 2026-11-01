@@ -14,7 +14,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { waitUntil } from '@vercel/functions';
 import pg from 'pg';
-import { type Pool, type RunningService, type ServiceName, bootService, setServicePorts } from '@erp/platform';
+import { type Pool, type RunningService, type ServiceName, bootService, createPool, setServicePorts, transportMode } from '@erp/platform';
 import { SERVICE_DEFS } from '../scripts/services.ts';
 import { createGateway } from '../services/gateway/src/app.ts';
 import { runCommerceChecks } from '../services/commerce/src/automation.ts';
@@ -95,10 +95,40 @@ async function ensureSetUp(session: string) {
   }
 }
 
+/**
+ * The same over the database web API (DB_TRANSPORT=http): no session, so the lock is a row with an expiry, taken and
+ * released by single atomic statements. A load cut off by the function's time limit leaves no marker; the lock expires
+ * and the next instance starts again.
+ */
+async function ensureSetUpHttp() {
+  const p = createPool('identity');
+  const complete = async () => {
+    const s = (await p.query(`SELECT to_regclass('identity.setup_state') IS NOT NULL AS marker, to_regclass('identity.users') IS NOT NULL AS started`)).rows[0] as { marker: boolean; started: boolean };
+    return { ...s, done: s.marker && ((await p.query('SELECT EXISTS (SELECT 1 FROM identity.setup_state) AS ok')).rows[0].ok as boolean) };
+  };
+  if ((await complete()).done) return;
+  const me = `${process.pid}-${Math.random().toString(36).slice(2)}`;
+  for (;;) {
+    const got = await p.query(`INSERT INTO public.erp_locks (name, holder, until) VALUES ('setup', $1, now() + interval '290 seconds')
+      ON CONFLICT (name) DO UPDATE SET holder = EXCLUDED.holder, until = EXCLUDED.until WHERE erp_locks.until < now() RETURNING holder`, [me]);
+    if (got.rowCount) break;
+    await new Promise((r) => setTimeout(r, 3000));
+    if ((await complete()).done) return;
+  }
+  try {
+    const s = await complete();
+    if (s.done) return;
+    console.log(`[setup] ${s.started ? 'incomplete setup found: starting again' : 'empty database'}: migrating and loading demo data`);
+    await setupDatabase({ reset: s.started, log: (l) => console.log(`[setup] ${l}`) });
+  } finally {
+    await p.query(`DELETE FROM public.erp_locks WHERE name = 'setup' AND holder = $1`, [me]).catch(() => {});
+  }
+}
+const setUp = async () => (transportMode() === 'http' ? ensureSetUpHttp() : ensureSetUp((await database()).session));
+
 async function boot(): Promise<Booted> {
-  const db = await database();
-  process.env.DATABASE_URL = db.transaction;
-  await ensureSetUp(db.session);
+  if (transportMode() !== 'http') process.env.DATABASE_URL = (await database()).transaction;
+  await setUp();
   const services = await Promise.all(SERVICE_DEFS.map((def) => bootService(def, { serverless: true })));
   const ports: Partial<Record<ServiceName, number>> = {};
   await Promise.all(services.map((s) => new Promise<void>((resolve) => {
@@ -119,7 +149,9 @@ async function drainAll(services: RunningService[]) {
     // Another instance may be loading the demo (it holds the setup lock): consuming its events here, half-way through,
     // breaks the load. Skip this round; the shared check does not wait.
     const idp = services.find((s) => s.ctx.name === 'identity')!.ctx.pool;
-    const free = await idp.query(`SELECT pg_try_advisory_xact_lock_shared(hashtext('erp:setup')) AS free`).then((r) => r.rows[0].free as boolean, () => false);
+    const free = await idp.query(transportMode() === 'http'
+      ? `SELECT NOT EXISTS (SELECT 1 FROM public.erp_locks WHERE name = 'setup' AND until > now()) AS free`
+      : `SELECT pg_try_advisory_xact_lock_shared(hashtext('erp:setup')) AS free`).then((r) => r.rows[0].free as boolean, () => false);
     if (!free) return;
     // Two rounds: handlers publish events that other services consume.
     for (let round = 0; round < 2; round++)
@@ -174,7 +206,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       return res.end();
     }
     res.setHeader('content-type', 'text/plain; charset=utf-8');
-    process.env.DATABASE_URL = (await database()).transaction;
+    if (transportMode() !== 'http') process.env.DATABASE_URL = (await database()).transaction;
     try {
       await setupDatabase({ reset: new URL(url, 'http://x').searchParams.get('reset') === '1', log: (line) => void res.write(`${line}\n`) });
       res.end('✔ setup complete\n');
@@ -196,7 +228,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     if (!ok) {
       // Let a drain already running finish first, so its transactions are not left holding locks the reset needs.
       await draining?.catch(() => {});
-      await (resetting ??= ensureSetUp((await database()).session).finally(() => { setServicePorts(ports); resetting = null; }));
+      await (resetting ??= setUp().finally(() => { setServicePorts(ports); resetting = null; }));
     }
   }
   if (url.startsWith('/api/_cron')) {

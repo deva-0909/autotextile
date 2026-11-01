@@ -102,7 +102,7 @@ jobs:
           DB_TRANSPORT: rpc
         run: |
           start=$(date +%s)
-          npm run setup -- --reset 2>&1 | tee setup-rpc.log | tail -5
+          npm run setup -- --reset 2>&1 | tee setup-rpc.log | grep -E "Database API calls|✔|✖" || true
           echo "Demo load through the web API took $(( $(date +%s) - start )) s"
           if grep -nE '\[seed\].*(skipped|failed|did not validate|error)|Error:' setup-rpc.log; then echo "::error::The demo data did not load cleanly through the web API"; exit 1; fi
       - name: Drop the test databases on Supabase (also leftovers from earlier runs)

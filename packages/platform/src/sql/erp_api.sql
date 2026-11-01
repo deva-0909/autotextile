@@ -130,3 +130,6 @@ DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN EXECUTE 'REVOKE ALL ON FUNCTION public.erp_run(jsonb) FROM anon, authenticated'; END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN EXECUTE 'GRANT EXECUTE ON FUNCTION public.erp_run(jsonb) TO service_role'; END IF;
 END $$;
+
+-- Coordination without a session: a named lock with an expiry (used while the demo data is loaded).
+CREATE TABLE IF NOT EXISTS public.erp_locks (name text PRIMARY KEY, holder text NOT NULL, until timestamptz NOT NULL);

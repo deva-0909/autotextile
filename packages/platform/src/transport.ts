@@ -130,11 +130,21 @@ export function localRunner(databaseUrl: string): { run: RunFn; raw: pg.Pool } {
 }
 
 /** Installs erp_run and friends (local and CI databases; on Supabase they are installed once as a migration). */
-export async function installApi(raw: { query: (q: string) => Promise<unknown> }) {
+export async function installApi(raw: pg.Pool) {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  await raw.query(`SELECT pg_advisory_lock(hashtext('erp:api'))`);
-  try { await raw.query(fs.readFileSync(path.join(here, 'sql', 'erp_api.sql'), 'utf8')); }
-  finally { await raw.query(`SELECT pg_advisory_unlock(hashtext('erp:api'))`); }
+  // One connection for lock, install and unlock (a pooled query may land on a different connection each time).
+  const c = await raw.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query(`SELECT pg_advisory_xact_lock(hashtext('erp:api'))`);
+    await c.query(fs.readFileSync(path.join(here, 'sql', 'erp_api.sql'), 'utf8'));
+    await c.query('COMMIT');
+  } catch (e) {
+    await c.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    c.release();
+  }
 }
 
 // ------------------------------------------------------------------ pool and client
