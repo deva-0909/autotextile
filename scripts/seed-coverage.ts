@@ -31,8 +31,9 @@ export async function seedCoverage(o: { call: Call; login: (email: string) => Pr
 
   const wh = await call<{ id: string; code: string }[]>('organisation', await as('admin@textile.local'), 'GET', '/warehouses');
   const SRT = wh.find((w) => w.code === 'SRT')!.id;
-  const books = await call<{ id: string; is_primary: boolean }[]>('finance', await as('accounts@textile.local'), 'GET', '/books');
+  const books = await call<{ id: string; is_primary: boolean; gstin: string }[]>('finance', await as('accounts@textile.local'), 'GET', '/books');
   const book = books.find((b) => b.is_primary)!.id;
+  const ourGstin = books.find((b) => b.is_primary)!.gstin;
 
   await step('sales return', async () => {
     const fs = list(await call<{ id: string; status: string }[]>('fulfilment', await as('dispatch@textile.local'), 'GET', '/fulfilments?pageSize=200'));
@@ -62,9 +63,10 @@ export async function seedCoverage(o: { call: Call; login: (email: string) => Pr
   });
 
   await step('refund', async () => {
-    const ps = list(await call<{ id: string; status: string; amount: number }[]>('commerce', await as('accounts@textile.local'), 'GET', '/payments?pageSize=200'));
-    const p = ps.find((x) => x.status === 'success' && Number(x.amount) > 2000);
-    if (!p) throw new Error('no successful payment');
+    // Only online (gateway) payments are refunded here; bank and cash ones are refunded through Finance.
+    const ps = list(await call<{ id: string; status: string; amount: number; gateway: string }[]>('commerce', await as('accounts@textile.local'), 'GET', '/payments?pageSize=200'));
+    const p = ps.find((x) => x.status === 'success' && x.gateway !== 'offline' && Number(x.amount) > 2000);
+    if (!p) throw new Error('no successful online payment');
     await call('commerce', await as('accounts@textile.local'), 'POST', `/payments/${p.id}/refund`, { amount: 1500, reason: 'Freight charged twice on the order; refund of the extra freight' });
   });
 
@@ -77,17 +79,27 @@ export async function seedCoverage(o: { call: Call; login: (email: string) => Pr
 
   await step('purchase order revision', async () => {
     const pos = list(await call<{ id: string; status: string }[]>('procurement', await as('purchase@textile.local'), 'GET', '/purchase-orders?pageSize=200'));
-    const po = pos.find((x) => ['approved', 'sent', 'accepted'].includes(x.status));
-    if (!po) throw new Error('no approved purchase order');
+    let po = pos.find((x) => ['approved', 'sent', 'accepted'].includes(x.status));
+    if (!po) {
+      // Approve the one waiting, then revise it.
+      const waiting = pos.find((x) => x.status === 'pending_approval');
+      if (!waiting) throw new Error('no purchase order to revise');
+      const owner = await as('owner@textile.local');
+      const a = list(await call<{ id: string; ref_id: string }[]>('governance', owner, 'GET', '/approvals?f_status=pending&pageSize=200')).find((x) => x.ref_id === waiting.id);
+      if (!a) throw new Error('approval for the waiting PO not found');
+      await call('governance', owner, 'POST', `/approvals/${a.id}/decide`, { decision: 'approved', comment: 'Rates checked against the last three POs' });
+      await o.drain();
+      po = waiting;
+    }
     await call('procurement', await as('purchase@textile.local'), 'POST', `/purchase-orders/${po.id}/revise`, { reason: 'Supplier can deliver only 80% this month; quantity and delivery date to be revised' });
   });
 
   await step('GSTR-1 filing', async () => {
-    await call('finance', await as('accounts@textile.local'), 'POST', '/gst/gstr1-filings', { book_id: book, period: `${month(1)}-01`, filed_on: `${month(0)}-10`, arn: 'AA2410250123456' });
+    await call('finance', await as('accounts@textile.local'), 'POST', '/gst/gstr1-filings', { book_id: book, period: `${month(1)}-01`, filed_on: day(0), arn: 'AA2410250123456' });
   });
 
   await step('ITC reversal', async () => {
-    await call('finance', await as('accounts@textile.local'), 'POST', '/gst/itc-reversals', { gstin: '24AABCS1429B1Z5', supplier_name: 'Shree Ambica Knitters', doc_no: 'SAK/0915', doc_date: `${month(2)}-15`, reason: 'rule_37', period: `${month(0)}-01`, igst: 0, cgst: 1250, sgst: 1250, note: 'Not paid within 180 days of the invoice' });
+    await call('finance', await as('accounts@textile.local'), 'POST', '/gst/itc-reversals', { gstin: ourGstin, supplier_name: 'Shree Ambica Knitters', doc_no: 'SAK/0915', doc_date: `${month(2)}-15`, reason: 'rule_37', period: `${month(0)}-01`, igst: 0, cgst: 1250, sgst: 1250, note: 'Not paid within 180 days of the invoice' });
   });
 
   await step('TDS on a mill bill and its challan', async () => {
@@ -141,7 +153,7 @@ export async function seedCoverage(o: { call: Call; login: (email: string) => Pr
   });
 
   await step('supplier bank change', async () => {
-    await by(['purchase@textile.local', 'accounts@textile.local'], (t) => call('masters', t, 'POST', `/parties/${o.party('Shree Ambica Knitters')}/bank-accounts`, { account_name: 'Shree Ambica Knitters', account_number: '50200061234567', ifsc: 'HDFC0001234', bank_name: 'HDFC Bank, Ring Road' }));
+    await by(['purchase@textile.local', 'accounts@textile.local'], (t) => call('masters', t, 'POST', `/parties/${o.party('Shree Ambica Knitters')}/bank-accounts`, { account_name: 'Shree Ambica Knitters', account_number: '50200061234567', ifsc: 'HDFC0001234', bank_name: 'HDFC Bank, Ring Road', reason: 'Supplier moved its account to HDFC; letter on company letterhead received' }));
   });
 
   await step('duplicate enquiry', async () => {
