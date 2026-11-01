@@ -1,0 +1,63 @@
+# Unit and integration tests. Each integration file boots all 15 services against its own throwaway database.
+#
+# Database: a throwaway Postgres inside the run by default. To run against Supabase instead, add a repository secret
+# TEST_DATABASE_URL with the transaction-pooler URL of a login that may create databases, for example
+#   postgres://erp_test.<project-ref>:<password>@aws-1-ap-south-1.pooler.supabase.com:6543/postgres?sslmode=no-verify
+# (see docs/testing.md). The tests then create and drop their databases there.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      database:
+        description: 'Where to run: ci (throwaway Postgres in the run) or supabase (TEST_DATABASE_URL secret)'
+        type: choice
+        options: [ci, supabase]
+        default: ci
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: textile_erp
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      USE_SUPABASE: ${{ github.event_name == 'workflow_dispatch' && inputs.database == 'supabase' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit -p . && npx tsc --noEmit -p apps/web
+      - name: Choose the database
+        env:
+          TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+        run: |
+          if [ "$USE_SUPABASE" = "true" ]; then
+            if [ -z "$TEST_DATABASE_URL" ]; then echo "::error::Add the TEST_DATABASE_URL repository secret to run against Supabase"; exit 1; fi
+            # Supabase's transaction pooler: one login, schema set per transaction, few connections per service.
+            { echo "DATABASE_URL=$TEST_DATABASE_URL"; echo "DB_ROLE_PER_SERVICE=1"; echo "PG_POOL_MAX=3"; } >> "$GITHUB_ENV"
+            echo "Running against Supabase"
+          else
+            echo "DATABASE_URL=postgres://postgres:postgres@localhost:5432/textile_erp" >> "$GITHUB_ENV"
+            echo "Running against the throwaway Postgres in this run"
+          fi
+      - name: Unit and integration tests
+        run: npm test

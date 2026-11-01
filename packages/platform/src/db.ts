@@ -70,7 +70,11 @@ function scopedClient(schema: string) {
   };
 }
 /** Hosted Postgres needs TLS; a local server usually has none. */
+/** TLS for remote databases; none for a local one, unless the URL says otherwise (sslmode=disable, require or no-verify). */
 function sslFor(u: URL) {
+  const mode = u.searchParams.get('sslmode');
+  if (mode === 'disable') return undefined;
+  if (mode === 'require' || mode === 'no-verify') return { rejectUnauthorized: false };
   return ['localhost', '127.0.0.1'].includes(u.hostname) ? undefined : { rejectUnauthorized: false };
 }
 
