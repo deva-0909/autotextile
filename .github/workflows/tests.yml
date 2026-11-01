@@ -96,6 +96,15 @@ jobs:
           gaps=$(psql "$DATABASE_URL" -tAc "SELECT string_agg(to_char(m, 'YYYY-MM'), ', ') FROM generate_series(date '2026-04-01', date_trunc('month', current_date) - interval '1 month', interval '1 month') m WHERE NOT EXISTS (SELECT 1 FROM finance.tax_lines t WHERE t.direction = 'outward' AND date_trunc('month', t.doc_date) = m)")
           if [ -n "$gaps" ]; then echo "::error::Demo months with no sales: $gaps"; exit 1; fi
           psql "$DATABASE_URL" -tAc "SELECT to_char(m, 'YYYY-MM') || ' sales ' || round(t) FROM (SELECT date_trunc('month', doc_date) AS m, sum(taxable) AS t FROM finance.tax_lines WHERE direction = 'outward' GROUP BY 1) x ORDER BY m"
+      - name: Demo data loads through the database web API (timed)
+        if: env.USE_SUPABASE != 'true'
+        env:
+          DB_TRANSPORT: rpc
+        run: |
+          start=$(date +%s)
+          npm run setup -- --reset 2>&1 | tee setup-rpc.log | tail -5
+          echo "Demo load through the web API took $(( $(date +%s) - start )) s"
+          if grep -nE '\[seed\].*(skipped|failed|did not validate|error)|Error:' setup-rpc.log; then echo "::error::The demo data did not load cleanly through the web API"; exit 1; fi
       - name: Drop the test databases on Supabase (also leftovers from earlier runs)
         if: always() && env.USE_SUPABASE == 'true' && env.DATABASE_URL != ''
         run: |

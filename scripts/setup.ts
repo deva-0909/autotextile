@@ -7,7 +7,7 @@
  *        npm run setup -- --reset (drop and recreate the database)
  */
 import pg from 'pg';
-import { config } from '@erp/platform';
+import { apiCalls, config, transportMode } from '@erp/platform';
 import { DEMO_PASSWORD, DEMO_USERS } from './seed-data.ts';
 import { setupDatabase } from './setup-lib.ts';
 
@@ -43,6 +43,7 @@ async function ensureDatabase() {
 
 if (process.env.DB_ROLE_PER_SERVICE !== '1') await ensureDatabase();
 await setupDatabase({ reset });
+if (transportMode() !== 'pg') console.log(`• Database API calls: ${apiCalls.dry} scratch runs, ${apiCalls.commit} commits`);
 console.log(`
 ✔ Setup complete. Start everything with:  npm start
   Then open http://localhost:${config.port('gateway')}

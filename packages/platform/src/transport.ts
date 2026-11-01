@@ -25,6 +25,8 @@ interface RunResult { results: { i: number; rows: Record<string, unknown>[]; rc:
 export type RunFn = (p: { mode: 'dry' | 'commit'; steps: Omit<Step, 'write' | 'lock' | 'deferred'>[]; uuids?: string[]; seqs?: [string, number][] }) => Promise<RunResult>;
 interface QueryResult { rows: Record<string, unknown>[]; rowCount: number }
 
+/** Calls made to erp_run so far in this process, by mode (for measuring). */
+export const apiCalls = { dry: 0, commit: 0 };
 export const transportMode = () => (process.env.DB_TRANSPORT ?? 'pg') as 'pg' | 'rpc' | 'http';
 
 /** Per-transaction context: whether the transaction called another service (then it is not safe to retry). */
@@ -96,6 +98,7 @@ const isConflict = (e: unknown) => (e as { code?: string })?.code === '40001';
 export function httpRunner(url: string, key: string): RunFn {
   const endpoint = `${url.replace(/\/$/, '')}/rest/v1/rpc/erp_run`;
   return async (p) => {
+    apiCalls[p.mode]++;
     for (let attempt = 1; ; attempt++) {
       let res: Response;
       try {
@@ -119,6 +122,7 @@ export function localRunner(databaseUrl: string): { run: RunFn; raw: pg.Pool } {
   return {
     raw,
     run: async (p) => {
+      apiCalls[p.mode]++;
       const { rows } = await raw.query('SELECT public.erp_run($1::jsonb) AS out', [JSON.stringify(p)]);
       return rows[0].out as RunResult;
     },
