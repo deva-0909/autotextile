@@ -51,6 +51,14 @@ CI runs the whole test suite in `pg` and `rpc` modes, and loads the full demo da
 
 `DATABASE_URL`, `DB_PASSWORD` and the `erp_identity` login are not needed in this mode.
 
+## Reloading the demo
+
+A full demo load is about 18,000 database calls. Over the web API that takes 10–12 minutes, longer than a Vercel
+function may run (5 minutes on the current plan). So when `DATABASE_URL` (or `SUPABASE_PROJECT_REF` + `DB_PASSWORD`)
+is also set, the load alone uses a temporary direct pool (about 1.5 minutes) that is closed when it finishes; every other
+request stays on the web API. Without those settings, a reload needs a host that allows a longer run (Vercel Pro:
+13 minutes) or the load split into resumable parts.
+
 ## What needs a direct connection
 
 Manual backups and restore tests use `pg_dump`/`pg_restore`, so they are available only with `DB_TRANSPORT=pg`. On the
