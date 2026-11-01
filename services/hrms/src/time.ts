@@ -8,20 +8,29 @@ const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Time as HH:MM (24-ho
 type Status = 'present' | 'absent' | 'half_day' | 'leave' | 'weekly_off' | 'holiday';
 
 /** Marks one day; works out lateness and overtime against the shift, credits comp-off for work on an off day, and tells CRM. */
-async function mark(c: Client, e: { id: string; user_id: string | null; weekly_off: number; overtime_eligible: boolean; shift_id: string | null; pt_state: string }, day: string, a: { status: Status; in_time?: string | null; out_time?: string | null; source: string; note?: string | null; lat?: number | null; lng?: number | null }, by: string) {
-  const shift = e.shift_id ? await one<{ start_time: string; end_time: string; grace_minutes: number; hours: number }>(c, 'SELECT start_time::text, end_time::text, grace_minutes, hours::float FROM shifts WHERE id = $1', [e.shift_id]) : null;
+type Shift = { start_time: string; end_time: string; grace_minutes: number; hours: number };
+/** Looked up once for a whole day's muster instead of once per employee. */
+interface DayFacts { shifts: Map<string, Shift>; holidayStates: (string | null)[] }
+async function dayFacts(c: Client, day: string): Promise<DayFacts> {
+  const shifts = new Map((await many<Shift & { id: string }>(c, 'SELECT id, start_time::text, end_time::text, grace_minutes, hours::float FROM shifts')).map((x) => [x.id, x]));
+  const holidayStates = (await many<{ state_code: string | null }>(c, 'SELECT state_code FROM holidays WHERE day = $1', [day])).map((h) => h.state_code);
+  return { shifts, holidayStates };
+}
+
+async function mark(c: Client, e: { id: string; user_id: string | null; weekly_off: number; overtime_eligible: boolean; shift_id: string | null; pt_state: string }, day: string, a: { status: Status; in_time?: string | null; out_time?: string | null; source: string; note?: string | null; lat?: number | null; lng?: number | null }, by: string, facts?: DayFacts) {
+  const shift = !e.shift_id ? null : facts ? facts.shifts.get(e.shift_id) ?? null : await one<Shift>(c, 'SELECT start_time::text, end_time::text, grace_minutes, hours::float FROM shifts WHERE id = $1', [e.shift_id]);
   const mins = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
   let late = 0, ot = 0;
   if (shift && a.in_time && a.status === 'present') late = Math.max(0, mins(a.in_time) - mins(shift.start_time) - shift.grace_minutes);
   if (shift && a.in_time && a.out_time) ot = Math.max(0, mins(a.out_time) - mins(a.in_time) - shift.hours * 60 - 30);
-  const holiday = (await holidaysFor(c, e.pt_state, day, day)).has(day);
+  const holiday = facts ? facts.holidayStates.some((st) => st === null || st === e.pt_state) : (await holidaysFor(c, e.pt_state, day, day)).has(day);
   const offDay = dow(day) === e.weekly_off || holiday;
-  await c.query(`INSERT INTO attendance (employee_id, day, status, in_time, out_time, late_minutes, overtime_minutes, source, lat, lng, note, marked_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+  await c.query(`/* erp:defer */ INSERT INTO attendance (employee_id, day, status, in_time, out_time, late_minutes, overtime_minutes, source, lat, lng, note, marked_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
     ON CONFLICT (employee_id, day) DO UPDATE SET status = EXCLUDED.status, in_time = EXCLUDED.in_time, out_time = EXCLUDED.out_time, late_minutes = EXCLUDED.late_minutes, overtime_minutes = EXCLUDED.overtime_minutes, source = EXCLUDED.source, lat = EXCLUDED.lat, lng = EXCLUDED.lng, note = EXCLUDED.note, marked_by_name = EXCLUDED.marked_by_name, marked_at = now()`,
   [e.id, day, a.status, a.in_time ?? null, a.out_time ?? null, late, offDay && !e.overtime_eligible ? 0 : ot, a.source, a.lat ?? null, a.lng ?? null, a.note ?? null, by]);
   // Working on a weekly off or holiday earns a compensatory day off (valid 90 days) unless overtime is paid instead.
   if (offDay && !e.overtime_eligible && ['present', 'half_day'].includes(a.status))
-    await c.query(`INSERT INTO comp_offs (employee_id, worked_on, days, expires_on) VALUES ($1,$2,$3, $2::date + 90) ON CONFLICT (employee_id, worked_on) DO UPDATE SET days = EXCLUDED.days`, [e.id, day, a.status === 'half_day' ? 0.5 : 1]);
+    await c.query(`/* erp:defer */ INSERT INTO comp_offs (employee_id, worked_on, days, expires_on) VALUES ($1,$2,$3, $2::date + 90) ON CONFLICT (employee_id, worked_on) DO UPDATE SET days = EXCLUDED.days`, [e.id, day, a.status === 'half_day' ? 0.5 : 1]);
   if (e.user_id) await publish(c, S, 'hrms.attendance.marked', { user_id: e.user_id, employee_id: e.id, day, status: a.status === 'holiday' ? 'weekly_off' : a.status });
 }
 
@@ -88,13 +97,17 @@ export function timeRoutes(r: Router, { pool }: ServiceContext) {
     if (b.day > today()) throw badRequest('Attendance cannot be marked for a future date');
     const hr = hasPermission(req.user, 'hrms.attendance.manage');
     await tx(pool, async (c) => {
+      // The day's employees, marks, shifts and holidays in a few reads, not a few per employee.
+      const ids = b.entries.map((x) => x.employee_id);
+      const emps = new Map((await many<{ id: string; user_id: string | null; weekly_off: number; overtime_eligible: boolean; shift_id: string | null; status: string; pt_state: string }>(c, 'SELECT * FROM employees WHERE id = ANY($1::uuid[])', [ids])).map((e) => [e.id, e]));
+      const onLeave = new Set((await many<{ employee_id: string }>(c, `SELECT employee_id FROM attendance WHERE employee_id = ANY($1::uuid[]) AND day = $2 AND status = 'leave'`, [ids, b.day])).map((x) => x.employee_id));
+      const facts = await dayFacts(c, b.day);
       for (const x of b.entries) {
         if (!hr) await assertSelfOr(c, req, x.employee_id, 'hrms.attendance.manage');
-        const e = await one<{ id: string; user_id: string | null; weekly_off: number; overtime_eligible: boolean; shift_id: string | null; status: string; pt_state: string }>(c, 'SELECT * FROM employees WHERE id = $1', [x.employee_id]);
+        const e = emps.get(x.employee_id);
         if (!e || e.status === 'exited') throw notFound('Employee');
-        const cur = await one<{ status: string }>(c, 'SELECT status FROM attendance WHERE employee_id = $1 AND day = $2', [e.id, b.day]);
-        if (cur?.status === 'leave') continue; // approved leave stands until the leave is cancelled
-        await mark(c, e, b.day, { status: x.status, in_time: x.in_time, out_time: x.out_time, note: x.note, source: 'manual' }, req.user!.name);
+        if (onLeave.has(e.id)) continue; // approved leave stands until the leave is cancelled
+        await mark(c, e, b.day, { status: x.status, in_time: x.in_time, out_time: x.out_time, note: x.note, source: 'manual' }, req.user!.name, facts);
       }
       await auditReq(c, req, 'attendance', b.day, 'marked', { after: { entries: b.entries.length } });
     });

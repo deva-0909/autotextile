@@ -98,7 +98,7 @@ export function subscribe(pool: Pool, consumer: string, handlers: Record<string,
     let last = Number(off.last_id);
     const rows = off.events;
     const advance = async (c: Client, to: number) => {
-      const r = await c.query('UPDATE bus.offsets SET last_id = $3 WHERE consumer = $1 AND last_id = $2', [consumer, last, to]);
+      const r = await c.query('/* erp:expect 1 */ UPDATE bus.offsets SET last_id = $3 WHERE consumer = $1 AND last_id = $2', [consumer, last, to]);
       if (!r.rowCount) throw Object.assign(new Error('another instance handled this event'), { taken: true });
     };
     let skipTo = 0;
@@ -152,8 +152,8 @@ export function subscribe(pool: Pool, consumer: string, handlers: Record<string,
     // assignment below when the run finishes synchronously, leaving a settled promise that stop() spins on.
     const run = (async () => {
       try {
-        while (!stopped && (await batch()) > 0) { /* keep going */ }
-        await batch();
+        // A short page means caught up; events that handlers publish meanwhile are picked up by the next round.
+        while (!stopped && (await batch()) >= 200) { /* keep going */ }
       } catch (err) {
         console.error(`[bus:${consumer}] handler failed, will retry`, (err as Error).message);
       }

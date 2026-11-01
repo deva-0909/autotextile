@@ -20,7 +20,7 @@ import pg from 'pg';
 import pgUtils from 'pg/lib/utils.js';
 
 type Kind = 'rows' | 'dml_rows' | 'exec';
-interface Step { s: string; q: string; k: Kind; write: boolean; lock: boolean; deferred: boolean; v?: { rc?: number; h?: string } }
+interface Step { s: string; q: string; k: Kind; write: boolean; lock: boolean; deferred: boolean; ran?: boolean; v?: { rc?: number; h?: string } }
 interface RunResult { results: { i: number; rows: Record<string, unknown>[]; rc: number; h: string }[]; uuids: string[]; seqs: [string, number][] }
 export type RunFn = (p: { mode: 'dry' | 'commit'; steps: Omit<Step, 'write' | 'lock' | 'deferred'>[]; uuids?: string[]; seqs?: [string, number][] }) => Promise<RunResult>;
 interface QueryResult { rows: Record<string, unknown>[]; rowCount: number }
@@ -53,7 +53,11 @@ export function interpolate(sql: string, params: unknown[] = []): string {
 const stripComments = (sql: string) => sql.replace(/^(\s|--[^\n]*\n|\/\*[\s\S]*?\*\/)+/, '');
 const SIDE_EFFECT_FN = /\b(pg_advisory\w*|pg_notify|set_config|nextval|setval|erp_nextval|erp_uuid|gen_random_uuid|pg_terminate_backend)\s*\(/i;
 
-function classify(sql: string): { kind: Kind | 'begin' | 'commit' | 'rollback' | 'savepoint' | 'release' | 'rollback_to'; write: boolean; lock: boolean; deferrable: boolean } {
+function classify(sql: string): { kind: Kind | 'begin' | 'commit' | 'rollback' | 'savepoint' | 'release' | 'rollback_to'; write: boolean; lock: boolean; deferrable: boolean; expect?: number } {
+  // Hints from the code: /* erp:defer */ a change whose result is not used (applied at commit);
+  // /* erp:expect N */ a guarded change that must touch N rows (checked at commit; until then it reports N).
+  const hint = sql.match(/^\s*\/\*\s*erp:(defer|expect\s+(\d+))\s*\*\//);
+  if (hint) return { kind: 'exec', write: true, lock: false, deferrable: true, ...(hint[2] ? { expect: Number(hint[2]) } : {}) };
   const t = stripComments(sql);
   const w = (t.match(/^[A-Za-z]+/)?.[0] ?? '').toUpperCase();
   const lock = /\bFOR\s+(UPDATE|SHARE|NO\s+KEY\s+UPDATE|KEY\s+SHARE)\b/i.test(t);
@@ -195,7 +199,7 @@ export class RpcClient {
       case 'rollback': this.reset(); return { rows: [], rowCount: 0 };
       case 'commit': await this.commit(); return { rows: [], rowCount: 0 };
       case 'savepoint': {
-        if (this.log.some((s) => s.deferred && !s.v)) await this.dry(null); // record keys queued changes will use
+        if (this.log.some((s) => s.deferred && !s.ran)) await this.dry(null); // record keys queued changes will use
         this.marks.push({ name: text.trim().split(/\s+/)[1] ?? '', len: this.log.length, uuids: this.uuids.length, seqs: this.seqs.length });
         return { rows: [], rowCount: 0 };
       }
@@ -210,7 +214,11 @@ export class RpcClient {
     }
     if (!this.inTx) return this.pool.query(text);
     const step: Step = { s: this.pool.schema, q: text, k: c.kind as Kind, write: c.write, lock: c.lock, deferred: c.deferrable };
-    if (c.deferrable) { this.log.push(step); return { rows: [], rowCount: 1 }; }
+    if (c.deferrable) {
+      if (c.expect !== undefined) step.v = { rc: c.expect };
+      this.log.push(step);
+      return { rows: [], rowCount: c.expect ?? 1 };
+    }
     const r = await this.dry(step);
     // What the code saw, checked again at commit: rows read for update, and rows or counts from changes.
     if (c.lock || (c.write && c.kind === 'dml_rows')) step.v = { rc: r.rc, h: r.h };
@@ -226,7 +234,7 @@ export class RpcClient {
     const out = await this.pool.run({ mode: 'dry', steps: steps as never, uuids: this.uuids, seqs: this.seqs });
     this.uuids = out.uuids ?? this.uuids;
     this.seqs = out.seqs ?? this.seqs;
-    for (const s of this.log) if (s.deferred && !s.v) s.v = {}; // queued changes have now run once
+    for (const s of this.log) if (s.deferred) s.ran = true; // queued changes have now run once
     return out.results[0] ?? { i: 0, rows: [], rc: 0, h: '' };
   }
 
