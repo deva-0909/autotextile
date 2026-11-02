@@ -288,7 +288,7 @@ export function MillClaims() {
       <div className="space-y-4">
         {q.data?.length === 0 && <Card><EmptyState icon={<ShieldAlert className="size-5" />} title="No quality claims" /></Card>}
         {q.data?.map((c) => (
-          <Card key={c.id} title={<span className="flex items-center gap-2"><span className="font-mono">{c.number}</span> on {c.job_number} <StatusBadge status={c.status} /></span>} description={`${fmtNum(c.kg_affected)} kg affected · ${humanize(c.claim_type)}${c.amount ? ` · ${fmtINR(c.amount)}` : ''} · raised ${fmtDate(c.created_at)}`}
+          <Card key={c.id} title={<span className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="font-mono">{c.number}</span><span className="whitespace-nowrap">on {c.job_number}</span><StatusBadge status={c.status} /></span>} description={`${fmtNum(c.kg_affected)} kg affected · ${humanize(c.claim_type)}${c.amount ? ` · ${fmtINR(c.amount)}` : ''} · raised ${fmtDate(c.created_at)}`}
             actions={['open', 'under_review'].includes(c.status) && <Button size="sm" onClick={() => { setRespond(c.id); setText(c.mill_response ?? ''); }}>{c.mill_response ? 'Edit response' : 'Respond'}</Button>}>
             <div className="mb-2 flex flex-wrap gap-1">{c.defect_types.map((t) => <Badge key={t} tone="danger">{t}</Badge>)}</div>
             <p className="text-[13px] text-slate-700">{c.description}</p>
