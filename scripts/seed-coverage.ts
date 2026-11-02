@@ -138,6 +138,11 @@ export async function seedCoverage(o: { call: Call; login: (email: string) => Pr
     await call('finance', await as('accounts@textile.local'), 'POST', '/tds/challans', { section: '194C', month: `${m}-01`, bsr_code: '0510308', challan_no: '00417', paid_on: day(0) });
   });
 
+  await step('salary TDS deposited', async () => {
+    // Payroll two months back: its section 192 TDS was deposited on the 7th of the following month. Last month's is still due.
+    await call('finance', await as('accounts@textile.local'), 'POST', '/tds/challans', { section: '192', month: `${month(2)}-01`, bsr_code: '0510308', challan_no: '00388', paid_on: `${month(1)}-07` });
+  });
+
   await step('shade rejection', async () => {
     const products = list(await call<{ id: string; sku: string }[]>('masters', await as('admin@textile.local'), 'GET', '/products?pageSize=50'));
     const p = products.find((x) => /NVY/.test(x.sku)) ?? products[0]!;
