@@ -83,6 +83,9 @@ export function tdsRoutes(r: Router, { pool }: ServiceContext) {
         lines: [{ account: 'tds_payable', debit: amount }, { account: b.bank_account_id ?? 'bank_main', credit: amount }] });
       const ch = await one<{ id: string }>(c, `INSERT INTO tds_challans (section, month, amount, bsr_code, challan_no, paid_on, voucher_id, created_by_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [b.section, b.month, amount, b.bsr_code, b.challan_no, b.paid_on, v.id, req.user!.name]);
       await c.query('UPDATE tds_entries SET challan_id = $1 WHERE id = ANY($2)', [ch!.id, due.map((e) => e.id)]);
+      // The deposit settles that month's overdue alert, if one was raised.
+      await c.query(`UPDATE anomalies SET status = 'resolved', resolution = $2, resolved_by_name = $3, resolved_at = now() WHERE kind = 'tds_overdue' AND ref_id = $1 AND status = 'open'`,
+        [`${b.month}:${b.section}`, `Deposited ${b.paid_on} — challan ${b.bsr_code}/${b.challan_no}`, req.user!.name]);
       await auditReq(c, req, 'tds_challan', ch!.id, 'recorded', { after: { ...b, amount, voucher: v.number } });
       return { id: ch!.id, amount, voucher: v.number, entries: due.length };
     });
