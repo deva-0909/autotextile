@@ -66,9 +66,21 @@ fs.writeFileSync(path.join(fn, '.vc-config.json'), JSON.stringify({
 }, null, 2));
 
 // 3. Routing and cron
+// Browser security headers on every response. The app loads only its own scripts, styles and API; documents and
+// QR codes are shown from blob:/data: URLs; Google Fonts is allowed for styles and fonts. No other site may frame it.
+const CSP = [
+  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' data: https://fonts.gstatic.com", "img-src 'self' data: blob:", "connect-src 'self'",
+  "frame-src 'self' blob: data:", "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'",
+].join('; ');
+const SECURITY_HEADERS = {
+  'content-security-policy': CSP, 'x-frame-options': 'DENY', 'x-content-type-options': 'nosniff',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+};
 fs.writeFileSync(path.join(out, 'config.json'), JSON.stringify({
   version: 3,
   routes: [
+    { src: '^/(.*)$', headers: SECURITY_HEADERS, continue: true },
     { src: '^/assets/(.*)$', headers: { 'cache-control': 'public, max-age=31536000, immutable' }, continue: true },
     { handle: 'filesystem' },
     { src: '^/api/(.*)$', dest: '/api?__path=$1' },
