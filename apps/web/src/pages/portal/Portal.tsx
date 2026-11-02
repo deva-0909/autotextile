@@ -17,18 +17,29 @@ export function PortalLayout({ children }: { children: ReactNode }) {
   const { user, can, signOut } = useAuth();
   const nav = useNavigate();
   const mill = can('portal.mill.access') && !can('portal.supplier.access');
-  const links = mill ? [['/portal', 'Overview'], ['/portal/jobs', 'Job-work orders'], ['/portal/claims', 'Quality claims']] : [['/portal', 'Purchase orders']];
+  // Icon and label per page: on a phone only the icon shows (the label stays for screen readers), so the bar fits.
+  const links: [string, string, typeof Factory][] = mill
+    ? [['/portal', 'Overview', Factory], ['/portal/jobs', 'Job-work orders', ClipboardCheck], ['/portal/claims', 'Quality claims', ShieldAlert]]
+    : [['/portal', 'Purchase orders', PackageCheck]];
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4">
-          <div className="flex items-center gap-2.5"><img src="/favicon.svg" alt="" className="size-7" /><div className="leading-tight"><p className="text-[13.5px] font-semibold">{mill ? 'Mill portal' : 'Supplier portal'}</p><p className="text-[11px] text-slate-500">Demo Textile Trading Pvt Ltd</p></div></div>
-          <nav className="flex gap-1">
-            {links.map(([to, label]) => <NavLink key={to} to={to!} end className={({ isActive }) => clsx('rounded-md px-3 py-1.5 text-[13.5px]', isActive ? 'bg-brand-50 font-medium text-brand-700' : 'text-slate-600 hover:bg-slate-100')}>{label}</NavLink>)}
+        <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-3 sm:gap-6 sm:px-4">
+          <div className="flex shrink-0 items-center gap-2.5"><img src="/favicon.svg" alt="" className="size-7" /><div className="hidden leading-tight md:block"><p className="text-[13.5px] font-semibold">{mill ? 'Mill portal' : 'Supplier portal'}</p><p className="text-[11px] text-slate-500">Demo Textile Trading Pvt Ltd</p></div></div>
+          <nav className="flex min-w-0 gap-1" aria-label={mill ? 'Mill portal' : 'Supplier portal'}>
+            {links.map(([to, label, Icon]) => (
+              <NavLink key={to} to={to} end aria-label={label} title={label}
+                className={({ isActive }) => clsx('flex h-10 min-w-10 items-center justify-center gap-2 whitespace-nowrap rounded-md px-2.5 text-[13.5px] sm:px-3', isActive ? 'bg-brand-50 font-medium text-brand-700' : 'text-slate-600 hover:bg-slate-100')}>
+                <Icon className="size-[18px] shrink-0 sm:hidden" aria-hidden /><span className="hidden sm:inline">{label}</span>
+              </NavLink>
+            ))}
           </nav>
-          <div className="ml-auto flex items-center gap-3">
-            <Avatar name={user?.name ?? '?'} /><span className="hidden text-[13px] sm:block">{user?.name}</span>
-            <Button size="sm" variant="ghost" icon={<LogOut className="size-4" />} onClick={() => void signOut().then(() => nav('/login'))}>Sign out</Button>
+          <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+            <Avatar name={user?.name ?? '?'} /><span className="hidden text-[13px] lg:block">{user?.name}</span>
+            <button type="button" aria-label="Sign out" title="Sign out" onClick={() => void signOut().then(() => nav('/login'))}
+              className="flex h-10 min-w-10 items-center justify-center gap-2 rounded-md px-2.5 text-[13px] text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-500">
+              <LogOut className="size-4" aria-hidden /><span className="hidden sm:inline">Sign out</span>
+            </button>
           </div>
         </div>
       </header>
