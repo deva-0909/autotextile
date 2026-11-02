@@ -172,6 +172,8 @@ export async function seedOperations(services: RunningService[]) {
     await call('jobwork', millPortal, 'POST', `/portal/mill/jobs/${jw1.id}/acknowledge`, { kg_received: 2950 });
     for (const [code, status] of [['INSPECTION', 'completed'], ['PRETREATMENT', 'completed'], ['DYEING', 'completed'], ['WASHING', 'started']] as const)
       await call('jobwork', millPortal, 'POST', `/portal/mill/jobs/${jw1.id}/stages`, { stage_code: code, status });
+    // The mill's own login has a claim to answer: the first dye lot's shade strip is off, rework asked for (no money held).
+    await call('jobwork', millops, 'POST', '/claims', { job_order_id: jw1.id, defect_types: ['Shade variation'], description: 'Shade strip from the first dye lot reads lighter than NAVY-118 under D65; please re-dye the lot before compacting.', kg_affected: 240, samples: 'Shade strip sent back with the driver', claim_type: 'rework', amount: 0 });
 
     // ---------- P4 helpers: weigh/scan rolls, grade, put away ----------
     const weights = (n: number, base: number, total?: number) => {

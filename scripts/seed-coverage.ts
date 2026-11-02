@@ -106,7 +106,15 @@ export async function seedCoverage(o: { call: Call; login: (email: string) => Pr
   });
 
   await step('GSTR-1 filing', async () => {
-    await call('finance', await as('accounts@textile.local'), 'POST', '/gst/gstr1-filings', { book_id: book, period: `${month(1)}-01`, filed_on: day(0), arn: 'AA2410250123456' });
+    const acc = await as('accounts@textile.local');
+    // Earlier months of this financial year were filed on time (by the 11th); last month's is filed today.
+    const now = new Date(); const fyStartMonth = `${now.getUTCMonth() >= 3 ? now.getUTCFullYear() : now.getUTCFullYear() - 1}-04`;
+    for (let back = 12; back >= 2; back--) {
+      const m = month(back); if (m < fyStartMonth) continue;
+      const due = month(back - 1);
+      await call('finance', acc, 'POST', '/gst/gstr1-filings', { book_id: book, period: `${m}-01`, filed_on: `${due}-10`, arn: `AA24${m.replace('-', '').slice(2)}0${String(back).padStart(2, '0')}1234` });
+    }
+    await call('finance', acc, 'POST', '/gst/gstr1-filings', { book_id: book, period: `${month(1)}-01`, filed_on: day(0), arn: 'AA2410250123456' });
   });
 
   await step('ITC reversal', async () => {

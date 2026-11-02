@@ -61,10 +61,13 @@ export function tdsRoutes(r: Router, { pool }: ServiceContext) {
     }
     const today = new Date().toISOString().slice(0, 10);
     const summary = [...months.values()].map((m) => ({ ...m, pending: round2(m.deducted - m.deposited), overdue: m.deducted - m.deposited > 0.5 && m.due_date < today })).sort((a, b) => b.month.localeCompare(a.month));
-    const quarters = ['Q1', 'Q2', 'Q3', 'Q4'].map((q) => {
-      const es = entries.filter((e) => quarterOf(e.deducted_on) === q);
-      return { quarter: q, form: '26Q', deductees: new Set(es.map((e) => (e as unknown as { party_id: string }).party_id)).size, entries: es.length, tds: round2(es.reduce((s, e) => s + Number(e.tds_amount), 0)), deposited: round2(es.filter((e) => e.challan_id).reduce((s, e) => s + Number(e.tds_amount), 0)) };
-    });
+    // Salary TDS (section 192) is returned in Form 24Q; other resident deductions in 26Q.
+    const formOf = (section: string) => (section === '192' ? '24Q' : '26Q');
+    const forms = [...new Set(entries.map((e) => formOf(e.section)))].sort().reverse();
+    const quarters = (forms.length ? forms : ['26Q']).flatMap((form) => ['Q1', 'Q2', 'Q3', 'Q4'].map((q) => {
+      const es = entries.filter((e) => quarterOf(e.deducted_on) === q && formOf(e.section) === form);
+      return { quarter: q, form, deductees: new Set(es.map((e) => (e as unknown as { party_id: string }).party_id)).size, entries: es.length, tds: round2(es.reduce((s, e) => s + Number(e.tds_amount), 0)), deposited: round2(es.filter((e) => e.challan_id).reduce((s, e) => s + Number(e.tds_amount), 0)) };
+    }));
     res.json({ fy, entries, challans, summary, quarters });
   });
 

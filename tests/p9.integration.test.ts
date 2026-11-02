@@ -217,6 +217,11 @@ describe('P9 HRMS and payroll', () => {
     const tb = await h.ok(t.accounts!, 'GET', '/finance/reports/trial-balance?from=2020-04-01');
     assert.ok(tb.balanced);
     assert.equal(tb.rows.find((r: { code: string }) => r.code === '2300')?.closing_credit ?? 0, 0, 'salaries payable cleared by the payment');
+    // Salary TDS (section 192): one register line per employee taxed, equal to the payslip deduction; returned in 24Q.
+    const fyY = Number(month.slice(5, 7)) >= 4 ? Number(month.slice(0, 4)) : Number(month.slice(0, 4)) - 1;
+    const reg = await h.ok(t.accounts!, 'GET', `/finance/tds/register?fy=${String(fyY).slice(2)}${String(fyY + 1).slice(2)}`);
+    const salaryTds = reg.entries.filter((e: { section: string; party_name: string }) => e.section === '192' && e.party_name === slip.employee_name).reduce((a: number, e: { tds_amount: number }) => a + e.tds_amount, 0);
+    assert.equal(salaryTds, Number(slip.deductions.income_tax ?? 0), 'salary TDS in the register matches the payslip');
     // Payslip: the employee sees their own, colleagues do not.
     assert.equal((await h.call(t.east!, 'GET', `/hrms/payslips/${slip.id}`)).status, 200);
     assert.equal((await h.call(t.sales!, 'GET', `/hrms/payslips/${slip.id}`)).status, 404);

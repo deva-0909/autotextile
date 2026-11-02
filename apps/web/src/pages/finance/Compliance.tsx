@@ -556,7 +556,7 @@ export function TdsPage() {
   const r = reg.data;
   return (
     <>
-      <PageHeader title="TDS" description="Tax is deducted when a supplier’s or mill’s bill posts, by the section set for that party, with single and annual thresholds. Deposit by the 7th of the following month; the quarterly 26Q is prepared from this register." breadcrumbs={[{ label: 'Finance', to: '/finance' }, { label: 'TDS' }]} />
+      <PageHeader title="TDS" description="Tax is deducted when a supplier’s or mill’s bill posts, by the section set for that party, with single and annual thresholds; salary TDS (section 192) comes from each approved payroll, one line per employee. Deposit by the 7th of the following month; the quarterly 26Q (suppliers) and 24Q (salaries) are prepared from this register." breadcrumbs={[{ label: 'Finance', to: '/finance' }, { label: 'TDS' }]} />
       <Tabs className="mb-4" value={tab} onChange={setTab} tabs={[{ value: 'register', label: 'Register and challans' }, { value: 'parties', label: 'Deductees', count: pts.data?.length }, { value: 'sections', label: 'Sections and rates' }]} />
       {tab === 'register' ? (!r ? <Skeleton className="h-60" /> : (
         <div className="space-y-4">

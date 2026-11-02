@@ -118,5 +118,8 @@ export async function applyPayrollDecision(c: Client, p: { ref_id: string; decis
   if (p.decision !== 'approved') { await c.query(`UPDATE payroll_runs SET status = 'draft', updated_at = now() WHERE id = $1`, [run.id]); return; }
   await c.query(`UPDATE payroll_runs SET status = 'approved', approved_by_name = $2, approved_at = now(), updated_at = now() WHERE id = $1`, [run.id, p.decided_by_name]);
   const t = run.totals;
-  await publish(c, S, 'hrms.payroll.approved', { run_id: run.id, month: run.month, reference: `PAYROLL-${run.month.slice(0, 7)}`, gross: t.gross, net: t.net, pf_employee: t.pf_employee, esic_employee: t.esic_employee, pt: t.pt, tds: t.tds, pf_employer: t.pf_employer, esic_employer: t.esic_employer });
+  // Salary TDS per employee (section 192), so accounts can deposit it and report it in Form 24Q.
+  const tdsLines = await many<{ employee_id: string; employee_code: string; employee_name: string; pan: string | null; gross: number; tds: number }>(c,
+    `SELECT employee_id, employee_code, employee_name, pan, gross::float, (deductions->>'income_tax')::float AS tds FROM payslips WHERE run_id = $1 AND coalesce((deductions->>'income_tax')::numeric, 0) > 0 ORDER BY employee_code`, [run.id]);
+  await publish(c, S, 'hrms.payroll.approved', { run_id: run.id, month: run.month, reference: `PAYROLL-${run.month.slice(0, 7)}`, gross: t.gross, net: t.net, pf_employee: t.pf_employee, esic_employee: t.esic_employee, pt: t.pt, tds: t.tds, pf_employer: t.pf_employer, esic_employer: t.esic_employer, tds_lines: tdsLines });
 }

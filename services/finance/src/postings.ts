@@ -237,10 +237,11 @@ export const recentBankChange = (c: Client, partyId: string) => one<{ changed_at
 /** Payroll approved in HR: salary cost and the liabilities to employees, PF/ESIC/PT and salary TDS (section 192). */
 export function payrollApprovedConsumer() {
   return async (ev: BusEvent, c: Client) => {
-    const p = ev.payload as { run_id: string; month: string; reference: string; gross: number; net: number; pf_employee: number; esic_employee: number; pt: number; tds: number; pf_employer: number; esic_employer: number };
+    const p = ev.payload as { run_id: string; month: string; reference: string; gross: number; net: number; pf_employee: number; esic_employee: number; pt: number; tds: number; pf_employer: number; esic_employer: number;
+      tds_lines?: { employee_id: string; employee_code: string; employee_name: string; pan: string | null; gross: number; tds: number }[] };
     const book = await primaryBook(c);
     const statutory = round2(Number(p.pf_employee) + Number(p.esic_employee) + Number(p.pt) + Number(p.pf_employer) + Number(p.esic_employer));
-    await post(c, {
+    const v = await post(c, {
       type: 'payroll', book_id: book.id, date: monthEndOf(p.month), auto: true, by: SYSTEM, approved_by: 'payroll approval',
       narration: `Salaries for ${p.month.slice(0, 7)}`, source: { service: 'hrms', type: 'payroll_run', id: p.run_id, ref: p.reference },
       lines: [
@@ -249,7 +250,16 @@ export function payrollApprovedConsumer() {
         { account: 'tds_payable', credit: Number(p.tds), narration: 'Salary TDS (section 192)' },
       ],
     });
+    // One register line per employee, so salary TDS goes through the challan flow and into Form 24Q.
+    if (!v.existing) await recordSalaryTds(c, v.id, book.id, monthEndOf(p.month), p.tds_lines ?? []);
   };
+}
+export async function recordSalaryTds(c: Client, voucherId: string, bookId: string, date: string, lines: { employee_id: string; employee_name: string; pan: string | null; gross: number; tds: number }[]) {
+  for (const l of lines) {
+    if (!(Number(l.tds) > 0)) continue;
+    await c.query(`INSERT INTO tds_entries (voucher_id, book_id, party_id, party_name, pan, section, base_amount, rate, tds_amount, deducted_on) VALUES ($1,$2,$3,$4,$5,'192',$6,$7,$8,$9)`,
+      [voucherId, bookId, l.employee_id, l.employee_name, l.pan, round2(Number(l.gross)), Number(l.gross) > 0 ? round2((Number(l.tds) / Number(l.gross)) * 100) : 0, round2(Number(l.tds)), date]);
+  }
 }
 export function payrollPaidConsumer() {
   return async (ev: BusEvent, c: Client) => {
