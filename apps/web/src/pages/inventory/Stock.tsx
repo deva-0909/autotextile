@@ -57,7 +57,7 @@ function Availability() {
       {verify.data && (verify.data.ok
         ? <div className="mb-4 flex items-center gap-2 text-[12.5px] text-emerald-700"><CheckCircle2 className="size-4" />Ledger verified: {fmtNum(verify.data.movements)} movements reconcile exactly to {fmtNum(verify.data.rolls)} rolls.</div>
         : <div className="mb-4"><Notice tone="danger">The roll positions do not match the ledger in {verify.data.mismatches.length} place(s). Contact support.</Notice></div>)}
-      <Card padded={false} actions={<select className="input h-8 w-auto text-[13px]" value={w} onChange={(e) => setW(e.target.value)}><option value="">All warehouses</option>{(wh.data ?? []).map((x) => <option key={x.id} value={x.id}>{x.code}</option>)}</select>} title="By fabric and warehouse">
+      <Card padded={false} actions={<select aria-label="Warehouse" className="input h-8 w-auto text-[13px]" value={w} onChange={(e) => setW(e.target.value)}><option value="">All warehouses</option>{(wh.data ?? []).map((x) => <option key={x.id} value={x.id}>{x.code}</option>)}</select>} title="By fabric and warehouse">
         {!q.data ? <Skeleton className="m-5 h-40" /> : (
           <SimpleTable rows={q.data.items} rowKey={(r) => `${r.product_id}${r.warehouse_id}`} empty={<EmptyState title="No stock" />} columns={[
             { key: 's', header: 'Fabric', render: (r) => <div><p className="font-mono text-[12.5px] font-semibold">{r.sku}</p><p className="max-w-[220px] truncate text-[12px] text-slate-500">{r.product_name}</p></div> },
@@ -154,7 +154,7 @@ function Shades() {
     <>
       <Notice tone="info">Rolls of one fabric from different dye lots can differ visibly. Reservations are blocked from mixing dye lots unless a reason is given, and shades a customer has rejected are never reserved for that customer.</Notice>
       <div className="mt-5 grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <Card title="Shade groups in stock" padded={false} className="xl:col-span-2" actions={<select className="input h-8 w-auto text-[13px]" value={p} onChange={(e) => setP(e.target.value)}><option value="">All fabrics</option>{(prods.data ?? []).map((x) => <option key={x.id} value={x.id}>{x.sku}</option>)}</select>}>
+        <Card title="Shade groups in stock" padded={false} className="xl:col-span-2" actions={<select aria-label="Warehouse" className="input h-8 w-auto text-[13px]" value={p} onChange={(e) => setP(e.target.value)}><option value="">All fabrics</option>{(prods.data ?? []).map((x) => <option key={x.id} value={x.id}>{x.sku}</option>)}</select>}>
           {!q.data ? <Skeleton className="m-5 h-32" /> : (
             <SimpleTable rows={q.data.groups} rowKey={(r) => `${r.product_id}${r.shade_code}${r.dye_lot}`} columns={[
               { key: 's', header: 'Fabric', render: (r) => <span className="font-mono text-[12.5px]">{r.sku}</span> },

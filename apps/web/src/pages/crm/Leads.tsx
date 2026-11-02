@@ -147,7 +147,7 @@ function ImportModal({ onClose }: { onClose: () => void }) {
             <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-3 md:grid-cols-3">
               {FIELDS.map((f) => (
                 <label key={f} className="text-[12px] text-slate-600">{humanize(f)}
-                  <select className="input mt-0.5 h-8 text-[12.5px]" value={map[f] ?? guess(f)} onChange={(e) => setMap({ ...map, [f]: e.target.value })}><option value="">—</option>{header.map((h) => <option key={h} value={h}>{h}</option>)}</select>
+                  <select aria-label={`Field for column ${f}`} className="input mt-0.5 h-8 text-[12.5px]" value={map[f] ?? guess(f)} onChange={(e) => setMap({ ...map, [f]: e.target.value })}><option value="">—</option>{header.map((h) => <option key={h} value={h}>{h}</option>)}</select>
                 </label>
               ))}
             </div>

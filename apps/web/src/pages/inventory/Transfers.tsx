@@ -79,7 +79,7 @@ function NewTransferModal({ onClose, onDone }: { onClose: () => void; onDone: (i
           <p className="text-[12.5px] font-medium text-slate-700">Fabric</p>
           {lines.map((l, i) => (
             <div key={i} className="flex gap-2">
-              <select className="input flex-1" value={l.product_id} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, product_id: e.target.value } : x)))}><option value="">Choose…</option>{(prods.data ?? []).map((p) => <option key={p.id} value={p.id}>{p.sku} · {p.name}</option>)}</select>
+              <select aria-label="Fabric" className="input flex-1" value={l.product_id} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, product_id: e.target.value } : x)))}><option value="">Choose…</option>{(prods.data ?? []).map((p) => <option key={p.id} value={p.id}>{p.sku} · {p.name}</option>)}</select>
               <input className="input w-32" type="number" placeholder="KG" value={l.requested_kg} onChange={(e) => setLines(lines.map((x, j) => (j === i ? { ...x, requested_kg: e.target.value } : x)))} />
               {lines.length > 1 && <Button variant="ghost" icon={<Trash2 className="size-4" />} onClick={() => setLines(lines.filter((_, j) => j !== i))} aria-label="Remove" />}
             </div>

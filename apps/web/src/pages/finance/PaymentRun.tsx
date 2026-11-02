@@ -115,7 +115,7 @@ export function PaymentRunPage() {
             { key: 'n', header: 'Run', render: (r) => <span className="font-mono text-[12.5px]">{r.number}</span> },
             { key: 'd', header: 'Date', render: (r) => fmtDate(r.run_date) },
             { key: 'c', header: 'Bills', align: 'right', render: (r) => r.count },
-            { key: 't', header: 'Released', align: 'right', render: (r) => <span className="tabular">{fmtINR(r.released)} <span className="text-slate-400">of {fmtINR(r.total)}</span>{r.waiting > 0 && <span className="block text-[11.5px] text-amber-600">{r.waiting} waiting for a checker</span>}</span> },
+            { key: 't', header: 'Released', align: 'right', render: (r) => <span className="tabular">{fmtINR(r.released)} <span className="text-slate-400">of {fmtINR(r.total)}</span>{r.waiting > 0 && <span className="block text-[11.5px] text-amber-700">{r.waiting} waiting for a checker</span>}</span> },
             { key: 'by', header: 'By', render: (r) => <span className="text-[12.5px] text-slate-500">{r.created_by_name} · {fmtRelative(r.created_at)}</span> },
             { key: 'f', header: '', render: (r) => r.released > 0 && can('finance.voucher.post') && <Button size="xs" variant="ghost" icon={<Download className="size-3" />} onClick={() => void download(r.id, r.number)}>Bank file</Button> },
           ]} />

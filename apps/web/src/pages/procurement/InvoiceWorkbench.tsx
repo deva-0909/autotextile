@@ -133,7 +133,7 @@ function ConfField({ label, field, data, set, warnings, type = 'text', mono, req
         <label className="text-[12.5px] font-medium text-slate-700">{label}{required && <span className="ml-0.5 text-rose-500">*</span>}</label>
         {c !== undefined && <Badge tone={confTone(c)}>{c === 1 ? 'Verified' : `${Math.round(c * 100)}%`}</Badge>}
       </div>
-      <input className={clsx('input', mono && 'font-mono', w?.severity === 'critical' && 'input-error', c !== undefined && c < 0.75 && 'border-amber-400 bg-amber-50/40')} type={type} step="any"
+      <input aria-label={typeof label === 'string' ? label : undefined} className={clsx('input', mono && 'font-mono', w?.severity === 'critical' && 'input-error', c !== undefined && c < 0.75 && 'border-amber-400 bg-amber-50/40')} type={type} step="any"
         value={v ?? ''} onChange={(e) => set(field, type === 'number' ? (e.target.value === '' ? null : Number(e.target.value)) : e.target.value || null)} />
       {w && <p className={clsx('mt-1 text-[11.5px] font-medium', w.severity === 'critical' ? 'text-rose-600' : 'text-amber-700')}>{w.message}</p>}
     </div>
@@ -230,12 +230,12 @@ export function CaptureReviewPage() {
                   <tbody className="divide-y divide-slate-100">
                     {data.lines.map((l, i) => (
                       <tr key={i} className={clsx(l.confidence !== undefined && l.confidence < 0.75 && 'bg-amber-50/50')}>
-                        <td className="px-1.5 py-1"><input className="input h-7 text-[12.5px]" value={l.description} onChange={(e) => setLine(i, { description: e.target.value })} />{l.unit && !/^kg/i.test(l.unit) && <span className="text-[11px] text-amber-700">Unit on invoice: {l.unit}</span>}</td>
-                        <td className="px-1.5 py-1"><input className="input h-7 font-mono text-[12px]" value={l.hsn_code ?? ''} onChange={(e) => setLine(i, { hsn_code: e.target.value || null })} /></td>
-                        <td className="px-1.5 py-1"><input className="input h-7 text-right tabular" type="number" value={l.qty_kg ?? ''} onChange={(e) => setLine(i, { qty_kg: e.target.value === '' ? null : Number(e.target.value) })} /></td>
-                        <td className="px-1.5 py-1"><input className="input h-7 text-right tabular" type="number" value={l.rate ?? ''} onChange={(e) => setLine(i, { rate: e.target.value === '' ? null : Number(e.target.value) })} /></td>
-                        <td className="px-1.5 py-1"><input className="input h-7 text-right tabular" type="number" value={l.gst_rate ?? ''} onChange={(e) => setLine(i, { gst_rate: e.target.value === '' ? null : Number(e.target.value) })} /></td>
-                        {cap.po_lines.length > 0 && <td className="px-1.5 py-1"><select className="input h-7 text-[12px]" value={l.po_line_id ?? ''} onChange={(e) => setLine(i, { po_line_id: e.target.value || null })}><option value="">Auto</option>{cap.po_lines.map((p) => <option key={p.id} value={p.id}>{p.sku} · ₹{p.rate_per_kg}</option>)}</select></td>}
+                        <td className="px-1.5 py-1"><input aria-label={`Line ${i + 1} description`} className="input h-7 text-[12.5px]" value={l.description} onChange={(e) => setLine(i, { description: e.target.value })} />{l.unit && !/^kg/i.test(l.unit) && <span className="text-[11px] text-amber-700">Unit on invoice: {l.unit}</span>}</td>
+                        <td className="px-1.5 py-1"><input aria-label={`Line ${i + 1} HSN`} className="input h-7 font-mono text-[12px]" value={l.hsn_code ?? ''} onChange={(e) => setLine(i, { hsn_code: e.target.value || null })} /></td>
+                        <td className="px-1.5 py-1"><input className="input h-7 text-right tabular" type="number" aria-label={`Line ${i + 1} kg`} value={l.qty_kg ?? ''} onChange={(e) => setLine(i, { qty_kg: e.target.value === '' ? null : Number(e.target.value) })} /></td>
+                        <td className="px-1.5 py-1"><input className="input h-7 text-right tabular" type="number" aria-label={`Line ${i + 1} rate`} value={l.rate ?? ''} onChange={(e) => setLine(i, { rate: e.target.value === '' ? null : Number(e.target.value) })} /></td>
+                        <td className="px-1.5 py-1"><input className="input h-7 text-right tabular" type="number" aria-label={`Line ${i + 1} GST %`} value={l.gst_rate ?? ''} onChange={(e) => setLine(i, { gst_rate: e.target.value === '' ? null : Number(e.target.value) })} /></td>
+                        {cap.po_lines.length > 0 && <td className="px-1.5 py-1"><select aria-label="PO line" className="input h-7 text-[12px]" value={l.po_line_id ?? ''} onChange={(e) => setLine(i, { po_line_id: e.target.value || null })}><option value="">Auto</option>{cap.po_lines.map((p) => <option key={p.id} value={p.id}>{p.sku} · ₹{p.rate_per_kg}</option>)}</select></td>}
                         <td><IconButton label="Remove" onClick={() => { setData({ ...data, lines: data.lines.filter((_, j) => j !== i) }); setDirty(true); }}><Trash2 className="size-3" /></IconButton></td>
                       </tr>
                     ))}

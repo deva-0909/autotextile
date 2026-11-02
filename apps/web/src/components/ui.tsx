@@ -72,7 +72,7 @@ type InputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'prefix'> & { labe
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input({ label, error, hint, className, prefix, suffix, required, id, ...rest }, ref) {
   const auto = useId();
   const input = (
-    <input ref={ref} id={id ?? auto} required={required} aria-invalid={!!error} className={clsx('input', error && 'input-error', prefix && 'pl-9', suffix && 'pr-12')} {...rest} />
+    <input ref={ref} id={id ?? auto} required={required} aria-invalid={!!error} aria-label={!label ? (rest['aria-label'] ?? (typeof rest.placeholder === 'string' ? rest.placeholder : undefined) ?? ({ month: 'Month', date: 'Date', search: 'Search', number: 'Amount' } as Record<string, string>)[rest.type ?? '']) : undefined} className={clsx('input', error && 'input-error', prefix && 'pl-9', suffix && 'pr-12')} {...rest} />
   );
   return (
     <Field label={label} error={error} hint={hint} required={required} className={className} htmlFor={id ?? auto}>
@@ -124,13 +124,14 @@ export function Checkbox({ label, description, className, ...rest }: InputHTMLAt
   );
 }
 
-export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label?: ReactNode; disabled?: boolean }) {
+export function Switch({ checked, onChange, label, disabled, 'aria-label': ariaLabel }: { checked: boolean; onChange: (v: boolean) => void; label?: ReactNode; disabled?: boolean; 'aria-label'?: string }) {
   return (
     <label className={clsx('inline-flex items-center gap-2.5', disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')}>
       <button
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-label={ariaLabel ?? (typeof label === 'string' ? label : 'Toggle')}
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={clsx('relative h-5 w-9 rounded-full transition-colors', checked ? 'bg-brand-600' : 'bg-slate-300')}
@@ -363,7 +364,7 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
 export function PermissionDenied({ message }: { message?: string }) {
   return (
     <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
-      <div className="mb-3 flex size-11 items-center justify-center rounded-xl bg-amber-50 text-amber-600"><Lock className="size-5" /></div>
+      <div className="mb-3 flex size-11 items-center justify-center rounded-xl bg-amber-50 text-amber-700"><Lock className="size-5" /></div>
       <p className="text-[14px] font-semibold text-slate-900">You don’t have access to this</p>
       <p className="mt-1 max-w-sm text-[13px] text-slate-500">{message ?? 'Your role or data scope does not include this area. Ask an administrator if you need it.'}</p>
     </div>
@@ -401,7 +402,7 @@ export function Progress({ value, max, tone = 'brand', label }: { value: number;
 }
 
 export function Stat({ label, value, sub, tone }: { label: ReactNode; value: ReactNode; sub?: ReactNode; tone?: 'danger' | 'warning' | 'success' }) {
-  const t = tone === 'danger' ? 'text-rose-600' : tone === 'warning' ? 'text-amber-600' : tone === 'success' ? 'text-emerald-600' : 'text-slate-900';
+  const t = tone === 'danger' ? 'text-rose-600' : tone === 'warning' ? 'text-amber-700' : tone === 'success' ? 'text-emerald-700' : 'text-slate-900';
   return (
     <div className="card px-4 py-2.5">
       <p className="text-[12px] font-medium text-slate-500">{label}</p>

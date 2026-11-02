@@ -142,7 +142,7 @@ export function ApprovalsPage() {
         columns={[
           { key: 'title', header: 'Request', csv: (r) => r.title, render: (r) => (
             <div className="flex items-center gap-3">
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-amber-50 text-amber-600"><ShieldAlert className="size-4" /></span>
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-amber-50 text-amber-700"><ShieldAlert className="size-4" /></span>
               <div className="min-w-0"><p className="truncate font-medium text-slate-900">{r.title}</p><p className="truncate text-[12px] text-slate-500">{r.summary}</p></div>
             </div>
           ) },

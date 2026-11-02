@@ -68,7 +68,7 @@ export function EntitiesPage() {
                 <div key={g.id} className="px-5 py-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <span className="flex size-8 items-center justify-center rounded-md bg-emerald-50 text-emerald-600"><Building2 className="size-4" /></span>
+                      <span className="flex size-8 items-center justify-center rounded-md bg-emerald-50 text-emerald-700"><Building2 className="size-4" /></span>
                       <div>
                         <p className="flex flex-wrap items-center gap-2">
                           <span className="font-mono text-[13.5px] font-semibold tracking-wide text-slate-900">{g.gstin}</span>

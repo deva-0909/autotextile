@@ -27,14 +27,14 @@ export function CustomerPortalLayout({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-slate-50">
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-4 px-4">
-          <Link to="/shop" className="flex items-center gap-2.5"><img src="/favicon.svg" alt="" className="size-7" /><div className="hidden leading-tight sm:block"><p className="text-[13.5px] font-semibold">Demo Textile Trading</p><p className="text-[11px] text-slate-500">Trade portal</p></div></Link>
+          <Link to="/shop" aria-label="Demo Textile Trading: trade portal home" className="flex items-center gap-2.5"><img src="/favicon.svg" alt="" className="size-7" /><div className="hidden leading-tight sm:block"><p className="text-[13.5px] font-semibold">Demo Textile Trading</p><p className="text-[11px] text-slate-500">Trade portal</p></div></Link>
           <nav className="flex gap-0.5 overflow-x-auto">
-            {links.map(([to, label, icon]) => <NavLink key={to} to={to} className={({ isActive }) => clsx('flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13.5px] whitespace-nowrap', isActive ? 'bg-brand-50 font-medium text-brand-700' : 'text-slate-600 hover:bg-slate-100')}>{icon}<span className="hidden md:inline">{label}</span></NavLink>)}
+            {links.map(([to, label, icon]) => <NavLink key={to} to={to} aria-label={label} title={label} className={({ isActive }) => clsx('flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13.5px] whitespace-nowrap', isActive ? 'bg-brand-50 font-medium text-brand-700' : 'text-slate-600 hover:bg-slate-100')}>{icon}<span className="hidden md:inline">{label}</span></NavLink>)}
           </nav>
           <div className="ml-auto flex items-center gap-2">
             {can('portal.customer.order') && <Link to="/cart" className="relative rounded-md p-2 text-slate-600 hover:bg-slate-100" aria-label="Cart"><ShoppingCart className="size-5" />{!!cart.data && <span className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-brand-600 text-[10px] font-bold text-white">{cart.data}</span>}</Link>}
             <Avatar name={user?.name ?? '?'} size="sm" /><span className="hidden text-[13px] lg:block">{user?.name}</span>
-            <Button size="sm" variant="ghost" icon={<LogOut className="size-4" />} onClick={() => void signOut().then(() => nav('/login'))}><span className="hidden sm:inline">Sign out</span></Button>
+            <Button size="sm" variant="ghost" aria-label="Sign out" icon={<LogOut className="size-4" />} onClick={() => void signOut().then(() => nav('/login'))}><span className="hidden sm:inline">Sign out</span></Button>
           </div>
         </div>
       </header>
@@ -71,8 +71,8 @@ export function ShopPage() {
       {list.isError ? <ErrorState error={list.error} /> : !list.data ? <Skeleton className="h-72" /> : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((p) => (
-            <button key={p.id} onClick={() => nav(`/shop/${p.id}`)} className={clsx('card group overflow-hidden text-left transition hover:border-slate-300 hover:shadow-md', p.status !== 'in_stock' && 'opacity-60')}>
-              <div className="relative h-28" style={{ background: `linear-gradient(135deg, ${swatch(p.attributes)} 0%, ${swatch(p.attributes)}dd 100%)` }}>
+            <button key={p.id} onClick={() => nav(`/shop/${p.id}`)} className={clsx('card group overflow-hidden text-left transition hover:border-slate-300 hover:shadow-md', p.status !== 'in_stock' && 'bg-slate-50')}>
+              <div className={clsx('relative h-28', p.status !== 'in_stock' && 'grayscale')} style={{ background: `linear-gradient(135deg, ${swatch(p.attributes)} 0%, ${swatch(p.attributes)}dd 100%)` }}>
                 <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'repeating-linear-gradient(90deg, transparent 0 3px, rgba(255,255,255,.35) 3px 4px)' }} />
                 <span className="absolute top-3 left-3 rounded bg-white/90 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-slate-800">{p.sku}</span>
                 {p.status !== 'in_stock' && <span className="absolute top-3 right-3 rounded bg-white/90 px-1.5 py-0.5 text-[11px] font-medium text-slate-700">Out of stock</span>}
@@ -202,7 +202,7 @@ export function CartPage() {
             <Card title="Summary">
               <KeyValue columns={1} items={[{ label: 'Fabric (taxable value)', value: fmtINR(c.taxable) }, { label: 'GST (estimate)', value: fmtINR(c.tax_estimate) }, { label: 'Total', value: <span className="text-[18px] font-semibold">{fmtINR(c.total_estimate)}</span> }]} />
               <div className="mt-4 rounded-lg bg-slate-50 p-3 text-[13px]">
-                {c.terms === 'credit' ? <p className="flex items-start gap-2"><CreditCard className="mt-0.5 size-4 text-emerald-600" /><span><b>On your approved credit.</b> No token needed; the order is booked straight away.</span></p>
+                {c.terms === 'credit' ? <p className="flex items-start gap-2"><CreditCard className="mt-0.5 size-4 text-emerald-700" /><span><b>On your approved credit.</b> No token needed; the order is booked straight away.</span></p>
                   : c.token ? <p className="flex items-start gap-2"><CreditCard className="mt-0.5 size-4 text-brand-600" /><span><b>Token to book now: {fmtINR(c.token.amount)}</b><br /><span className="text-slate-600">{c.token.text}. Holds your stock for {c.token.validity_days} days; {c.token.refundable ? `refundable to your advance${c.token.cancellation_fee_pct ? ` less ${c.token.cancellation_fee_pct}%` : ''} if you cancel` : 'non-refundable'}. The balance is due before dispatch.</span></span></p> : null}
               </div>
               {c.needs_company_approval && <div className="mt-3"><Notice tone="warning">Above your company’s approval limit of {fmtINR(c.approval_limit)}: an approver in your company must approve this order first.</Notice></div>}

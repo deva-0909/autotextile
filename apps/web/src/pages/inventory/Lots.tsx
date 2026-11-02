@@ -240,7 +240,7 @@ export function WarehouseMapPage() {
   return (
     <>
       <PageHeader title="Warehouse map" description="Zones, aisles, racks and bins with what each holds. Colour shows how full a bin is against its capacity." breadcrumbs={[{ label: 'Inventory', to: '/inventory' }, { label: 'Warehouse map' }]}
-        actions={<select className="input h-9 w-auto" value={id} onChange={(e) => { setWhId(e.target.value); setBin(null); }}>{(wh.data ?? []).map((w) => <option key={w.id} value={w.id}>{w.code} · {w.name}</option>)}</select>} />
+        actions={<select aria-label="Warehouse" className="input h-9 w-auto" value={id} onChange={(e) => { setWhId(e.target.value); setBin(null); }}>{(wh.data ?? []).map((w) => <option key={w.id} value={w.id}>{w.code} · {w.name}</option>)}</select>} />
       {!q.data ? <Skeleton className="h-96" /> : (
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_360px]">
           <div className="space-y-4">

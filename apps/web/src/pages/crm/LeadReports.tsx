@@ -48,7 +48,7 @@ function Leaderboard({ from, to }: { from: string; to: string }) {
         { key: 'n', header: 'Salesperson', render: (r) => <span className={clsx('font-medium', !r.active && 'text-slate-400')}>{r.name}{!r.active && ' (inactive)'}</span> },
         { key: 'a', header: 'Assigned', align: 'right', render: (r) => r.assigned },
         { key: 'nc', header: 'Never contacted', align: 'right', render: (r) => <span className={clsx(r.never_contacted && 'font-semibold text-rose-600')}>{r.never_contacted}</span> },
-        { key: 'o', header: 'Overdue', align: 'right', render: (r) => <span className={clsx(r.overdue && 'font-semibold text-amber-600')}>{r.overdue}</span> },
+        { key: 'o', header: 'Overdue', align: 'right', render: (r) => <span className={clsx(r.overdue && 'font-semibold text-amber-700')}>{r.overdue}</span> },
         { key: 'np', header: 'No progress', align: 'right', render: (r) => <span className={clsx(r.no_progress && 'font-semibold text-rose-600')}>{r.no_progress}</span> },
         { key: 'cr', header: 'Contact rate', align: 'right', render: (r) => <span className={clsx(r.contact_rate != null && r.contact_rate < 70 ? 'text-rose-600' : 'text-emerald-700')}>{pct(r.contact_rate)}</span> },
         { key: 'fr', header: 'First call, avg', align: 'right', render: (r) => <span className={clsx(r.avg_first_response_min != null && r.avg_first_response_min > target && 'text-rose-600')}>{mins(r.avg_first_response_min)}</span> },

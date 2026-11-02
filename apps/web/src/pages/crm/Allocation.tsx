@@ -143,7 +143,7 @@ function Team() {
   const [edit, setEdit] = useState<Member | { user_id: string; name: string } | null>(null);
   return (
     <Card title="Sales team" description="Territory, language and value bands used for profile matching; lead cap and discount authority per person." padded={false}
-      actions={can('crm.config.manage') && cands.data?.length ? <select className="input h-8 w-auto text-[13px]" value="" onChange={(e) => { const u = cands.data!.find((x) => x.id === e.target.value); if (u) setEdit({ user_id: u.id, name: u.name }); }}><option value="">Add a person…</option>{cands.data.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select> : undefined}>
+      actions={can('crm.config.manage') && cands.data?.length ? <select aria-label="Add to the team" className="input h-8 w-auto text-[13px]" value="" onChange={(e) => { const u = cands.data!.find((x) => x.id === e.target.value); if (u) setEdit({ user_id: u.id, name: u.name }); }}><option value="">Add a person…</option>{cands.data.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select> : undefined}>
       {!q.data ? <Skeleton className="m-5 h-32" /> : (
         <SimpleTable rows={q.data} rowKey={(m) => m.user_id} onRowClick={can('crm.config.manage') ? (m) => setEdit(m) : undefined} columns={[
           { key: 'n', header: 'Salesperson', render: (m) => <span className="flex items-center gap-2"><Avatar name={m.name} size="sm" />{m.name}</span> },

@@ -64,8 +64,8 @@ function LineRow({ line, priced, warehouseId, onChange, onRemove }: { line: Draf
   return (
     <div className={clsx('rounded-lg border p-3', priced?.needs_approval ? 'border-amber-300 bg-amber-50/40' : 'border-slate-200')}>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-[2fr_2fr_1fr_1fr_auto]">
-        <select className="input" value={line.product_id} onChange={(e) => onChange({ ...line, product_id: e.target.value, lot_id: '' })}><option value="">Fabric…</option>{(prods.data ?? []).map((p) => <option key={p.id} value={p.id}>{p.sku} · {p.name}</option>)}</select>
-        <select className="input" value={line.lot_id} onChange={(e) => onChange({ ...line, lot_id: e.target.value })} disabled={!line.product_id}>
+        <select aria-label="Fabric" className="input" value={line.product_id} onChange={(e) => onChange({ ...line, product_id: e.target.value, lot_id: '' })}><option value="">Fabric…</option>{(prods.data ?? []).map((p) => <option key={p.id} value={p.id}>{p.sku} · {p.name}</option>)}</select>
+        <select aria-label="Lot" className="input" value={line.lot_id} onChange={(e) => onChange({ ...line, lot_id: e.target.value })} disabled={!line.product_id}>
           <option value="">Any lot (from stock)</option>
           {(lots.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.lot_no} · {fmtNum(Number(l.available_kg))} kg free · {l.price_per_kg ? `₹${l.price_per_kg}` : 'no price'}{l.dye_lot ? ` · ${l.dye_lot}` : ''}{l.grade ? ` · ${l.grade}` : ''}</option>)}
         </select>

@@ -21,7 +21,7 @@ function useCount(path: string, enabled: boolean) {
 }
 
 function Kpi({ icon, label, value, sub, to, tone = 'brand' }: { icon: ReactNode; label: string; value: ReactNode; sub?: ReactNode; to?: string; tone?: 'brand' | 'amber' | 'emerald' | 'sky' | 'violet' }) {
-  const bg = { brand: 'bg-brand-50 text-brand-600', amber: 'bg-amber-50 text-amber-600', emerald: 'bg-emerald-50 text-emerald-600', sky: 'bg-sky-50 text-sky-600', violet: 'bg-violet-50 text-violet-600' }[tone];
+  const bg = { brand: 'bg-brand-50 text-brand-600', amber: 'bg-amber-50 text-amber-700', emerald: 'bg-emerald-50 text-emerald-700', sky: 'bg-sky-50 text-sky-600', violet: 'bg-violet-50 text-violet-600' }[tone];
   const body = (
     <div className="card group flex h-full items-start gap-3 p-3 transition hover:border-slate-300">
       <span className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${bg}`}>{icon}</span>

@@ -45,7 +45,7 @@ export function CommerceOrdersPage() {
             { key: 's', header: 'Fabric', render: (r) => <span className="font-mono text-[12px]">{r.skus}</span> },
             { key: 'k', header: 'KG', align: 'right', render: (r) => fmtNum(Number(r.kg)) },
             { key: 't', header: 'Value', align: 'right', render: (r) => fmtINR(Number(r.total_estimate)) },
-            { key: 'p', header: 'Terms', render: (r) => r.payment_terms === 'credit' ? <Badge tone="violet">Credit</Badge> : <span className="text-[12.5px]">Token {fmtINR(Number(r.token_amount))}{r.token_paid_at ? <Check className="ml-1 inline size-3.5 text-emerald-600" /> : null}</span> },
+            { key: 'p', header: 'Terms', render: (r) => r.payment_terms === 'credit' ? <Badge tone="violet">Credit</Badge> : <span className="text-[12.5px]">Token {fmtINR(Number(r.token_amount))}{r.token_paid_at ? <Check className="ml-1 inline size-3.5 text-emerald-700" /> : null}</span> },
             { key: 'st', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
           ]} />
         )}

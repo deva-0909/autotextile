@@ -62,9 +62,9 @@ export function QcPage() {
               {q.data.map((l) => (
                 <li key={l.lot_id}>
                   <button onClick={() => setLotId(l.lot_id)} className={clsx('w-full px-4 py-3 text-left hover:bg-slate-50', lot?.lot_id === l.lot_id && 'bg-brand-50/60')}>
-                    <div className="flex items-center justify-between"><span className="font-mono text-[12.5px] font-semibold">{l.lot_no}</span><span className="text-[12px] text-slate-500 tabular">{l.rolls} rolls · {fmtNum(l.kg)} kg</span></div>
+                    <div className="flex items-center justify-between"><span className="font-mono text-[12.5px] font-semibold">{l.lot_no}</span><span className="text-[12px] text-slate-600 tabular">{l.rolls} rolls · {fmtNum(l.kg)} kg</span></div>
                     <p className="text-[12.5px] text-slate-700">{l.sku}</p>
-                    <p className="text-[11.5px] text-slate-500">{l.party_name ?? l.source_ref} · {fmtDate(l.received_date)}</p>
+                    <p className="text-[11.5px] text-slate-600">{l.party_name ?? l.source_ref} · {fmtDate(l.received_date)}</p>
                   </button>
                 </li>
               ))}
@@ -89,7 +89,7 @@ export function QcPage() {
                           <td className="px-2 py-2"><div className="inline-flex overflow-hidden rounded-md ring-1 ring-slate-200">{GRADES.map((g) => (
                             <button key={g.g} onClick={() => set(r.barcode, { grade: g.g })} className={clsx('px-2.5 py-1 text-[12px] font-semibold', v.grade === g.g ? g.cls : 'bg-white text-slate-600 hover:bg-slate-50')}>{g.label}</button>
                           ))}</div></td>
-                          <td className="px-2 py-2"><input className="input h-8 w-20" type="number" value={v.gsm} onChange={(e) => set(r.barcode, { gsm: e.target.value })} /></td>
+                          <td className="px-2 py-2"><input className="input h-8 w-20" type="number" aria-label={`GSM of ${r.barcode}`} value={v.gsm} onChange={(e) => set(r.barcode, { gsm: e.target.value })} /></td>
                           <td className="px-2 py-2"><input className="input h-8 w-16" type="number" value={v.width_in} onChange={(e) => set(r.barcode, { width_in: e.target.value })} /></td>
                           <td className="px-2 py-2"><input className="input h-8 w-24" value={v.shade_code} onChange={(e) => set(r.barcode, { shade_code: e.target.value })} /></td>
                           <td className="px-2 py-2"><input className="input h-8 w-44" list="defects" placeholder={v.grade === 'A' ? '' : 'e.g. Holes, Slubs'} value={v.defects} onChange={(e) => set(r.barcode, { defects: e.target.value })} /></td>
@@ -206,7 +206,7 @@ export function MoveModal({ roll, suggestions, onClose, onDone }: { roll: { barc
     }}>Move</Button></>}>
       <div className="space-y-3">
         {suggestions.length > 0 && <div className="flex flex-wrap gap-2">{suggestions.map((s) => <Button key={s.id} size="sm" variant={loc === s.id ? 'primary' : 'secondary'} onClick={() => setLoc(s.id)}>{s.path}</Button>)}</div>}
-        <select className="input" value={loc} onChange={(e) => setLoc(e.target.value)}>
+        <select aria-label="Location" className="input" value={loc} onChange={(e) => setLoc(e.target.value)}>
           <option value="">Choose a location…</option>
           {options.map((l) => <option key={l.id} value={l.id}>{l.path} · {humanize(l.purpose)}{l.rolls ? ` · ${l.rolls} rolls, ${fmtNum(l.kg)} kg` : ' · empty'}</option>)}
         </select>

@@ -253,7 +253,7 @@ export function ChangePasswordRequired() {
   const [loading, setLoading] = useState(false);
   return (
     <AuthShell>
-      <div className="mb-6 flex size-11 items-center justify-center rounded-xl bg-amber-50 text-amber-600"><KeyRound className="size-5" /></div>
+      <div className="mb-6 flex size-11 items-center justify-center rounded-xl bg-amber-50 text-amber-700"><KeyRound className="size-5" /></div>
       <h2 className="text-[22px] font-semibold tracking-tight">Set your own password</h2>
       <p className="mt-1.5 text-[13.5px] text-slate-500">Your administrator issued a temporary password. Choose a new one to continue.</p>
       <form

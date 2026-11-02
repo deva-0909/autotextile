@@ -32,7 +32,7 @@ export function LineEditor({ lines, onChange, withRate, rateLabel = 'Rate / kg',
               return (
                 <tr key={i}>
                   <td className="px-2 py-1.5">
-                    <select className="input h-8 text-[13px]" value={l.product_id} onChange={(e) => set(i, { product_id: e.target.value })}>
+                    <select aria-label="Fabric" className="input h-8 text-[13px]" value={l.product_id} onChange={(e) => set(i, { product_id: e.target.value })}>
                       <option value="">Select fabric…</option>
                       {products.data?.map((p) => <option key={p.id} value={p.id}>{p.sku} · {p.name}</option>)}
                     </select>
@@ -66,11 +66,11 @@ export function DeliverTo({ type, id, onChange, error }: { type: 'warehouse' | '
     <div>
       <p className="label">Deliver to<span className="ml-0.5 text-rose-500">*</span></p>
       <div className="flex gap-2">
-        <select className="input w-44" value={type} onChange={(e) => onChange(e.target.value as 'warehouse' | 'mill', '')}>
+        <select aria-label="Source type" className="input w-44" value={type} onChange={(e) => onChange(e.target.value as 'warehouse' | 'mill', '')}>
           <option value="warehouse">Our warehouse</option>
           <option value="mill">Processing mill (direct)</option>
         </select>
-        <select className={`input flex-1 ${error ? 'input-error' : ''}`} value={id} onChange={(e) => onChange(type, e.target.value)}>
+        <select aria-label="Source" className={`input flex-1 ${error ? 'input-error' : ''}`} value={id} onChange={(e) => onChange(type, e.target.value)}>
           <option value="">Select…</option>
           {type === 'warehouse' ? wh.data?.filter((w) => w.status === 'active').map((w) => <option key={w.id} value={w.id}>{w.code} · {w.name}</option>)
             : mills.data?.map((m) => <option key={m.id} value={m.id}>{m.code} · {m.legal_name}</option>)}

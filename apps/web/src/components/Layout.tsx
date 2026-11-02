@@ -122,7 +122,7 @@ function ScopeChip() {
     : `${s.data.warehouses.map((w) => w.code).join(', ') || 'No warehouses'} · ${s.data.gstRegistrations.map((g) => g.gstin).join(', ')}`;
   return (
     <div className="hidden items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[12px] text-slate-600 lg:flex" title="Your data scope">
-      <ShieldCheck className="size-3.5 text-emerald-600" />
+      <ShieldCheck className="size-3.5 text-emerald-700" />
       <span className="max-w-[340px] truncate">{label}</span>
       {!full && <Badge tone="warning">Restricted</Badge>}
     </div>

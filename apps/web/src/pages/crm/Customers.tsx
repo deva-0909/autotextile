@@ -337,7 +337,7 @@ export function PerformancePage() {
   return (
     <>
       <PageHeader title="Targets & performance" description="Only verified outcomes count: revenue, kg and margin come from quotations the customer accepted at an approved price on a customer account."
-        breadcrumbs={[{ label: 'Sales & CRM', to: '/crm' }, { label: 'Performance' }]} actions={<input type="month" className="input h-9 w-auto" value={period} onChange={(e) => setPeriod(e.target.value)} />} />
+        breadcrumbs={[{ label: 'Sales & CRM', to: '/crm' }, { label: 'Performance' }]} actions={<input type="month" aria-label="Month" className="input h-9 w-auto" value={period} onChange={(e) => setPeriod(e.target.value)} />} />
       <Card padded={false}>
         {!q.data ? <Skeleton className="m-5 h-40" /> : (
           <SimpleTable rows={q.data.people} rowKey={(p) => p.user_id} empty={<EmptyState icon={<Target className="size-5" />} title="No sales team" />} columns={[

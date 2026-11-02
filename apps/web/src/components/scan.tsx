@@ -50,7 +50,7 @@ export function ScanInput({ onScan, placeholder = 'Scan or type a roll barcode',
       </div>
       {last && (
         <div className={clsx('mt-3 flex items-start gap-3 rounded-lg px-4 py-3 ring-1 ring-inset', last.ok ? 'bg-emerald-50 ring-emerald-600/20' : 'bg-rose-50 ring-rose-600/20')} role="status">
-          {last.ok ? <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-600" /> : <XCircle className="mt-0.5 size-5 shrink-0 text-rose-600" />}
+          {last.ok ? <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-700" /> : <XCircle className="mt-0.5 size-5 shrink-0 text-rose-600" />}
           <div className="min-w-0">
             <p className={clsx('text-[14px] font-semibold', last.ok ? 'text-emerald-900' : 'text-rose-900')}><span className="font-mono">{last.code}</span> · {last.title}</p>
             {last.detail && <div className="mt-0.5 text-[12.5px] text-slate-600">{last.detail}</div>}

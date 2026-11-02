@@ -180,7 +180,7 @@ export function DataTable<T>({
       {query.isError && !data ? (
         <ErrorState error={query.error} onRetry={() => query.refetch()} />
       ) : (
-        <div className="scrollbar-thin overflow-x-auto">
+        <div className="scrollbar-thin overflow-x-auto focus-visible:outline-2 focus-visible:outline-brand-500" tabIndex={0} role="region" aria-label="Table (scrolls sideways)">
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80">
@@ -235,7 +235,7 @@ export function DataTable<T>({
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2">
             Rows
-            <select className="input h-7 w-[72px] py-0 text-[12.5px]" value={size} onChange={(e) => setSize(Number(e.target.value))}>
+            <select aria-label="Rows per page" className="input h-7 w-[72px] py-0 text-[12.5px]" value={size} onChange={(e) => setSize(Number(e.target.value))}>
               {[10, 25, 50, 100].map((n) => <option key={n}>{n}</option>)}
             </select>
           </label>
@@ -324,7 +324,7 @@ export function SimpleTable<T>({ rows, columns, rowKey, onRowClick, empty, pageS
   }, [exporting, csvName]);
   const showPager = !!pageSize && rows.length > pageSize;
   return (
-    <div className="scrollbar-thin overflow-x-auto">
+    <div className="scrollbar-thin overflow-x-auto focus-visible:outline-2 focus-visible:outline-brand-500" tabIndex={0} role="region" aria-label="Table (scrolls sideways)">
       <table ref={tableRef} className="w-full text-left">
         <thead>
           <tr className="border-b border-slate-200 bg-slate-50/80">

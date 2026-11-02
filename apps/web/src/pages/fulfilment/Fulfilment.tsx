@@ -239,7 +239,7 @@ export function FulfilmentDetailPage() {
           { ok: g.paid, label: payLabel(g), sub: !g.invoiced ? '—' : g.payment === 'credit' ? 'Within approved credit' : g.payment === 'override' ? `Override by ${f.gate_override_by_name}` : due > 0 ? `${fmtINR(due)} due` : 'Paid in full' },
         ].map((x) => (
           <div key={x.label} className={clsx('rounded-xl p-4 ring-1 ring-inset', x.ok ? 'bg-emerald-50 ring-emerald-600/20' : 'bg-white ring-slate-200')}>
-            <p className="flex items-center gap-1.5 text-[13px] font-semibold">{x.ok ? <CheckCircle2 className="size-4 text-emerald-600" /> : <Circle className="size-4 text-slate-300" />}{x.label}</p>
+            <p className="flex items-center gap-1.5 text-[13px] font-semibold">{x.ok ? <CheckCircle2 className="size-4 text-emerald-700" /> : <Circle className="size-4 text-slate-300" />}{x.label}</p>
             <p className="mt-0.5 text-[12px] text-slate-600">{x.sub}</p>
           </div>
         ))}
@@ -445,7 +445,7 @@ export function ShipmentDetailPage() {
             <ol className="space-y-3">{s.events.map((e) => <li key={e.id} className="flex gap-3 text-[13px]"><span className="mt-1 size-2.5 shrink-0 rounded-full bg-brand-500" /><div><p className="font-medium">{humanize(e.milestone)}{e.location ? ` · ${e.location}` : ''}</p>{e.note && <p className="text-slate-600">{e.note}</p>}<p className="text-[12px] text-slate-400">{e.by_name} · {e.source === 'customer_portal' ? 'customer portal · ' : ''}{fmtDateTime(e.at)}</p></div></li>)}</ol>
             {s.status !== 'delivered' && can('fulfilment.dispatch') && (
               <div className="mt-5 grid grid-cols-1 gap-2 border-t border-slate-100 pt-4 md:grid-cols-[160px_1fr_1fr_auto]">
-                <select className="input" value={ms.milestone} onChange={(e) => setMs({ ...ms, milestone: e.target.value })}>{['picked_up', 'in_transit', 'reached_hub', 'out_for_delivery', 'exception'].map((m) => <option key={m} value={m}>{humanize(m)}</option>)}</select>
+                <select aria-label="Milestone" className="input" value={ms.milestone} onChange={(e) => setMs({ ...ms, milestone: e.target.value })}>{['picked_up', 'in_transit', 'reached_hub', 'out_for_delivery', 'exception'].map((m) => <option key={m} value={m}>{humanize(m)}</option>)}</select>
                 <input className="input" placeholder="Location" value={ms.location} onChange={(e) => setMs({ ...ms, location: e.target.value })} />
                 <input className="input" placeholder="Note" value={ms.note} onChange={(e) => setMs({ ...ms, note: e.target.value })} />
                 <Button onClick={async () => { try { await api.post(`/fulfilment/shipments/${id}/milestones`, { milestone: ms.milestone, location: ms.location || null, note: ms.note || null }); setMs({ milestone: 'in_transit', location: '', note: '' }); q.refetch(); } catch (e) { toast({ tone: 'error', title: (e as Error).message }); } }}>Add</Button>
@@ -566,8 +566,8 @@ export function ReturnDetailPage() {
             { key: 's', header: 'Fabric', render: (l) => l.sku },
             { key: 'k', header: 'KG', align: 'right', render: (l) => fmtNum(Number(l.kg)) },
             { key: 'v', header: 'Value incl. GST', align: 'right', render: (l) => fmtINR(Number(l.kg) * Number(l.price_per_kg) * (1 + Number(l.gst_rate) / 100)) },
-            { key: 'r', header: 'Received', render: (l) => (l.received ? <CheckCircle2 className="size-4 text-emerald-600" /> : '—') },
-            { key: 'd', header: 'Disposition', render: (l) => (r.status === 'received' && manage && l.received ? <select className="input h-8 w-32" value={disp[l.barcode] ?? ''} onChange={(e) => setDisp({ ...disp, [l.barcode]: e.target.value })}><option value="">Choose…</option><option value="restock">Restock (grade A)</option><option value="hold">Hold</option><option value="reject">Reject</option></select> : l.disposition ? humanize(l.disposition) : '—') },
+            { key: 'r', header: 'Received', render: (l) => (l.received ? <CheckCircle2 className="size-4 text-emerald-700" /> : '—') },
+            { key: 'd', header: 'Disposition', render: (l) => (r.status === 'received' && manage && l.received ? <select aria-label="Disposition" className="input h-8 w-32" value={disp[l.barcode] ?? ''} onChange={(e) => setDisp({ ...disp, [l.barcode]: e.target.value })}><option value="">Choose…</option><option value="restock">Restock (grade A)</option><option value="hold">Hold</option><option value="reject">Reject</option></select> : l.disposition ? humanize(l.disposition) : '—') },
           ]} />
           {r.status === 'received' && manage && <div className="flex justify-end border-t border-slate-100 px-5 py-3"><Button variant="primary" icon={<Scale className="size-4" />} disabled={!r.lines.filter((l) => l.received).every((l) => disp[l.barcode])} onClick={() => void post('disposition', { lines: r.lines.filter((l) => l.received).map((l) => ({ barcode: l.barcode, disposition: disp[l.barcode] })) }, 'Disposition saved')}>Save QC disposition</Button></div>}
         </Card>
