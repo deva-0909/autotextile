@@ -170,7 +170,7 @@ const STATUS: Record<string, [Tone, string]> = {
   open: ['success', 'Open'], closed: ['neutral', 'Closed'], discontinued: ['neutral', 'Discontinued'], draft: ['neutral', 'Draft'],
   locked: ['danger', 'Locked'], success: ['success', 'Success'],
   submitted: ['info', 'Submitted'], converted: ['violet', 'Sourced'], cancelled: ['neutral', 'Cancelled'], awarded: ['success', 'Awarded'], not_awarded: ['neutral', 'Not awarded'], received_quote: ['info', 'Received'],
-  sent: ['info', 'Sent to supplier'], accepted: ['success', 'Accepted'], rejected_by_supplier: ['danger', 'Rejected by supplier'], partially_received: ['warning', 'Partly received'], received: ['success', 'Received'],
+  sent: ['info', 'Sent'], accepted: ['success', 'Accepted'], rejected_by_supplier: ['danger', 'Rejected by supplier'], partially_received: ['warning', 'Partly received'], received: ['success', 'Received'],
   queued: ['neutral', 'Queued'], extracting: ['info', 'Extracting'], needs_review: ['warning', 'Needs review'], failed: ['danger', 'Failed'],
   posted: ['success', 'Posted'], matched: ['success', 'Matched'], variance: ['danger', 'Variance'], no_po: ['warning', 'No PO'], no_receipt: ['warning', 'No receipt'], not_run: ['neutral', 'Not matched'],
   unpaid: ['neutral', 'Unpaid'], paid: ['success', 'Paid'],
