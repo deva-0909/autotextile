@@ -90,9 +90,9 @@ export function QcPage() {
                             <button key={g.g} onClick={() => set(r.barcode, { grade: g.g })} className={clsx('px-2.5 py-1 text-[12px] font-semibold', v.grade === g.g ? g.cls : 'bg-white text-slate-600 hover:bg-slate-50')}>{g.label}</button>
                           ))}</div></td>
                           <td className="px-2 py-2"><input className="input h-8 w-20" type="number" aria-label={`GSM of ${r.barcode}`} value={v.gsm} onChange={(e) => set(r.barcode, { gsm: e.target.value })} /></td>
-                          <td className="px-2 py-2"><input className="input h-8 w-16" type="number" value={v.width_in} onChange={(e) => set(r.barcode, { width_in: e.target.value })} /></td>
-                          <td className="px-2 py-2"><input className="input h-8 w-24" value={v.shade_code} onChange={(e) => set(r.barcode, { shade_code: e.target.value })} /></td>
-                          <td className="px-2 py-2"><input className="input h-8 w-44" list="defects" placeholder={v.grade === 'A' ? '' : 'e.g. Holes, Slubs'} value={v.defects} onChange={(e) => set(r.barcode, { defects: e.target.value })} /></td>
+                          <td className="px-2 py-2"><input className="input h-8 w-16" type="number" aria-label={`Width of ${r.barcode} (inches)`} value={v.width_in} onChange={(e) => set(r.barcode, { width_in: e.target.value })} /></td>
+                          <td className="px-2 py-2"><input className="input h-8 w-24" aria-label={`Shade of ${r.barcode}`} value={v.shade_code} onChange={(e) => set(r.barcode, { shade_code: e.target.value })} /></td>
+                          <td className="px-2 py-2"><input className="input h-8 w-44" list="defects" aria-label={`Defects on ${r.barcode}`} placeholder={v.grade === 'A' ? '' : 'e.g. Holes, Slubs'} value={v.defects} onChange={(e) => set(r.barcode, { defects: e.target.value })} /></td>
                         </tr>
                       );
                     })}

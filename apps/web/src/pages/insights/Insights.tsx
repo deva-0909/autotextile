@@ -424,7 +424,7 @@ export function AssistantPage() {
           <div ref={end} />
         </div>
         <form className="flex gap-2 border-t border-slate-200 p-3" onSubmit={(e) => { e.preventDefault(); void send(q); }}>
-          {Speech && <Button type="button" variant="ghost" icon={listening ? <MicOff className="size-4" /> : <Mic className="size-4" />} onClick={listen}>{listening ? 'Stop' : ''}</Button>}
+          {Speech && <Button type="button" variant="ghost" aria-label={listening ? 'Stop voice input' : 'Ask by voice'} title={listening ? 'Stop voice input' : 'Ask by voice'} icon={listening ? <MicOff className="size-4" /> : <Mic className="size-4" />} onClick={listen}>{listening ? 'Stop' : ''}</Button>}
           <Input className="flex-1" placeholder="Ask about sales, stock, customers, suppliers, money…" value={q} onChange={(e) => setQ(e.target.value)} />
           <Button type="submit" variant="primary" loading={busy} icon={<Send className="size-4" />}>Ask</Button>
         </form>

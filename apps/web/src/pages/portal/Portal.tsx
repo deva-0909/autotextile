@@ -196,7 +196,7 @@ export function MillHome() {
             </ul>
           ) : <EmptyState icon={<Truck className="size-5" />} title="No incoming grey fabric" />}
         </Card>
-        <Card title="Job-work orders" padded={false} actions={<Link className="link text-[12.5px]" to="/portal/jobs">All orders</Link>}>
+        <Card title="Job-work orders" padded={false} actions={<Link className="link inline-block py-1 text-[12.5px]" to="/portal/jobs">All orders</Link>}>
           <SimpleTable rows={(jobs.data ?? []).filter((j) => !['closed', 'returned'].includes(j.status)).slice(0, 8)} rowKey={(j) => j.id} onRowClick={(j) => nav(`/portal/jobs/${j.id}`)} columns={[
             { key: 'n', header: 'Challan', render: (j) => <span className="font-mono text-[12.5px] font-semibold">{j.number}</span> },
             { key: 'p', header: 'Process', render: (j) => j.process_name },

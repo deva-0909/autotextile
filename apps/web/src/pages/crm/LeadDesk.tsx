@@ -282,7 +282,7 @@ export function LeadSettingsPage() {
           {num('no_progress_attempts', 'Calls before flagging', 'Counted since the last real progress', 'calls')}
         </Card>
         <Card title="Objections" description="The list salespeople choose from when a lead is lost. One per line; ‘Other’ always stays and needs a note.">
-          <Textarea rows={9} disabled={!edit} value={objText} onChange={(e) => setObjText(e.target.value)} />
+          <Textarea rows={9} aria-label="Objections, one per line" disabled={!edit} value={objText} onChange={(e) => setObjText(e.target.value)} />
         </Card>
         <Card title="Forecast: chance of an order by stage" description="Multiplied by the lead’s score to give each open lead’s likelihood.">
           <div className="grid grid-cols-3 gap-3">{Object.entries(v.stage_probability).map(([k, p]) => (

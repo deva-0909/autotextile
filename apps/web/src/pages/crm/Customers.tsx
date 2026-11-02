@@ -44,7 +44,7 @@ export function CrmDashboard() {
             {pipe.map((s) => {
               const row = v?.stages.find((x) => x.stage === s);
               return (
-                <Link key={s} to={`/crm/leads`} className="grid grid-cols-[140px_1fr_120px] items-center gap-3 text-[13px] hover:opacity-80">
+                <Link key={s} to={`/crm/leads`} className="grid min-h-7 grid-cols-[140px_1fr_120px] items-center gap-3 text-[13px] hover:opacity-80">
                   <span className="text-slate-700">{humanize(s)}</span>
                   <Bar value={row?.n ?? 0} max={maxStage} />
                   <span className="text-right tabular"><b>{row?.n ?? 0}</b> · {fmtINR(row?.value ?? 0)}</span>

@@ -73,9 +73,9 @@
 /* Touch screens: small text links, breadcrumbs and sortable column headings get an invisible tap margin (no layout
    change), and checkboxes grow to 20 px, so nothing tappable is smaller than about 32 px. Mouse users see no change. */
 @media (pointer: coarse) {
-  .link, nav[aria-label="Breadcrumb"] a, th button { position: relative; }
-  .link::after, nav[aria-label="Breadcrumb"] a::after, th button::after { content: ""; position: absolute; inset: -10px -4px; }
-  input[type="checkbox"], input[type="radio"] { width: 20px; height: 20px; }
+  .link, nav[aria-label="Breadcrumb"] a, th button, td a { position: relative; }
+  .link::after, nav[aria-label="Breadcrumb"] a::after, th button::after, td a::after { content: ""; position: absolute; inset: -10px -4px; }
+  input[type="checkbox"], input[type="radio"] { width: 24px; height: 24px; }
 }
 
 /* Codes (fabric SKUs, document numbers, GSTINs) stay on one line in tables instead of breaking at their hyphens;

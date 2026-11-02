@@ -106,7 +106,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
     const auto = useId();
     return (
       <Field label={label} error={error} hint={hint} required={required} className={className} htmlFor={id ?? auto}>
-        <textarea ref={ref} id={id ?? auto} rows={rows} required={required} className={clsx('input', error && 'input-error')} {...rest} />
+        <textarea ref={ref} id={id ?? auto} rows={rows} required={required} aria-label={!label ? (rest["aria-label"] ?? (typeof rest.placeholder === "string" ? rest.placeholder : undefined)) : undefined} className={clsx('input', error && 'input-error')} {...rest} />
       </Field>
     );
   },
